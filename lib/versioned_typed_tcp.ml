@@ -947,7 +947,7 @@ module Make (Z : Arg) :
             ~max_pending_connections:(min 1_000 t.max_clients)
         in
         let warn_thres =
-          Int.max 1 (Float.iround_towards_zero_exn
+          Int.max 1 (Float.iround_exn ~dir:`Zero
                        (float t.max_clients *. t.warn_free_connections_pct))
         in
         let incr_free_connections () =
