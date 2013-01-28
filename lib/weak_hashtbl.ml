@@ -1,75 +1,62 @@
 
 open Core.Std
+open Import
 
-module Make (M : sig
-  val add_finalizer : 'a Heap_block.t -> ('a Heap_block.t -> unit) -> unit
-end) = struct
-  module Entry_id : Unique_id.Id = Unique_id.Int63 (struct end)
+module Entry_id : Unique_id.Id = Unique_id.Int63 (struct end)
 
-  module Entry = struct
-    type 'a t =
-      { mutable id : Entry_id.t
-      ; data : 'a Weak.t
-      }
-    with sexp_of
+module Entry = struct
+  type 'a t =
+    { mutable id : Entry_id.t
+    ; data : 'a Weak.t
+    }
+  with sexp_of
 
-    let create () = { id = Entry_id.create (); data = Weak.create ~len:1 }
+  let create () = { id = Entry_id.create (); data = Weak.create ~len:1 }
 
-    let data t = Weak.get t.data 0
-  end
-
-  type ('a, 'b) t = ('a, 'b Entry.t) Hashtbl.t with sexp_of
-
-  let create hashable = Hashtbl.create ~hashable ()
-
-  let maybe_remove t key entry_id =
-    Option.iter (Hashtbl.find t key) ~f:(fun entry ->
-      if Entry_id.(=) entry.Entry.id entry_id
-      then Hashtbl.remove t key)
-  ;;
-
-  let get_entry t key = Hashtbl.find_or_add t key ~default:Entry.create
-
-  let set_data t key entry data =
-    let entry_id = Entry_id.create () in
-    entry.Entry.id <- entry_id;
-    Weak.set entry.Entry.data 0 (Some data);
-    M.add_finalizer data (fun _ -> maybe_remove t key entry_id);
-  ;;
-
-  let replace t ~key ~data = set_data t key (get_entry t key) data
-
-  let find t key =
-    let open Option.Monad_infix in
-    Hashtbl.find t key
-    >>= fun entry ->
-    Entry.data entry
-  ;;
-
-  let find_or_add t key ~default =
-    let entry = get_entry t key in
-    match Entry.data entry with
-    | Some v -> v
-    | None ->
-      let data = default () in
-      set_data t key entry data;
-      data
-  ;;
-
-  let remove = Hashtbl.remove
+  let data t = Weak.get t.data 0
 end
 
+type ('a, 'b) t = ('a, 'b Entry.t) Hashtbl.t with sexp_of
+
+let create hashable = Hashtbl.create ~hashable ()
+
+let maybe_remove t key entry_id =
+  Option.iter (Hashtbl.find t key) ~f:(fun entry ->
+    if Entry_id.(=) entry.Entry.id entry_id
+    then Hashtbl.remove t key)
+;;
+
+let get_entry t key = Hashtbl.find_or_add t key ~default:Entry.create
+
+let set_data t key entry data =
+  let entry_id = Entry_id.create () in
+  entry.Entry.id <- entry_id;
+  Weak.set entry.Entry.data 0 (Some data);
+  Gc.add_finalizer data (fun _ -> maybe_remove t key entry_id);
+;;
+
+let replace t ~key ~data = set_data t key (get_entry t key) data
+
+let find t key =
+  let open Option.Monad_infix in
+  Hashtbl.find t key
+  >>= fun entry ->
+  Entry.data entry
+;;
+
+let find_or_add t key ~default =
+  let entry = get_entry t key in
+  match Entry.data entry with
+  | Some v -> v
+  | None ->
+    let data = default () in
+    set_data t key entry data;
+    data
+;;
+
+let remove = Hashtbl.remove
+
 TEST_UNIT =
-  let module T = Make (struct
-    (* We use [Caml.Gc.finalise] rather than [Core.Gc.add_finalizer] so that finalizers
-       run immediately after calling [full_major], in our thread.  If we used
-       [Core.Gc.add_finalizer], the finalizers would get queued to run in another thread,
-       and we would have to wait for that thread to run the finalizers before checking
-       that the properties that we desire from their running hold. *)
-    let add_finalizer x f = Caml.Gc.finalise f x
-  end)
-  in
-  let open T in
   let module M = struct
     type t =
       { foo : int
@@ -79,6 +66,10 @@ TEST_UNIT =
   end
   in
   let open M in
+  let stabilize () =
+    Gc.full_major ();
+    Async_core.Scheduler.run_cycles_until_no_jobs_remain ()
+  in
   let block foo = Heap_block.create_exn ({ foo; bar = 0; baz = "hello" }, 0) in
   let tbl = create Int.hashable in
   let add k b = ignore (find_or_add tbl k ~default:(fun () -> !b)) in
@@ -108,22 +99,20 @@ TEST_UNIT =
   assert (is_block k2 !b2);
   assert (is_block k3 !b3);
   blackhole b1;
-  Gc.full_major ();
+  stabilize ();
   assert (is_absent k1);
   assert (is_block k2 !b2);
   assert (is_block k3 !b3);
   blackhole b2;
-  Gc.full_major ();
+  stabilize ();
   assert (is_absent k1);
   assert (is_absent k2);
   assert (is_block k3 !b3);
   replace tbl ~key:k3 ~data:!b4;
   blackhole b3;
-  Gc.full_major ();
+  stabilize ();
   assert (is_block k3 !b4);
   blackhole b4;
-  Gc.full_major ();
+  stabilize ();
   assert (is_absent k3);
 ;;
-
-include Make (Async_unix.Async_gc)

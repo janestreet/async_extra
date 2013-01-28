@@ -193,14 +193,14 @@ val create : level:Level.t -> output:Output.t list -> t
     output with a timestamp. *)
 val raw   : ?tags:(string * string) list -> t -> ('a, unit, string, unit) format4 -> 'a
 
+(** [debug] printf like logging at the `Debug log level *)
+val debug : ?tags:(string * string) list -> t -> ('a, unit, string, unit) format4 -> 'a
+
 (** [info] printf like logging at the `Info log level *)
 val info  : ?tags:(string * string) list -> t -> ('a, unit, string, unit) format4 -> 'a
 
-(** [error] printf like logging at the `Info log level *)
+(** [error] printf like logging at the `Error log level *)
 val error : ?tags:(string * string) list -> t -> ('a, unit, string, unit) format4 -> 'a
-
-(** [error] printf like logging at the `Info log level *)
-val debug : ?tags:(string * string) list -> t -> ('a, unit, string, unit) format4 -> 'a
 
 (** [printf] generalized printf style logging *)
 val printf
