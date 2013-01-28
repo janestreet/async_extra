@@ -2,11 +2,10 @@
 open Core.Std
 open Import
 
-
 (* The reason for defining this module type explicitly is so that we can internally keep
    track of what is and isn't exposed. *)
 module type Connection = sig
-  module Server : sig
+  module Implementations : sig
     type 'a t
   end
 
@@ -15,9 +14,9 @@ module type Connection = sig
 
   (** Initiate an Rpc connection on the given reader/writer pair.  [server] should be the
       bag of implementations that the calling side implements; it defaults to
-      [Server.null] (i.e., "I implement no RPCs"). *)
+      [Implementations.null] (i.e., "I implement no RPCs"). *)
   val create
-    :  ?server:'s Server.t
+    :  ?implementations:'s Implementations.t
     -> connection_state:'s
     -> ?max_message_size:int
     -> Reader.t
@@ -53,7 +52,7 @@ module type Connection = sig
       When the deferred returned by [with_close] becomes determined, both [Reader.close]
       and [Writer.close] have finished. *)
   val with_close
-    :  ?server:'s Server.t
+    :  ?implementations:'s Implementations.t
     -> connection_state:'s
     -> Reader.t
     -> Writer.t
@@ -64,13 +63,13 @@ module type Connection = sig
     ]
     -> 'a Deferred.t
 
-  (* Runs [with_close] but dispatches no queries. The server is required because this
-     function doesn't let you dispatch any queries (i.e., act as a client), it would be
-     pointless to call it if you didn't want to act as a server.*)
+  (* Runs [with_close] but dispatches no queries. The implementations are required because
+     this function doesn't let you dispatch any queries (i.e., act as a client), it would
+     be pointless to call it if you didn't want to act as a server.*)
   val server_with_close
     :  Reader.t
     -> Writer.t
-    -> server:'s Server.t
+    -> implementations:'s Implementations.t
     -> connection_state:'s
     -> on_handshake_error:[
     | `Raise
@@ -79,14 +78,14 @@ module type Connection = sig
     ]
     -> unit Deferred.t
 
-  (** [serve server ~port ?on_handshake_error ()] starts a server with the given
+  (** [serve implementations ~port ?on_handshake_error ()] starts a server with the given
       implementation on [port].  The optional auth function will be called on all incoming
       connections with the address info of the client and will disconnect the client
       immediately if it returns false.  This auth mechanism is generic and does nothing
       other than disconnect the client - any logging or record of the reasons is the
       responsibility of the auth function itself. *)
   val serve
-    :  server:'s Server.t
+    :  implementations:'s Implementations.t
     -> initial_connection_state:('address -> 's)
     -> where_to_listen:('address, 'listening_on) Tcp.Where_to_listen.t
     -> ?auth:('address -> bool)

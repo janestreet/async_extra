@@ -274,13 +274,13 @@ module Server = struct
   ]
 
   let serve ~auth ~port =
-    let server =
-      Rpc.Server.create ~implementations ~on_unknown_rpc:`Ignore
+    let implementations =
+      Rpc.Implementations.create ~implementations ~on_unknown_rpc:`Ignore
       |! function
       | Ok s -> State.global.State.serving_on <- `Port port; s
       | Error (`Duplicate_implementations _) -> assert false
     in
-    Rpc.Connection.serve ~auth ~server ~where_to_listen:(Tcp.on_port port) ()
+    Rpc.Connection.serve ~auth ~implementations ~where_to_listen:(Tcp.on_port port) ()
       ~initial_connection_state:(fun _ -> State.global)
 
   exception File_is_already_open_in_tcp_file of string with sexp

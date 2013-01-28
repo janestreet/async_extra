@@ -14,14 +14,13 @@ open Rpc_intf
 
     The [Implementation.t] hides the type of the query and the response, whereas the
     [Rpc.t] is polymorphic in the query and response type.  This allows you to build a
-    [Server.t] out of a list of [Implementation.t]s.
+    [Implementations.t] out of a list of [Implementation.t]s.
 
     Each RPC also comes with a version number.  This is meant to allow support of multiple
     different versions of what is essentially the same RPC.  You can think of it as an
     extension to the name of the RPC, and in fact, each RPC is uniquely identified by its
     (name, version) pair.  RPCs with the same name but different versions should implement
-    similar functionality.
-*)
+    similar functionality. *)
 
 module Implementation : sig
   (* A ['connection_state t] is something which knows how to respond to one query, given
@@ -41,9 +40,9 @@ module Implementation : sig
   val description : _ t -> Description.t
 end
 
-module Server : sig
-  (* A ['connection_state Server.t] is something which knows how to respond to many
-     different queries. It is conceptually a package of
+module Implementations : sig
+  (* A ['connection_state Implementations.t] is something which knows how to respond to
+     many different queries. It is conceptually a package of
      ['connection_state Implementation.t]'s. *)
   type 'connection_state t
 
@@ -74,7 +73,7 @@ module Server : sig
     -> 'connection_state t
 end
 
-module type Connection = Connection with module Server := Server
+module type Connection = Connection with module Implementations := Implementations
 
 module Connection : Connection
 

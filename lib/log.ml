@@ -44,7 +44,7 @@ module Rotation = struct
     size  : Byte_units.t option;
     time  : (Time.Ofday.t * Zone.t) option;
     keep  : [ `All | `Newer_than of Time.Span.t | `At_least of int ];
-  } with fields
+  } with sexp,fields
 
   let should_rotate t ~last_messages ~last_size ~last_time =
     Fields.fold ~init:false
@@ -179,7 +179,7 @@ module Output : sig
   val screen        : t
   val writer        : format -> Writer.t -> t
   val file          : format -> filename:string -> t
-  val rotating_file : format -> basename:string -> Rotation.t -> t Deferred.t
+  val rotating_file : format -> basename:string -> Rotation.t -> t
 
   val combine : t list -> t
 end = struct
@@ -271,7 +271,7 @@ end = struct
       :  format
       -> basename:string
       -> Rotation.t
-      -> t Deferred.t
+      -> t
   end = struct
     let filename ~dirname ~basename number =
       if number = 0 then
@@ -340,11 +340,14 @@ end = struct
         | true -> Filename.basename basename, return (Filename.dirname basename)
         | false -> basename, Sys.getcwd ()
       in
-      dirname >>= fun dirname ->
-      let filename = filename ~dirname ~basename 0 in
-      rotate ~dirname ~basename rotation.Rotation.keep
-      >>| fun () ->
-      (fun msgs ->
+      let finished_rotation =
+        dirname >>= fun dirname ->
+        let filename = filename ~dirname ~basename 0 in
+        rotate ~dirname ~basename rotation.Rotation.keep >>| fun () ->
+        (dirname, filename)
+      in
+      fun msgs ->
+        finished_rotation >>= fun (dirname, filename) ->
         begin
           if
             Rotation.should_rotate rotation ~last_messages:!last_messages
@@ -358,8 +361,9 @@ end = struct
         >>| fun size ->
         last_messages := !last_messages + 1;
         last_size     := !last_size + Int63.to_int_exn size;
-        last_time     := Time.now ())
+        last_time     := Time.now ()
     ;;
+
   end
 
   let rotating_file = Rotating_file.create
@@ -412,7 +416,7 @@ module Flush_at_exit_or_gc : sig
   val add_log : t -> unit
   val close   : t -> unit
 end = struct
-  module Weak_table = Weak.Make (struct
+  module Weak_table = Caml.Weak.Make (struct
     type z = t
     type t = z
     let equal = Pipe.equal
@@ -427,9 +431,7 @@ end = struct
 
   (* [flush] adds a flush deferred to the flush_bag *)
   let flush t =
-    if (closed t)
-    then ()
-    else begin
+    if not (closed t) then begin
       let flush_bag = Lazy.force flush_bag in
       let flushed   = flushed t in
       let tag       = Bag.add flush_bag flushed in
@@ -461,7 +463,7 @@ end = struct
     (* If we fall out of scope just close and flush normally.  Without this we risk being
        finalized and removed from the weak table before the the shutdown handler runs, but
        also before we get all of logs out of the door. *)
-    Gc.add_finalizer close log;
+    Gc.add_finalizer_exn log close;
   ;;
 end
 
@@ -548,12 +550,15 @@ let info ?tags t k  = printf ?tags t ~level:`Info k
 let error ?tags t k = printf ?tags t ~level:`Error k
 
 module type Global_intf = sig
+  val log : t Lazy.t
+
   val set_level  : Level.t -> unit
   val set_output : Output.t list -> unit
   val raw        : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
   val info       : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
   val error      : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
   val debug      : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val flushed    : unit -> unit Deferred.t
 
   val printf
     :  ?tags:(string * string) list
@@ -564,8 +569,8 @@ module type Global_intf = sig
   val sexp
     :  ?tags:(string * string) list
     -> ?level:Level.t
-    -> ('a -> Sexp.t)
     -> 'a
+    -> ('a -> Sexp.t)
     -> unit
 
   val of_lazy
@@ -575,7 +580,6 @@ module type Global_intf = sig
     -> unit
 
   val message : Message.t -> unit
-  val flushed    : unit -> unit Deferred.t
 end
 
 module Make_global(Empty : sig end) : Global_intf = struct
@@ -589,7 +593,7 @@ module Make_global(Empty : sig end) : Global_intf = struct
   let debug ?tags k = debug ?tags (Lazy.force log) k
   let flushed () = flushed (Lazy.force log)
   let printf  ?tags ?level k = printf ?tags ?level (Lazy.force log) k
-  let sexp    ?tags ?level to_sexp v = sexp ?tags ?level (Lazy.force log) v to_sexp
+  let sexp    ?tags ?level v to_sexp = sexp ?tags ?level (Lazy.force log) v to_sexp
   let of_lazy ?tags ?level l_msg = of_lazy ?tags ?level (Lazy.force log) l_msg
   let message msg = message (Lazy.force log) msg
 end

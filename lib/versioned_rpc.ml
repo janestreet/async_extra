@@ -232,7 +232,8 @@ module Callee_converts = struct
             log_version version;
             match Result.try_with (fun () -> Version_i.model_of_query q) with
             | Error exn ->
-              Error.raise (failed_conversion (`Query, `Rpc name, `Version version, exn))
+              Error.raise
+                (failed_conversion (`Query, `Rpc name, `Version version, exn))
             | Ok q ->
               f s q
               >>| fun r ->

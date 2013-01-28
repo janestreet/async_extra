@@ -61,7 +61,7 @@ module Rotation : sig
     size  : Byte_units.t option;
     time  : (Time.Ofday.t * Zone.t) option;
     keep  : [ `All | `Newer_than of Time.Span.t | `At_least of int ];
-  }
+  } with sexp
 end
 
 module Output : sig
@@ -87,43 +87,7 @@ module Output : sig
   (* see Async_extended.Syslog for syslog output *)
   val writer        : format -> Writer.t -> t
   val file          : format -> filename:string -> t
-  val rotating_file : format -> basename:string -> Rotation.t -> t Deferred.t
-end
-
-(* An interface for singleton logs *)
-module type Global_intf = sig
-  val set_level : Level.t -> unit
-  val set_output : Output.t list -> unit
-
-  (** logging functions as the functions that operate on a given log.  In this case they
-      operate on a single log global to the module *)
-  val raw   : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
-  val info  : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
-  val error : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
-  val debug : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
-  val flushed : unit -> unit Deferred.t
-
-  val printf
-    :  ?tags:(string * string) list
-    -> ?level:Level.t
-    -> ('a, unit, string, unit) format4
-    -> 'a
-
-  val sexp
-    :  ?tags:(string * string) list
-    -> ?level:Level.t
-    -> ('a -> Sexp.t)
-    -> 'a
-    -> unit
-
-  val of_lazy
-    :  ?tags:(string * string) list
-    -> ?level:Level.t
-    -> string Lazy.t
-    -> unit
-
-  val message : Message.t -> unit
-  val flushed : unit -> unit Deferred.t
+  val rotating_file : format -> basename:string -> Rotation.t -> t
 end
 
 module Blocking : sig
@@ -159,6 +123,45 @@ module Blocking : sig
   val debug : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
 end
 
+type t
+
+(* An interface for singleton logs *)
+module type Global_intf = sig
+  val log : t Lazy.t
+
+  val set_level : Level.t -> unit
+  val set_output : Output.t list -> unit
+
+  (** logging functions as the functions that operate on a given log.  In this case they
+      operate on a single log global to the module *)
+  val raw   : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val info  : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val error : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val debug : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val flushed : unit -> unit Deferred.t
+
+  val printf
+    :  ?tags:(string * string) list
+    -> ?level:Level.t
+    -> ('a, unit, string, unit) format4
+    -> 'a
+
+  val sexp
+    :  ?tags:(string * string) list
+    -> ?level:Level.t
+    -> 'a
+    -> ('a -> Sexp.t)
+    -> unit
+
+  val of_lazy
+    :  ?tags:(string * string) list
+    -> ?level:Level.t
+    -> string Lazy.t
+    -> unit
+
+  val message : Message.t -> unit
+end
+
 (* This functor can be called to generate "singleton" logging modules *)
 module Make_global(Empty : sig end) : Global_intf
 
@@ -167,8 +170,6 @@ module Make_global(Empty : sig end) : Global_intf
    More nuanced logging can be had by using the functions that operate on a
    distinct Log.t type. *)
 module Global : Global_intf
-
-type t
 
 (** [set_level] sets the level of the given log.  Messages sent at a level less than the
     current level will not be output. *)

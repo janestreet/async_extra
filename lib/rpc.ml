@@ -193,7 +193,7 @@ module Implementation = struct
   let description t = {Description.name = Rpc_tag.to_string t.tag; version = t.version }
 end
 
-module Server : sig
+module Implementations : sig
   type 'a t
 
   val create :
@@ -207,7 +207,6 @@ module Server : sig
        , [`Duplicate_implementations of Implementation.Description.t list]
        ) Result.t
 
-  (* a server that can handle no queries *)
   val null : unit -> 'a t
 
   val query_handler :
@@ -384,7 +383,7 @@ module Handshake_error = struct
     | Error e -> Error (Handshake_error e)
 end
 
-module type Connection = Connection with module Server := Server
+module type Connection = Connection with module Implementations := Implementations
 
 (* Internally, we use a couple of extra functions on connections that aren't exposed to
    users. *)
@@ -407,7 +406,7 @@ module type Connection_internal = sig
 end
 
 module Connection : Connection_internal = struct
-  module Server = Server
+  module Implementations = Implementations
 
   type response_handler =
     Response.t
@@ -504,15 +503,17 @@ module Connection : Connection_internal = struct
     close_finished t;
   ;;
 
-  let create ?server ~connection_state ?max_message_size:max_len reader writer =
-    let server = match server with None -> Server.null () | Some s -> s in
+  let create ?implementations ~connection_state ?max_message_size:max_len reader writer =
+    let implementations =
+      match implementations with None -> Implementations.null () | Some s -> s
+    in
     let t =
       {
         reader;
         writer;
         open_queries             = Hashtbl.Poly.create ~size:10 ();
         open_streaming_responses = Hashtbl.Poly.create ~size:10 ();
-        handle_query             = Server.query_handler server ~connection_state ();
+        handle_query = Implementations.query_handler implementations ~connection_state ();
         close_started  = Ivar.create ();
         close_finished = Ivar.create ();
       }
@@ -595,7 +596,7 @@ module Connection : Connection_internal = struct
     result >>| Handshake_error.result_to_exn_result
 
   let with_close
-      ?server
+      ?implementations
       ~connection_state
       reader
       writer
@@ -606,32 +607,33 @@ module Connection : Connection_internal = struct
       | `Call f -> f
       | `Raise -> raise
     in
-    create ?server ~connection_state reader writer >>= fun t ->
+    create ?implementations ~connection_state reader writer >>= fun t ->
     match t with
     | Error e -> handle_handshake_error e
     | Ok t ->
       Monitor.protect ~finally:(fun () -> close t) (fun () ->
         dispatch_queries t
         >>= fun result ->
-        (match server with
+        (match implementations with
         | None -> Deferred.unit
         | Some _ -> Ivar.read t.close_finished)
         >>| fun () ->
         result
       )
 
-  let server_with_close reader writer ~server ~connection_state ~on_handshake_error =
+  let server_with_close reader writer ~implementations ~connection_state
+      ~on_handshake_error =
     let on_handshake_error =
       match on_handshake_error with
       | `Call f -> `Call f
       | `Raise -> `Raise
       | `Ignore -> `Call (fun _ -> Deferred.unit)
     in
-    with_close reader writer ~server ~connection_state ~on_handshake_error
+    with_close reader writer ~implementations ~connection_state ~on_handshake_error
       ~dispatch_queries:(fun _ -> Deferred.unit)
 
   let serve
-      ~server
+      ~implementations
       ~initial_connection_state
       ~where_to_listen
       ?(auth = (fun _ -> true))
@@ -641,7 +643,7 @@ module Connection : Connection_internal = struct
       if not (auth inet) then Deferred.unit
       else begin
         let connection_state = initial_connection_state inet in
-        create ~server ~connection_state r w >>= function
+        create ~implementations ~connection_state r w >>= function
         | Ok t -> Reader.close_finished r >>= fun () -> close t
         | Error handshake_error ->
           begin match on_handshake_error with
@@ -656,8 +658,8 @@ module Connection : Connection_internal = struct
     Monitor.try_with (fun () ->
       Tcp.connect (Tcp.to_host_and_port host port)
       >>= fun (r,w) ->
-      let server = Server.null () in
-      create ~server ~connection_state:() r w >>| function
+      let implementations = Implementations.null () in
+      create ~implementations ~connection_state:() r w >>| function
       | Ok t -> t
       | Error handshake_error -> raise handshake_error)
 

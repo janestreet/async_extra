@@ -27,20 +27,12 @@
 
 open Core.Std
 
-(** [Weak_hashtbl] requires that all values in the table be boxed, which ensures that
-    weak pointers and finalization work as expected. *)
-module Box : sig
-  type 'a t
-  val inject  : 'a -> 'a t
-  val project : 'a t -> 'a
-end
-
 type ('a, 'b) t
 
 val create : 'a Hashtbl.Hashable.t -> ('a, 'b) t
 
-val find        : ('a, 'b) t -> 'a                               -> 'b option
-val find_or_add : ('a, 'b) t -> 'a -> default:(unit -> 'b Box.t) -> 'b
+val find        : ('a, 'b) t -> 'a -> 'b Heap_block.t option
+val find_or_add : ('a, 'b) t -> 'a -> default:(unit -> 'b Heap_block.t) -> 'b Heap_block.t
 val remove      : ('a, 'b) t -> 'a -> unit
-val replace     : ('a, 'b) t -> key:'a -> data:'b Box.t -> unit
+val replace     : ('a, 'b) t -> key:'a -> data:'b Heap_block.t -> unit
 
