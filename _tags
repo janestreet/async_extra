@@ -1,0 +1,46 @@
+# OASIS_START
+# DO NOT EDIT (digest: 0e1d7b37b0322ac75d655d4a0639b1dd)
+# Ignore VCS directories, you can use the same kind of rule outside 
+# OASIS_START/STOP if you want to exclude directories that contains 
+# useless stuff for the build process
+<**/.svn>: -traverse
+<**/.svn>: not_hygienic
+".bzr": -traverse
+".bzr": not_hygienic
+".hg": -traverse
+".hg": not_hygienic
+".git": -traverse
+".git": not_hygienic
+"_darcs": -traverse
+"_darcs": not_hygienic
+# Library async_extra
+"lib/async_extra.cmxs": use_async_extra
+"lib/async_gc.cmx": for-pack(Async_extra)
+"lib/file_tail.cmx": for-pack(Async_extra)
+"lib/file_writer.cmx": for-pack(Async_extra)
+"lib/import.cmx": for-pack(Async_extra)
+"lib/lock_file.cmx": for-pack(Async_extra)
+"lib/persistent_singleton.cmx": for-pack(Async_extra)
+"lib/rpc.cmx": for-pack(Async_extra)
+"lib/std.cmx": for-pack(Async_extra)
+"lib/tcp.cmx": for-pack(Async_extra)
+"lib/tcp_file.cmx": for-pack(Async_extra)
+"lib/typed_tcp.cmx": for-pack(Async_extra)
+"lib/typed_tcp_intf.cmx": for-pack(Async_extra)
+"lib/unpack_sequence.cmx": for-pack(Async_extra)
+"lib/versioned_rpc.cmx": for-pack(Async_extra)
+"lib/versioned_typed_tcp.cmx": for-pack(Async_extra)
+<lib/*.ml{,i}>: pkg_sexplib.syntax
+<lib/*.ml{,i}>: pkg_sexplib
+<lib/*.ml{,i}>: pkg_fieldslib.syntax
+<lib/*.ml{,i}>: pkg_fieldslib
+<lib/*.ml{,i}>: pkg_bin_prot
+<lib/*.ml{,i}>: pkg_bin_prot.syntax
+<lib/*.ml{,i}>: pkg_pa_ounit
+<lib/*.ml{,i}>: pkg_pa_pipebang
+<lib/*.ml{,i}>: pkg_core
+<lib/*.ml{,i}>: pkg_async_core
+<lib/*.ml{,i}>: pkg_async_unix
+<lib/*.ml{,i}>: pkg_threads
+# OASIS_STOP
+<lib/*.ml{,i}>: syntax_camlp4o
