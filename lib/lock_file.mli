@@ -1,4 +1,3 @@
-open Core.Std
 open Import
 
 (** [create ?message path] tries to create a file at [path] containing the text [message],

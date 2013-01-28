@@ -123,5 +123,4 @@ module Client : sig
       calls [unlink] or [close]. The client can indicate that it is no longer interested
       by calling [Pipe.close_reader]. *)
   val tail : t -> string -> Response.t Pipe.Reader.t Deferred.t
-
 end

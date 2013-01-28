@@ -86,22 +86,12 @@ let of_bigstring bin_t s = Rpc_result.try_with_bin_io (fun () -> Ok (
   bin_t.Bin_prot.Type_class.reader.Bin_prot.Type_class.read s ~pos_ref:(ref 0)
 ))
 
-(* For convenience since unit is a very common type for rpc arguments and return
-   values. *)
-module Export : sig
-  val bin_unit : unit Bin_prot.Type_class.t
-end = struct
-  type unit_ = unit with bin_io
-  let bin_unit = bin_unit_
-end
-include Export
-
 module Header : sig
-  type t with bin_io, sexp
+  type t with bin_type_class
   val v1 : t
   val negotiate_version : t -> t -> int option
 end = struct
-  type t = int list with bin_io, sexp
+  type t = int list with bin_io
 
   let v1 = [ 1 ]
 
@@ -356,7 +346,7 @@ module Handshake_error = struct
   include Sexpable.To_stringable (T)
 
   exception Handshake_error of t with sexp
-  let raise t = raise (Handshake_error t)
+
   let result_to_exn_result = function
     | Ok x -> Ok x
     | Error e -> Error (Handshake_error e)
@@ -544,8 +534,8 @@ module Connection : Connection_internal = struct
       }
     in
     let result =
-      Writer.write_bin_prot t.writer Header.bin_writer_t Header.v1;
-      Reader.read_bin_prot ?max_len t.reader Header.bin_reader_t
+      Writer.write_bin_prot t.writer Header.bin_t.Bin_prot.Type_class.writer Header.v1;
+      Reader.read_bin_prot ?max_len t.reader Header.bin_t.Bin_prot.Type_class.reader
       >>| fun header ->
       match header with
       | `Eof ->

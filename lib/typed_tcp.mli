@@ -1,4 +1,3 @@
-open Core.Std
 open Typed_tcp_intf
 
 module type Arg = Arg

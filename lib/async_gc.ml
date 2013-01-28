@@ -1,5 +1,4 @@
 open Core.Std
-open Import
 
 include Gc
 

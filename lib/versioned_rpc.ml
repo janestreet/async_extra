@@ -43,8 +43,10 @@ module Caller_converts = struct
       let versions () = Int.Set.of_list (Int.Table.keys registry)
 
       module Register (Version_i : sig
-        type query with bin_io
-        type response with bin_io
+        type query
+        type response
+        val bin_query : query Bin_prot.Type_class.t
+        val bin_response : response Bin_prot.Type_class.t
         val version : int
         val query_of_model : Model.query -> query
         val model_of_response : response -> Model.response
@@ -115,9 +117,12 @@ module Caller_converts = struct
       let versions () = Int.Set.of_list (Int.Table.keys registry)
 
       module Register (Version_i : sig
-        type query with bin_io
-        type response with bin_io
-        type error with bin_io
+        type query
+        type response
+        type error
+        val bin_query : query Bin_prot.Type_class.t
+        val bin_response : response Bin_prot.Type_class.t
+        val bin_error : error Bin_prot.Type_class.t
         val version : int
         val query_of_model : Model.query -> query
         val model_of_response : response -> Model.response
@@ -206,8 +211,10 @@ module Callee_converts = struct
     let versions () = Int.Set.of_list (Hashtbl.keys registry)
 
     module Register (Version_i : sig
-      type query with bin_io
-      type response with bin_io
+      type query
+      type response
+      val bin_query : query Bin_prot.Type_class.t
+      val bin_response : response Bin_prot.Type_class.t
       val version : int
       val model_of_query : query -> Model.query
       val response_of_model : Model.response -> response

@@ -9,7 +9,7 @@ module Protocol = struct
       type t =
         | Read
         | Tail
-        with sexp, bin_io
+        with bin_io
     end
 
     module Error = struct
@@ -22,7 +22,7 @@ module Protocol = struct
     end
 
     module Query = struct
-      type t = Open of string * Mode.t with sexp, bin_io
+      type t = Open of string * Mode.t with bin_io
     end
 
     module Message : sig
@@ -426,10 +426,6 @@ end
 module Client = struct
   type t = Rpc.Connection.t
 
-  module File_id = struct
-    type t = Rpc.Pipe_rpc.Id.t
-  end
-
   module Error    = Protocol.Open_file.Error
   module Message  = Protocol.Open_file.Message
   module Response = Protocol.Open_file.Response
@@ -458,6 +454,4 @@ module Client = struct
     Pipe.closed pipe_r >>> (fun () ->
       Rpc.Pipe_rpc.abort Protocol.Open_file.rpc t id);
     pipe_r
-
-  let close t id = Rpc.Pipe_rpc.abort Protocol.Open_file.rpc t id
 end

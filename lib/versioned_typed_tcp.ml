@@ -6,15 +6,13 @@ exception Bigsubstring_allocator_got_invalid_requested_size of int with sexp
 
 let bigsubstring_allocator ?(initial_size = 512) () =
   let buf = ref (Bigstring.create initial_size) in
-  let rec alloc requested_size =
+  fun requested_size ->
     if requested_size < 1 then
       raise (Bigsubstring_allocator_got_invalid_requested_size requested_size);
     if requested_size > Bigstring.length !buf then
       buf := (Bigstring.create
                 (Int.max requested_size (2 * Bigstring.length !buf)));
     Bigsubstring.create !buf ~pos:0 ~len:requested_size
-  in
-  alloc
 ;;
 
 module type Name = sig
@@ -314,7 +312,6 @@ module Make (Z : Arg) :
     let wait_after_exn = sec 0.5
 
     let wait_after_connect_failure = sec 4.
-    let wait_after_too_many_clients = sec 0.5
     let connect_timeout = sec 10.
   end
 
@@ -336,7 +333,7 @@ module Make (Z : Arg) :
       recv_version : Version.t;
       credentials : string; (* For future use *)
     }
-    with sexp, bin_io
+    with sexp_of, bin_io
 
     let create ~name ~send_version ~recv_version ~credentials =
       { name;
@@ -353,7 +350,7 @@ module Make (Z : Arg) :
     type t = {
       time_stamp: Time.t;
       body_length: int;
-    } with sexp, bin_io
+    } with sexp_of, bin_io
   end
 
   module Connection = struct
@@ -710,11 +707,13 @@ module Make (Z : Arg) :
       mutable num_accepts : Int63.t;
     }
 
+(*
     let invariant t =
       assert (t.free_connections >= 0);
       assert (t.free_connections <= t.max_clients);
       assert ((t.free_connections = 0) = is_some t.when_free);
     ;;
+*)
 
     let flushed t ~cutoff =
       let flushes =
