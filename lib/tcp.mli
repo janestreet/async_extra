@@ -1,6 +1,19 @@
 open Core.Std
 open Import
 
+(* [Tcp] supports connection to [inet] sockets and [unix] sockets.  These are two
+   different types.  We use ['a where_to_connect] to specify a socket to connect to, where
+   the ['a] identifies the type of socket. *)
+type 'a where_to_connect constraint 'a = [< Socket.Address.t ]
+val to_host_and_port : string -> int -> Socket.Address.Inet.t where_to_connect
+val to_file          :        string -> Socket.Address.Unix.t where_to_connect
+
+type 'a with_connect_options =
+     ?buffer_age_limit:[ `At_most of Time.Span.t | `Unlimited ]
+  -> ?interrupt:unit Deferred.t
+  -> ?reader_buffer_size:int
+  -> ?timeout: Time.Span.t
+  -> 'a
 
 (** [with_connection ~host ~port f] looks up host from a string (using DNS as needed),
     connects, then calls [f] passing in a reader and a writer for the connected socket.
@@ -10,90 +23,113 @@ open Import
     [interrupt] is supplied then the connection attempt will be aborted if interrupt is
     fulfilled before the connection has been established.  Similarly, all connection
     attempts have a timeout (default 30s), that can be overridden with [timeout]. *)
-val with_connection
-  :  ?interrupt: unit Deferred.t
-  -> ?timeout: Time.Span.t
-  -> ?max_buffer_age:Time.Span.t
-  -> host:string
-  -> port:int
-  -> (Reader.t -> Writer.t -> 'a Deferred.t)
-  -> 'a Deferred.t
+val with_connection :
+  ( _ where_to_connect
+    -> (Reader.t -> Writer.t -> 'a Deferred.t)
+    -> 'a Deferred.t
+  ) with_connect_options
 
 (** [connect_sock ~host ~port] opens a TCP connection to the specified hostname
     and port, returning the socket.
 
     Any errors in the connection will be reported to the monitor that was current
     when connect was called. *)
-val connect_sock
-  : host:string -> port:int -> ([ `Active ], Socket.inet) Socket.t Deferred.t
+val connect_sock : 'addr where_to_connect -> ([ `Active ], 'addr) Socket.t Deferred.t
 
-val connect_sock_unix
-  : file:string -> ([ `Active ], Socket.unix) Socket.t Deferred.t
 
-(** [connect ~host ~port] is a convenience wrapper around [connect_sock] that returns a
+(* [connect ~host ~port] is a convenience wrapper around [connect_sock] that returns a
     reader and writer on the socket.  The reader and writer share a file descriptor, and
     so closing one will affect the other.  In particular, closing the reader before
     closing the writer will cause the writer to subsequently raise an exception when it
     attempts to flush internally-buffered bytes to the OS, due to a closed fd.  You should
     close the [Writer] first to avoid this problem.
 
-    If possible, use [with_conenection], which automatically handles closing. *)
-val connect
-  :  ?max_buffer_age:Time.Span.t
-  -> ?interrupt:unit Deferred.t
-  -> ?timeout: Time.Span.t
-  -> ?reader_buffer_size:int
-  -> host:string
-  -> port:int
-  -> unit
-  -> (Reader.t * Writer.t) Deferred.t
+    If possible, use [with_connection], which automatically handles closing. *)
+val connect :
+  ( _ where_to_connect
+    -> (Reader.t * Writer.t) Deferred.t
+  ) with_connect_options
 
-val connect_unix
-  :  ?max_buffer_age:Time.Span.t
-  -> ?interrupt:unit Deferred.t
-  -> ?timeout: Time.Span.t
-  -> ?reader_buffer_size:int
-  -> file:string
-  -> unit
-  -> (Reader.t * Writer.t) Deferred.t
+(** A [Where_to_listen] describes the socket that a tcp server should listen on. *)
+module Where_to_listen : sig
+  type ('address, 'listening_on) t constraint 'address = [< Socket.Address.t ]
 
-(** [serve ~port handler] starts a server on the specified port.  The return
-    value becomes determined once the socket is ready to accept connections.
-    [serve] calls [handler (address, reader, writer)] for each client that
-    connects.  If the deferred returned by [handler] is ever determined, or
-    [handler] raises an exception, then [reader] and [writer] are closed.
+  type inet = (Socket.Address.Inet.t, int   ) t
+  type unix = (Socket.Address.Unix.t, string) t
 
-    [max_pending_connections] is the maximum number of clients that can have a
-    connection pending, as with [Async.Std.Unix.Socket.listen].  Additional
-    connections will be rejected.
+  val create
+    :  socket_type:'address Socket.Type.t
+    -> address:'address
+    -> listening_on:('address -> 'listening_on)
+    -> ('address, 'listening_on) t
+end
 
-    [max_buffer_age] passes on to the underlying writer option of the same name.
+val on_port              : int ->    Where_to_listen.inet
+val on_port_chosen_by_os :           Where_to_listen.inet
+val on_file              : string -> Where_to_listen.unix
 
-    [on_handler_error] determines what happens if the handler throws an
-    exception. *)
-val serve
-  :  ?max_connections:int
-  -> ?max_pending_connections:int
-  -> ?max_buffer_age:Time.Span.t
-  -> port:int
-  -> on_handler_error:[ `Raise
-                      | `Ignore
-                      | `Call of (Socket.inet -> exn -> unit)
-                      ]
-  -> (Socket.inet -> Reader.t -> Writer.t -> unit Deferred.t)
-  -> unit Deferred.t
+(** A [Server.t] represents a TCP server listening on a socket. *)
+module Server : sig
 
-(** [serve_unix ~file handler] starts a server on the specified
-    file (unix domain socket).  Otherwise it behaves like [serve].
-*)
-val serve_unix
-  :  ?max_connections:int
-  -> ?max_pending_connections:int
-  -> ?max_buffer_age:Time.Span.t
-  -> file:string
-  -> on_handler_error:[ `Raise
-                      | `Ignore
-                      | `Call of (Socket.unix -> exn -> unit)
-                      ]
-  -> (Socket.unix -> Reader.t -> Writer.t -> unit Deferred.t)
-  -> unit Deferred.t
+  type ('address, 'listening_on) t constraint 'address = [< Socket.Address.t ]
+
+  type inet = (Socket.Address.Inet.t, int   ) t
+  type unix = (Socket.Address.Unix.t, string) t
+
+  val invariant : (_, _) t -> unit
+
+  val listening_on : (_, 'listening_on) t -> 'listening_on
+
+  (* [close t] starts closing the listening socket, and returns a deferred that becomes
+     determined after [Fd.close_finished fd] on the socket's fd.  It is guaranteed that
+     [t]'s client handler will never be called after [close t].  It is ok to call [close]
+     multiple times on the same [t]; calls subsequent to the initial call will have no
+     effect, but will return the same deferred as the original call.
+
+     [close_finished] becomes determined after [Fd.close_finished fd] on the socket's fd,
+     i.e. the same deferred that [close] returns.  [close_finished] differs from [close]
+     in that it does not have the side effect of initiating a close.
+
+     [is_closed t] returns [true] iff [close t] has been called. *)
+  val close          : (_, _) t -> unit Deferred.t
+  val close_finished : (_, _) t -> unit Deferred.t
+  val is_closed      : (_, _) t -> bool
+
+  (** [create where_to_listen handler] starts a server listening to a socket as specified
+      by [where_to_listen].  It returns a server once the socket is ready to accept
+      connections.  The server calls [handler (address, reader, writer)] for each client
+      that connects.  If the deferred returned by [handler] is ever determined, or
+      [handler] raises an exception, then [reader] and [writer] are closed.
+
+      [max_pending_connections] is the maximum number of clients that can have a
+      connection pending, as with [Unix.Socket.listen].  Additional connections will be
+      rejected.
+
+      [max_connections] is the maximum number of clients that can be connected
+      simultaneously.  The server will not call [accept] unless the number of clients is
+      less than [max_connections], although of course potential clients can have a
+      connection pending.
+
+      [buffer_age_limit] passes on to the underlying writer option of the same name.
+
+      [on_handler_error] determines what happens if the handler throws an exception.  The
+      default is [`Raise].  If an exception is raised by on_handler_error (either
+      explicitely via `Raise, or in the closure passed to `Call) no further connections
+      will be accepted.
+
+      The server will stop accepting and close the listening socket when an error handler
+      raises (either via [`Raise] or [`Call f] where [f] raises), or if [close] is
+      called. *)
+  val create
+    :  ?max_connections:int
+    -> ?max_pending_connections:int
+    -> ?buffer_age_limit:Writer.buffer_age_limit
+    -> ?on_handler_error:[ `Raise
+                         | `Ignore
+                         | `Call of ('address -> exn -> unit)
+                         ]
+    -> ('address, 'listening_on) Where_to_listen.t
+    -> ('address -> Reader.t -> Writer.t -> unit Deferred.t)
+    -> ('address, 'listening_on) t Deferred.t
+
+end

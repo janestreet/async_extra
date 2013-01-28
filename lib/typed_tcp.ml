@@ -36,13 +36,13 @@ module Make (Arg : Arg) = struct
     result_reader : Server_read_result.t Pipe.Reader.t;
     result_writer : Server_read_result.t Pipe.Writer.t;
     mutable listening : bool;
-    socket : ([ `Passive ], Socket.inet) Socket.t;
+    socket : ([ `Passive ], Socket.Address.Inet.t) Socket.t;
     auth : Unix.Inet_addr.t -> int -> [`Allow | `Deny of string option] Deferred.t;
     buffer_age_limit : [ `At_most of Time.Span.t | `Unlimited ] option;
   }
 
   let try_with = Monitor.try_with
-  let ignore_errors f = whenever (try_with f >>| ignore)
+  let ignore_errors f = don't_wait_for (try_with f >>| ignore)
 
   exception Exception_while_reading of exn with sexp
 
@@ -94,7 +94,8 @@ module Make (Arg : Arg) = struct
         | Error exn ->
           Monitor.send_exn (Monitor.current ()) exn;
           Clock.after (sec 0.5) >>> loop
-        | Ok (sock, `Inet (addr, port)) ->
+        | Ok `Socket_closed -> ()
+        | Ok (`Ok (sock, `Inet (addr, port))) ->
             (* Go ahead and accept more connections. *)
             loop ();
             if t.verbose then
@@ -134,7 +135,7 @@ module Make (Arg : Arg) = struct
                           | None -> assert false
                           | Some disconnect_reason ->
                             ignore_errors (fun () -> Transport.close transport);
-                            whenever
+                            don't_wait_for
                               (if not (Pipe.is_closed t.result_writer) then
                                   Pipe.write t.result_writer
                                     (R.Disconnect (id, Exn.sexp_of_t disconnect_reason))
@@ -170,11 +171,13 @@ module Make (Arg : Arg) = struct
     end
   ;;
 
-  let create ?max_pending_connections ?(verbose = false) ?(log_disconnects = true)
-    ?buffer_age_limit ~port ~auth () =
+  let create ?max_pending_connections
+      ?(verbose = false)
+      ?(log_disconnects = true)
+      ?buffer_age_limit ~port ~auth () =
     let s = Socket.create Socket.Type.tcp in
     Monitor.try_with (fun () ->
-      Socket.bind s (Socket.Address.inet_addr_any ~port))
+      Socket.bind s (Socket.Address.Inet.create_bind_any ~port))
     >>= function
       | Error e ->
         Unix.close (Socket.fd s) >>| fun () -> raise e

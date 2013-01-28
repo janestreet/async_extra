@@ -63,7 +63,7 @@ end
 module Chunker : sig
   (** A chunker is used to convert the incoming strings of data into a sequence of
       updates.  One creates a chunker, and then repeatedly [feed]s it data. *)
-  type t
+  type t with sexp_of
 
   val invariant : t -> unit
   val create : break_on_lines:bool -> t
@@ -172,10 +172,9 @@ type t =
        each time we reach EOF. *)
     mutable need_to_report_eof : bool;
   }
-with fields
+with fields, sexp_of
 
-(*
-let invariant t =
+let _invariant t =
   try
     Chunker.invariant t.chunker;
     assert Int64.(t.file_len >= zero);
@@ -185,7 +184,6 @@ let invariant t =
        and the time we read. *)
   with exn -> failwiths "invariant failed" (exn, t) <:sexp_of< exn * t >>
 ;;
-*)
 
 let need_to_read t = t.file_pos < t.file_len
 
@@ -198,12 +196,12 @@ let write t updates =
     Deferred.unit
 ;;
 
-let warning t w = whenever (write t (Queue.singleton (Update.Warning (t.file, w))))
+let warning t w = don't_wait_for (write t (Queue.singleton (Update.Warning (t.file, w))))
 
 let error t e =
   (* We want to be sure that [t] will be closed when this function returns, so we don't
      wait on the pipe to flush before calling [Pipe.close]. *)
-  whenever (write t (Queue.singleton (Update.Error (t.file, e))));
+  don't_wait_for (write t (Queue.singleton (Update.Error (t.file, e))));
   Pipe.close t.pipe_w;
 ;;
 

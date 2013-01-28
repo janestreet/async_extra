@@ -8,19 +8,25 @@ module Server : sig
     type t
   end
 
-  (** [serve ~port ()] must be called before clients will be able to connect.
-      Sets up a bound tcp socket on port that will be used to serve files to
-      clients.  The unit Deferred will be filled when the server is ready to
-      receive clients.
+  (** [serve ~port ()] must be called before clients will be able to connect.  Sets up a
+      bound tcp socket on port that will be used to serve files to clients.  The unit
+      Deferred will be filled when the server is ready to receive clients.
 
-      The [auth] function will be called once for every client connection.  If
-      it returns false the client will be disconnected immediately.  Further
-      details of [auth] can be found in the documentation for Rpc.serve. *)
-  val serve : auth:(Socket.inet -> bool) -> port:int -> unit Deferred.t
+      The [auth] function will be called once for every client connection.  If it returns
+      false the client will be disconnected immediately.  Further details of [auth] can be
+      found in the documentation for Rpc.serve. *)
+  val serve
+    :  auth:(Socket.Address.Inet.t -> bool)
+    -> port:int
+    -> Tcp.Server.inet Deferred.t
 
   (** [open_file filename] open a file for writing.  The filename given should
       be a real path on the server, and will create a real file there *)
-  val open_file : ?append:bool -> ?dos_format:bool -> string -> File.t Deferred.t
+  val open_file
+    :  ?append:bool (* defaults to false *)
+    -> ?dos_format:bool (* defaults to false *)
+    -> string
+    -> File.t Deferred.t
 
   (** [serve_existing_static_file filename] adds [filename] to the list of files
       that can be accessed via the Client module.  As indicated in the name,
@@ -36,7 +42,7 @@ module Server : sig
   (** [close t] closes the file t for writing.  If [stop_serving] is false
       (default is true) the file will be left on disk and will still be served
       to clients on a create request. *)
-  val close : ?stop_serving:bool -> File.t -> unit Deferred.t
+  val close : ?stop_serving:bool (* defaults to true *) -> File.t -> unit Deferred.t
 
   (** [write_message t msg] write [msg] to [t].  [msg] is assumed to contain no
       newlines except possibly at the end.  A newline will be added to the end
@@ -62,7 +68,7 @@ module Server : sig
       [t].  When the deferred returned by [f] is determined, [t] will be
       closed. *)
   val with_file
-    :  ?append:bool
+    :  ?append:bool (* defaults to false *)
     -> string
     -> f:(File.t -> 'a Deferred.t)
     -> 'a Deferred.t
@@ -109,8 +115,8 @@ module Client : sig
   (* [connect ~host ~port] connect to the server at ([host],[port]) *)
   val connect : host:string -> port:int -> (t, Exn.t) Result.t Deferred.t
 
-  (* [disconnect t] disconnect from t.  Pipes delivered by read/tail will be closed *)
-  val disconnect : t -> unit
+  (* [disconnect t] disconnect from t.  Pipes delivered by read/tail will be closed. *)
+  val disconnect : t -> unit Deferred.t
 
   (** [read t filename] provides a pipe that will be filled with messages from [filename]
       starting from the beginning, and continuing until the server calls [unlink] or

@@ -15,13 +15,19 @@ module Result : sig
   val to_error : (_, _) t -> Error.t
 end
 
+(** [unpack_from_string_pipe unpack_buffer input] returns [(output, result)], and uses
+    [unpack_buffer] to unpack values from [input] until [input] is closed.  It puts the
+    unpacked values into [output], which is closed once unpacking finishes, normally
+    or due to an error.  [result] indicates why unpacking finished.
+
+    [unpack_from_reader] and [unpack_bin_prot_from_reader] are similar.  They are more
+    efficient in that they blit bytes directly from the reader buffer to the unpack
+    buffer, without any intervening allocation. *)
 val unpack_from_string_pipe
   :  ('a, 'b) Unpack_buffer.t
   -> string Pipe.Reader.t
   -> 'a Pipe.Reader.t * ('a, 'b) Result.t Deferred.t
 
-(** [unpack_from_reader unpacker] unpacks all the values from reader until reaching EOF.
-    The resulting [pipe] is closed once unpacking finishes (normally or abnormally). *)
 val unpack_from_reader
   :  ('a, 'b) Unpack_buffer.t
   -> Reader.t

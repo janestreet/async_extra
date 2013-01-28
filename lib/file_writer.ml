@@ -48,7 +48,7 @@ let schedule_bigstring t ss =
 
 let create ?(append = true) file =
   let monitor =
-    Monitor.create ~name:(sprintf "Async.File_writer on file %s" file) ()
+    Monitor.create ~info:(Info.create "Async.File_writer" file <:sexp_of< string >>) ()
   in
   within' ~monitor (fun () ->
     Deferred.create

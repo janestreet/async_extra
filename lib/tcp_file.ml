@@ -1,3 +1,4 @@
+
 open Core.Std
 open Import
 
@@ -9,7 +10,7 @@ module Protocol = struct
       type t =
         | Read
         | Tail
-        with bin_io
+        with sexp, bin_io
     end
 
     module Error = struct
@@ -22,7 +23,7 @@ module Protocol = struct
     end
 
     module Query = struct
-      type t = Open of string * Mode.t with bin_io
+      type t = Open of string * Mode.t with sexp, bin_io
     end
 
     module Message : sig
@@ -102,7 +103,7 @@ module Server = struct
       tail     : Protocol.Open_file.Message.t Tail.t;
       line_ending : [ `Dos | `Unix ];
       mutable num_lines_on_disk_after_flushing_writer : int;
-      mutable closed : bool;
+      mutable status : [ `Open | `Closing of unit Deferred.t | `Closed ];
     } with sexp_of
   end
 
@@ -206,7 +207,7 @@ module Server = struct
         >>> function
         | `Aborted | `Read Stream.Nil -> stop_tailing ()
         | `Read (Stream.Cons (msg, rest)) ->
-          send_msg_to_client w msg >>> fun () -> loop rest
+          send_msg_to_client w msg >>> fun () -> loop (Stream.of_raw rest)
       in
       loop stream)
 
@@ -232,7 +233,7 @@ module Server = struct
                 `Wanted_to_read num_from_disk,
                 `But_only_managed (current_line - 1)))
           else (
-            whenever (Reader.close r);
+            don't_wait_for (Reader.close r);
             tail rest w aborted >>> stop_reading
           )
         in
@@ -262,7 +263,7 @@ module Server = struct
     | Ok ()   -> Pipe.close pipe_w
     | Error e ->
       if not (Pipe.is_closed pipe_w) then begin
-        whenever (Pipe.write pipe_w
+        don't_wait_for (Pipe.write pipe_w
           (Error (Open_file.Error.Unknown (Exn.to_string e))));
         Pipe.close pipe_w
       end);
@@ -279,7 +280,7 @@ module Server = struct
       | Ok s -> State.global.State.serving_on <- `Port port; s
       | Error (`Duplicate_implementations _) -> assert false
     in
-    Rpc.Connection.serve ~auth ~server ~port ()
+    Rpc.Connection.serve ~auth ~server ~where_to_listen:(Tcp.on_port port) ()
       ~initial_connection_state:(fun _ -> State.global)
 
   exception File_is_already_open_in_tcp_file of string with sexp
@@ -290,14 +291,17 @@ module Server = struct
     | `No      -> Deferred.return 0
     | `Unknown -> failwithf "unable to open file: %s" filename ()
     | `Yes ->
-      (* There is no strong case for using [exclusive:true] here, since locks are
+      (* There is no strong case for using [~exclusive:true] here, since locks are
          advisory, but it expresses something in the code that we want to be true, and
          shouldn't hurt. *)
       Reader.with_file ~exclusive:true filename
         ~f:(fun r -> Pipe.drain_and_count (Reader.lines r))
   ;;
 
-  let open_file ?(append=false) ?(dos_format = false) filename =
+  let open_file
+      ?(append = false)
+      ?(dos_format = false)
+      filename =
     let filename = canonicalize filename in
     match String.Table.find State.global.State.files filename with
     | Some _ -> raise (File_is_already_open_in_tcp_file filename)
@@ -309,7 +313,7 @@ module Server = struct
       in
       num_lines_already_on_disk
       >>= fun num_lines_already_on_disk ->
-      File_writer.create filename ~append
+      File_writer.create filename ~append:append
       >>| fun writer ->
       let file =
         { File.
@@ -318,7 +322,7 @@ module Server = struct
           tail        = Tail.create ();
           line_ending = if dos_format then `Dos else `Unix;
           num_lines_on_disk_after_flushing_writer = num_lines_already_on_disk;
-          closed = false;
+          status = `Open;
         }
       in
       String.Table.replace State.global.State.files ~key:filename ~data:file;
@@ -331,17 +335,25 @@ module Server = struct
 
   let stop_serving = stop_serving_internal
 
-  let close ?(stop_serving=true) t =
-    if t.File.closed
-    then Deferred.unit
-    else begin
-      t.File.closed <- true;
+  let close ?(stop_serving = true) t =
+    match t.File.status with
+    | `Closed         -> Deferred.unit
+    | `Closing closed -> closed
+    | `Open           ->
+      let close_notification = Ivar.create () in
+      t.File.status <- `Closing (Ivar.read close_notification);
       if stop_serving then stop_serving_internal t;
       Tail.close_if_open t.File.tail;
-      match t.File.writer with
-      | `Writer writer -> File_writer.close writer
-      | `This_is_a_static_file -> Deferred.unit
-    end
+      let closed =
+        match t.File.writer with
+        | `Writer writer         -> File_writer.close writer
+        | `This_is_a_static_file -> Deferred.unit
+      in
+      upon closed (fun () ->
+        Ivar.fill close_notification ();
+        t.File.status <- `Closed);
+      Ivar.read close_notification;
+  ;;
 
   exception Attempt_to_flush_static_tcp_file of string with sexp
 
@@ -349,23 +361,30 @@ module Server = struct
     match t.File.writer with
     | `Writer writer -> File_writer.flushed writer
     | `This_is_a_static_file -> raise (Attempt_to_flush_static_tcp_file t.File.filename)
+  ;;
 
   exception Attempt_to_write_message_to_closed_tcp_file of string with sexp
   exception Attempt_to_write_message_to_static_tcp_file of string with sexp
 
   let gen_message t f =
-    if t.File.closed then
-      raise (Attempt_to_write_message_to_closed_tcp_file t.File.filename);
     match t.File.writer with
-    | `Writer writer -> f writer
     | `This_is_a_static_file ->
       raise (Attempt_to_write_message_to_static_tcp_file t.File.filename)
+    | `Writer writer ->
+      match t.File.status with
+      | `Closing _ | `Closed ->
+        raise (Attempt_to_write_message_to_closed_tcp_file t.File.filename);
+      | `Open ->
+        f writer
+  ;;
 
   let write_message t msg =
     gen_message t (fun writer -> Atomic_operations.write_message t msg writer)
+  ;;
 
   let schedule_message t msg =
     gen_message t (fun writer -> Atomic_operations.schedule_message t msg writer)
+  ;;
 
   let write_sexp =
     (* We use strings for Sexps whose string representations can fit on the minor heap and
@@ -396,6 +415,7 @@ module Server = struct
     Monitor.try_with (fun () -> f t) >>= fun res ->
     close t >>| fun () ->
     Result.ok_exn res
+  ;;
 
   let serve_existing_static_file filename =
     let filename = canonicalize filename in
@@ -411,16 +431,18 @@ module Server = struct
           line_ending = `Unix;  (* Arbitrary setting: will never be used. *)
           tail;
           num_lines_on_disk_after_flushing_writer;
-          closed = true;
+          status = `Closed;
         }
       in
       String.Table.replace State.global.State.files ~key:filename ~data:file
     | Some _ -> raise (File_is_already_open_in_tcp_file filename)
+  ;;
 
   let writer_monitor t =
     match t.File.writer with
-    | `Writer writer -> Ok (File_writer.monitor writer)
+    | `Writer writer         -> Ok (File_writer.monitor writer)
     | `This_is_a_static_file -> Error `This_is_a_static_file
+  ;;
 end
 
 module Client = struct

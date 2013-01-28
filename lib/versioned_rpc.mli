@@ -10,20 +10,19 @@
           way.
 
           The proto-typical example of this scenario is a commander that
-          needs to call out to many assistants for that same system
-          (e.g. friend commander calling friend assistants).  In this
-          scenario, the assistants each implement a single version of
-          the rpc and the commander has to take this into account.
+          needs to call out to many assistants for that same system.
+          In this scenario, the assistants each implement a single
+          version of the rpc and the commander has to take this into
+          account.
       }
       {li The {i callee} is responsible for managing versions and
           is called by
 
           The proto-typical example of this scenario is an assistant
           from one system calling out the commander of another system
-          (e.g. jentry assistants querying friend commander for
-          symbology).  In this scenario, the assistants each know a
-          single version of the rpc to call and the commander has to
-          implement them all.
+          In this scenario, the assistants each know a single version
+          of the rpc to call and the commander has to implement them
+          all.
       }
     }
 
@@ -49,7 +48,7 @@
       Q --->-- Q2 --> R2 -->-- R    Q2 -->-- Q --> R --->-- R2
        \                      /             /       \
         `-->-- Q3 --> R3 -->-'      Q3 -->-'         `-->-- R3
-  }
+  v}
 *)
 
 open Core.Std
@@ -68,7 +67,7 @@ module Caller_converts : sig
 
       (** multi-version dispatch *)
       val dispatch_multi :
-        version:int -> Connection.t -> query -> (response, exn) Result.t Deferred.t
+        version:int -> Connection.t -> query -> response Or_error.t Deferred.t
 
       (** all versions supported by [dispatch_multi].
           (useful for computing which old versions may be pruned) *)
@@ -82,12 +81,12 @@ module Caller_converts : sig
       versions that [dispatch_multi] knows about.  Registration requires
       knowing how to get into and out of the model.
       {v
-          ,-->-- Q1 --> R1 -->-.
+           ,-->-- Q1 --> R1 -->-.
           /                      \
-        Q --->-- Q2 --> R2 -->-- R
+         Q --->-- Q2 --> R2 -->-- R
           \                      /
-          `-->-- Q3 --> R3 -->-'
-      }
+           `-->-- Q3 --> R3 -->-'
+      v}
     *)
     module Make (Model : sig
       val name : string  (* the name of the Rpc's being unified in the model *)
@@ -126,9 +125,9 @@ module Caller_converts : sig
         version:int
         -> Connection.t
         -> query
-        -> ( (response Or_error.t Pipe.Reader.t * Pipe_rpc.Id.t, error) Result.t
-           , exn
-           ) Result.t Deferred.t
+        -> ( response Or_error.t Pipe.Reader.t * Pipe_rpc.Id.t
+           , error
+           ) Result.t Or_error.t Deferred.t
 
       (** all versions supported by [dispatch_multi].
           (useful for computing which old versions may be pruned) *)
@@ -148,10 +147,10 @@ module Caller_converts : sig
         Q --->-- Q2 --> R2 -->-- R  E2 -->-- E
          \                      /           /
           `-->-- Q3 --> R3 -->-'    E3 -->-'
-      }
+      v}
     *)
     module Make (Model : sig
-      val name : string
+      val name : string  (* the name of the Rpc's being unified in the model *)
       type query
       type response
       type error
@@ -210,10 +209,10 @@ module Callee_converts : sig
        Q2 -->-- Q --> R --->-- R2
                /       \
        Q3 -->-'         `-->-- R3
-    }
+    v}
   *)
   module Make (Model : sig
-    val name : string
+    val name : string  (* the name of the Rpc's being unified in the model *)
     type query
     type response
   end) : sig
@@ -251,7 +250,10 @@ module Menu : sig
   val add : 's Implementation.t list -> 's Implementation.t list
 
   (** request an rpc version menu from an rpc connection *)
-  val request : Connection.t -> (t, exn) Result.t Deferred.t
+  val request : Connection.t -> t Or_error.t Deferred.t
+
+  (** find what rpcs are supported *)
+  val supported_rpcs : t -> Implementation.Description.t list
 
   (** find what versions of a particular rpc are supported *)
   val supported_versions : t -> rpc_name:string -> Int.Set.t

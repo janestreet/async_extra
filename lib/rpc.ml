@@ -1,6 +1,85 @@
 
+
+module Protocol = struct
+  (* WARNING: do not change any of these types without good reason *)
+
+  open Bin_prot.Std
+  open Sexplib.Std
+
+  module Rpc_tag : Core.Std.Identifiable = Core.Std.String
+
+  module Query_id = Core.Std.Unique_id.Int63(struct end)
+
+  module Unused_query_id : sig
+    type t with bin_io
+    val t : t
+  end = struct
+    type t = Query_id.t with bin_io
+    let t = Query_id.create ()
+  end
+
+  module Rpc_error = struct
+    type t =
+    | Bin_io_exn of Core.Std.Sexp.t
+    | Connection_closed
+    | Write_error of Core.Std.Sexp.t
+    | Uncaught_exn of Core.Std.Sexp.t
+    | Unimplemented_rpc of Rpc_tag.t * [`Version of int]
+    | Unknown_query_id of Query_id.t
+    with sexp, bin_io
+  end
+
+  module Rpc_result = struct
+    type 'a t = ('a, Rpc_error.t) Core.Std.Result.t with bin_io
+  end
+
+  module Header = struct
+    type t = int list with sexp, bin_io
+  end
+
+  module Query = struct
+    type t = {
+      tag     : Rpc_tag.t;
+      version : int;
+      id      : Query_id.t;
+      data    : Core.Std.Bigstring.t;
+    } with bin_io
+  end
+
+  module Response = struct
+    type t =
+      { id   : Query_id.t
+      ; data : Core.Std.Bigstring.t Rpc_result.t
+      } with bin_io
+  end
+
+  module Stream_query = struct
+    type t = [`Query of Core.Std.Bigstring.t | `Abort ] with bin_io
+  end
+
+  module Stream_initial_message = struct
+    type ('response, 'error) t =
+      { unused_query_id : Unused_query_id.t
+      ; initial : ('response, 'error) Core.Std.Result.t
+      } with bin_io
+  end
+
+  module Stream_response_data = struct
+    type t = [`Ok of Core.Std.Bigstring.t | `Eof] with bin_io
+  end
+
+  module Message = struct
+    type t =
+    | Heartbeat
+    | Query of Query.t
+    | Response of Response.t
+    with bin_io
+  end
+end
+
 open Core.Std
 open Import
+open Rpc_intf
 
 (* The Result monad is also used. *)
 let (>>=~) = Result.(>>=)
@@ -12,41 +91,26 @@ let defer_result : 'a 'b. ('a Deferred.t,'b) Result.t -> ('a,'b) Result.t Deferr
     | Error _ as err -> return err
     | Ok d -> d >>| fun x -> Ok x
 
-module Rpc_tag : Identifier = String
+open Protocol
 
-module Query_id = Unique_id.Int63(struct end)
-
-module Error = struct
-  module T = struct
-    type t =
-    | Bin_io_exn of Sexp.t
-    | Connection_closed
-    | Write_error of Sexp.t
-    | Uncaught_exn of Sexp.t
-    | Unimplemented_rpc of Rpc_tag.t * [`Version of int]
-    | Unknown_query_id of Query_id.t
-    with sexp, bin_io
-  end
-  include T
-  include Sexpable.To_stringable (T)
+module Rpc_error = struct
+  include Rpc_error
+  include Sexpable.To_stringable (Rpc_error)
 
   exception Rpc of t with sexp
   let raise t = raise (Rpc t)
 end
 
 module Rpc_result : sig
-  type 'a t = ('a, Error.t) Result.t
-  include Binable.S1 with type 'a t := 'a t
+  type 'a t = 'a Rpc_result.t
 
   type 'a try_with = location:string -> (unit -> 'a) -> 'a
 
   val try_with : 'a t Deferred.t try_with
-
   val try_with_bin_io : 'a t try_with
-
-  val to_exn_result : 'a t -> ('a, Exn.t) Result.t
+  val or_error : 'a t -> 'a Or_error.t
 end = struct
-  type 'a t = ('a, Error.t) Result.t with bin_io
+  type 'a t = ('a, Rpc_error.t) Result.t with bin_io
   type 'a try_with = location:string -> (unit -> 'a) -> 'a
 
   type located_error = {
@@ -62,7 +126,7 @@ end = struct
   let try_with ~location f = make_try_with
     (Monitor.try_with ?name:None)
     (>>|)
-    (fun e -> Error.Uncaught_exn e)
+    (fun e -> Rpc_error.Uncaught_exn e)
     ~location
     f
 
@@ -70,13 +134,13 @@ end = struct
   let try_with_bin_io ~location f = make_try_with
     Result.try_with
     (fun x f -> f x)
-    (fun e -> Error.Bin_io_exn e)
+    (fun e -> Rpc_error.Bin_io_exn e)
     ~location
     f
 
-  let to_exn_result = function
+  let or_error = function
     | Ok x -> Ok x
-    | Error e -> Error (Error.Rpc e)
+    | Error e -> Or_error.error "rpc" e Rpc_error.sexp_of_t
 end
 
 (* utility functions for bin-io'ing to and from a Bigstring.t *)
@@ -91,44 +155,12 @@ module Header : sig
   val v1 : t
   val negotiate_version : t -> t -> int option
 end = struct
-  type t = int list with bin_io
+  include Header
 
   let v1 = [ 1 ]
 
   let negotiate_version t1 t2 =
     Set.max_elt (Set.inter (Int.Set.of_list t1) (Int.Set.of_list t2))
-end
-
-module Query = struct
-  type t = {
-    tag     : Rpc_tag.t;
-    version : int;
-    id      : Query_id.t;
-    data    : Bigstring.t;
-  } with bin_io
-end
-
-module Response = struct
-  type t = {
-    id   : Query_id.t;
-    data : Bigstring.t Rpc_result.t;
-  } with bin_io
-end
-
-module Stream_query = struct
-  type t = [`Query of Bigstring.t | `Abort ] with bin_io
-end
-
-module Stream_response_data = struct
-  type t = [`Ok of Bigstring.t | `Eof] with bin_io
-end
-
-module Message = struct
-  type t =
-  | Heartbeat
-  | Query of Query.t
-  | Response of Response.t
-  with bin_io
 end
 
 module Implementation = struct
@@ -159,7 +191,6 @@ module Implementation = struct
   end
 
   let description t = {Description.name = Rpc_tag.to_string t.tag; version = t.version }
-
 end
 
 module Server : sig
@@ -239,7 +270,7 @@ end = struct
       | Ok (`Query data) ->
         let user_aborted = Ivar.create () in
         Hashtbl.replace open_streaming_responses ~key:query.Query.id ~data:user_aborted;
-        let aborted = Deferred.choose_ident [
+        let aborted = Deferred.any [
           Ivar.read user_aborted;
           aborted;
         ]
@@ -261,11 +292,12 @@ end = struct
           write_response (Ok err)
         | Ok (Ok (initial, pipe_r)) ->
           write_response (Ok initial);
-          Writer.attach_pipe ~close_on_eof:false writer pipe_r (fun x ->
-            write_response
-              (Ok (to_bigstring Stream_response_data.bin_t (`Ok x))));
+          don't_wait_for
+            (Writer.transfer writer pipe_r (fun x ->
+              write_response
+                (Ok (to_bigstring Stream_response_data.bin_t (`Ok x)))));
           Pipe.closed pipe_r >>> fun () ->
-          Pipe.flushed pipe_r
+          Pipe.upstream_flushed pipe_r
           >>> function
           | `Ok | `Reader_closed ->
             write_response (Ok (to_bigstring Stream_response_data.bin_t `Eof));
@@ -296,7 +328,7 @@ end = struct
           ~aborted ~open_streaming_responses () =
         match Hashtbl.find implementations (query.Query.tag, query.Query.version) with
         | None ->
-          let error = Error.Unimplemented_rpc
+          let error = Rpc_error.Unimplemented_rpc
             (query.Query.tag, `Version query.Query.version)
           in
           write_response writer {
@@ -307,7 +339,7 @@ end = struct
           begin
             match on_unknown_rpc with
             | `Ignore -> ()
-            | `Raise -> Error.raise error
+            | `Raise -> Rpc_error.raise error
             | `Call f -> f
               ~rpc_tag:(Rpc_tag.to_string query.Query.tag)
               ~version:query.Query.version;
@@ -352,71 +384,7 @@ module Handshake_error = struct
     | Error e -> Error (Handshake_error e)
 end
 
-(* The connection interface exposed to users in the mli. *)
-module type Connection = sig
-  type t
-
-  val create :
-    ?server:'s Server.t
-    -> connection_state:'s
-    -> ?max_message_size:int
-    -> Reader.t
-    -> Writer.t
-    -> (t, Exn.t) Result.t Deferred.t
-
-  val close : t -> unit
-  val closed : t -> unit Deferred.t
-  val already_closed : t -> bool
-  val bytes_to_write : t -> int
-
-  val with_close :
-    ?server:'s Server.t
-    -> connection_state:'s
-    -> Reader.t
-    -> Writer.t
-    -> dispatch_queries:(t -> 'a Deferred.t)
-    -> on_handshake_error:[
-    | `Raise
-    | `Call of (Exn.t -> 'a Deferred.t)
-    ]
-    -> 'a Deferred.t
-
-  val server_with_close :
-    Reader.t
-    -> Writer.t
-    -> server:'s Server.t
-    -> connection_state:'s
-    -> on_handshake_error:[
-    | `Raise
-    | `Ignore
-    | `Call of (Exn.t -> unit Deferred.t)
-    ]
-    -> unit Deferred.t
-
-  val serve :
-    server:'s Server.t
-    -> initial_connection_state:(Socket.inet -> 's)
-    -> port:int
-    -> ?auth:(Socket.inet -> bool)
-    -> ?on_handshake_error:[
-    | `Raise
-    | `Ignore
-    | `Call of (Exn.t -> unit)
-    ]
-    -> unit
-    -> unit Deferred.t
-
-  val client :
-    host:string
-    -> port:int
-    -> (t, Exn.t) Result.t Deferred.t
-
-  val with_client :
-    host:string
-    -> port:int
-    -> (t -> 'a Deferred.t)
-    -> ('a, Exn.t) Result.t Deferred.t
-end
+module type Connection = Connection with module Server := Server
 
 (* Internally, we use a couple of extra functions on connections that aren't exposed to
    users. *)
@@ -426,30 +394,33 @@ module type Connection_internal = sig
   type response_handler =
     Response.t
     -> [ `Keep
-      | `Remove
-      | `Replace of response_handler
-      | `Die of Error.t] Deferred.t
+       | `Remove
+       | `Replace of response_handler
+       | `Die of Rpc_error.t
+       ] Deferred.t
 
-  val dispatch :
-    ?response_handler:response_handler
+  val dispatch
+    :  ?response_handler:response_handler
     -> t
     -> query:Query.t
     -> (unit, [`Closed]) Result.t
 end
 
 module Connection : Connection_internal = struct
+  module Server = Server
+
   type response_handler =
     Response.t
     -> [ `Keep
-      | `Remove
-      | `Replace of response_handler
-      | `Die of Error.t] Deferred.t
+       | `Remove
+       | `Replace of response_handler
+       | `Die of Rpc_error.t
+       ] Deferred.t
 
   type t =
-    {
-      reader                   : Reader.t;
+    { reader                   : Reader.t;
       writer                   : Writer.t;
-      open_queries             : (Query_id.t, response_handler) Hashtbl.t;
+      open_queries             : (Query_id.t, response_handler sexp_opaque) Hashtbl.t;
       (* [open_streaming_responses] is only used to fill the
          [aborted] ivar on the server side *)
       open_streaming_responses : (Query_id.t, unit Ivar.t) Hashtbl.t;
@@ -459,10 +430,15 @@ module Connection : Connection_internal = struct
             -> write_response:(Writer.t -> Response.t -> unit)
             -> aborted:unit Deferred.t
             -> [ `Continue | `Stop ]);
-      eof                      : unit Ivar.t;
+      close_started  : unit Ivar.t;
+      close_finished : unit Ivar.t;
     }
+  with sexp_of
 
-  let writer t = if Ivar.is_full t.eof then Error `Closed else Ok t.writer
+  let is_closed t = Ivar.is_full t.close_started
+
+  let writer t = if is_closed t then Error `Closed else Ok t.writer
+
   let bytes_to_write t = Writer.bytes_to_write t.writer
 
   let dispatch ?response_handler t ~query =
@@ -481,12 +457,12 @@ module Connection : Connection_internal = struct
       ~writer:t.writer
       ~write_response:(fun writer response ->
         Writer.write_bin_prot writer Message.bin_writer_t (Message.Response response))
-      ~aborted:(Ivar.read t.eof)
+      ~aborted:(Ivar.read t.close_started)
 
   let handle_response t response =
     match Hashtbl.find t.open_queries response.Response.id with
     | None ->
-      Deferred.return (`Stop (Error (Error.Unknown_query_id response.Response.id)))
+      Deferred.return (`Stop (Error (Rpc_error.Unknown_query_id response.Response.id)))
     | Some f ->
       f response >>| fun action ->
       begin
@@ -514,12 +490,19 @@ module Connection : Connection_internal = struct
       | `Stop -> `Stop Result.ok_unit
     )
 
-  let close t =
-    Ivar.fill_if_empty t.eof ();
-    Deferred.whenever (Writer.close t.writer >>= fun () -> Reader.close t.reader)
+  let close_finished t = Ivar.read t.close_finished
 
-  let closed t = Ivar.read t.eof
-  let already_closed t = Ivar.is_full t.eof
+  let close t =
+    if not (is_closed t) then begin
+      Ivar.fill t.close_started ();
+      Writer.close t.writer
+      >>> fun () ->
+      Reader.close t.reader
+      >>> fun () ->
+      Ivar.fill t.close_finished ();
+    end;
+    close_finished t;
+  ;;
 
   let create ?server ~connection_state ?max_message_size:max_len reader writer =
     let server = match server with None -> Server.null () | Some s -> s in
@@ -530,7 +513,8 @@ module Connection : Connection_internal = struct
         open_queries             = Hashtbl.Poly.create ~size:10 ();
         open_streaming_responses = Hashtbl.Poly.create ~size:10 ();
         handle_query             = Server.query_handler server ~connection_state ();
-        eof                      = Ivar.create ();
+        close_started  = Ivar.create ();
+        close_finished = Ivar.create ();
       }
     in
     let result =
@@ -549,17 +533,17 @@ module Connection : Connection_internal = struct
           in
           let last_heartbeat = ref (Time.now ()) in
           let heartbeat () =
-            if not (already_closed t) then begin
+            if not (is_closed t) then begin
               if Time.diff (Time.now ()) !last_heartbeat > sec 30. then begin
-                close t;
-                Error.raise Error.Connection_closed
+                don't_wait_for (close t);
+                Rpc_error.raise Rpc_error.Connection_closed
               end;
               Writer.write_bin_prot t.writer Message.bin_writer_t Message.Heartbeat
             end
           in
           let rec loop current_read =
             Deferred.enabled [
-              Deferred.choice (Ivar.read t.eof) (fun () -> `EOF);
+              Deferred.choice (Ivar.read t.close_started) (fun () -> `EOF);
               Deferred.choice current_read      (fun v  -> `Read v);
             ] >>> fun filled ->
             match List.hd_exn (filled ()) with
@@ -567,16 +551,16 @@ module Connection : Connection_internal = struct
             | `Read `Eof ->
               (* The protocol is such that right now, the only outcome of the other
                  side closing the connection normally is that we get an eof. *)
-              close t
+              don't_wait_for (close t)
             | `Read `Ok msg ->
               last_heartbeat := Time.now ();
               handle_msg t msg >>> function
               | `Continue -> loop (read_message ())
               | `Stop result ->
-                close t;
+                don't_wait_for (close t);
                 match result with
                 | Ok () -> ()
-                | Error e -> Error.raise e
+                | Error e -> Rpc_error.raise e
           in
           begin
             let monitor = Monitor.create ~name:"RPC connection loop" () in
@@ -586,29 +570,29 @@ module Connection : Connection_internal = struct
                 ; (Monitor.errors (Writer.monitor t.writer))
                 ])))
               ~f:(fun exn ->
-                Ivar.fill_if_empty t.eof ();
+                don't_wait_for (close t);
                 let error = match exn with
-                  | Error.Rpc error -> error
-                  | exn -> Error.Uncaught_exn (Exn.sexp_of_t exn)
+                  | Rpc_error.Rpc error -> error
+                  | exn -> Rpc_error.Uncaught_exn (Exn.sexp_of_t exn)
                 in
                 (* clean up open streaming responses *)
                 Hashtbl.iter t.open_queries
                   ~f:(fun ~key:query_id ~data:response_handler ->
-                    whenever (Deferred.ignore (
+                    don't_wait_for (Deferred.ignore (
                       response_handler
                         { Response.
                           id = query_id;
                           data = Result.Error error
                         })));
-              Error.raise error);
+              Rpc_error.raise error);
           Scheduler.within ~monitor (fun () ->
-               Clock.every ~stop:(Ivar.read t.eof) (sec 10.) heartbeat;
-               loop (read_message ()))
-             end;
+            every ~stop:(Ivar.read t.close_started) (sec 10.) heartbeat;
+            loop (read_message ()))
+          end;
           Ok t
-          | Some i -> Error (Handshake_error.Negotiated_unexpected_version i)
-          in
-        result >>| Handshake_error.result_to_exn_result
+        | Some i -> Error (Handshake_error.Negotiated_unexpected_version i)
+    in
+    result >>| Handshake_error.result_to_exn_result
 
   let with_close
       ?server
@@ -626,11 +610,12 @@ module Connection : Connection_internal = struct
     match t with
     | Error e -> handle_handshake_error e
     | Ok t ->
-      Monitor.protect ~finally:(fun () -> close t; Deferred.unit) (fun () ->
-        dispatch_queries t >>= fun result ->
+      Monitor.protect ~finally:(fun () -> close t) (fun () ->
+        dispatch_queries t
+        >>= fun result ->
         (match server with
         | None -> Deferred.unit
-        | Some _ -> closed t)
+        | Some _ -> Ivar.read t.close_finished)
         >>| fun () ->
         result
       )
@@ -648,16 +633,16 @@ module Connection : Connection_internal = struct
   let serve
       ~server
       ~initial_connection_state
-      ~port
+      ~where_to_listen
       ?(auth = (fun _ -> true))
       ?(on_handshake_error = `Ignore)
       () =
-    Tcp.serve ~port ~on_handler_error:`Ignore (fun inet r w ->
+    Tcp.Server.create where_to_listen ~on_handler_error:`Ignore (fun inet r w ->
       if not (auth inet) then Deferred.unit
       else begin
         let connection_state = initial_connection_state inet in
         create ~server ~connection_state r w >>= function
-        | Ok t -> Reader.closed r >>| (fun () -> close t)
+        | Ok t -> Reader.close_finished r >>= fun () -> close t
         | Error handshake_error ->
           begin match on_handshake_error with
           | `Call f -> f handshake_error
@@ -667,22 +652,28 @@ module Connection : Connection_internal = struct
           Deferred.unit
       end)
 
-  let with_client ~host ~port f =
-    Monitor.try_with (fun () ->
-      Tcp.with_connection ~host ~port (fun r w ->
-        let server = Server.null () in
-        create ~server ~connection_state:() r w >>= function
-        | Ok t -> f t >>| (fun v -> close t; v)
-        | Error handshake_error -> raise handshake_error))
-
   let client ~host ~port =
     Monitor.try_with (fun () ->
-      Tcp.connect ~host ~port ()
+      Tcp.connect (Tcp.to_host_and_port host port)
       >>= fun (r,w) ->
       let server = Server.null () in
       create ~server ~connection_state:() r w >>| function
       | Ok t -> t
       | Error handshake_error -> raise handshake_error)
+
+  let with_client ~host ~port f =
+    Monitor.try_with (fun () ->
+      client ~host ~port
+      >>= fun res ->
+      begin match res with
+      | Error e -> return (Error e)
+      | Ok t ->
+        f t     >>= fun v  ->
+        close t >>= fun () ->
+        return (Ok v)
+      end)
+    >>= fun res ->
+    return (Result.join res)
 end
 
 module Rpc_common = struct
@@ -699,9 +690,9 @@ module Rpc_common = struct
     begin
       match Connection.dispatch conn ~query ~response_handler:(f response_ivar) with
       | Ok () -> ()
-      | Error `Closed -> Ivar.fill response_ivar (Error Error.Connection_closed)
+      | Error `Closed -> Ivar.fill response_ivar (Error Rpc_error.Connection_closed)
     end;
-    Ivar.read response_ivar >>| Rpc_result.to_exn_result
+    Ivar.read response_ivar >>| Rpc_result.or_error
 end
 
 module Rpc = struct
@@ -752,22 +743,13 @@ module Rpc = struct
     Rpc_common.dispatch_raw conn ~tag:t.tag ~version:t.version ~query_data ~query_id
       ~f:response_handler
 
-  let dispatch_exn t conn query =
-    dispatch t conn query
-    >>| fun result ->
-    match result with
-    | Ok result -> result
-    | Error error -> raise error
+  let dispatch_exn t conn query = dispatch t conn query >>| Or_error.ok_exn
 
 end
 
 (* the basis of the implementations of Pipe_rpc and State_rpc *)
 module Streaming_rpc = struct
-  module Initial_message = struct
-    type ('response, 'error) t =
-      { initial : ('response, 'error) Result.t
-      } with bin_io
-  end
+  module Initial_message = Stream_initial_message
 
   type ('query, 'initial_response, 'update_response, 'error_response) t =
     { tag : Rpc_tag.t
@@ -798,7 +780,8 @@ module Streaming_rpc = struct
       let init x =
         to_bigstring (Initial_message.bin_t t.bin_initial_response t.bin_error_response)
           { Initial_message.
-            initial = x
+            unused_query_id = Unused_query_id.t
+          ; initial = x
           }
       in
       match result with
@@ -813,11 +796,25 @@ module Streaming_rpc = struct
       f = Implementation.F.Pipe_rpc f;
     }
 
+  let abort t conn id =
+    let query =
+      { Query.
+        tag = t.tag;
+        version = t.version;
+        id;
+        data = to_bigstring Stream_query.bin_t `Abort;
+      }
+    in
+    ignore (
+      Connection.dispatch conn ~query : (unit,[`Closed]) Result.t
+    )
+
   let dispatch t conn query =
     let query_data = to_bigstring Stream_query.bin_t
       (`Query (to_bigstring t.bin_query query))
     in
     let query_id = Query_id.create () in
+    let server_closed_pipe = ref false in
     let response_handler ivar response =
       let read_updates pipe_w response =
         match response.Response.data with
@@ -830,9 +827,11 @@ module Streaming_rpc = struct
           in
           match data with
           | Error err ->
+            server_closed_pipe := true;
             Pipe.close pipe_w;
             return (`Die err)
           | Ok `Eof ->
+            server_closed_pipe := true;
             Pipe.close pipe_w;
             return `Remove
           | Ok (`Ok data) ->
@@ -844,7 +843,8 @@ module Streaming_rpc = struct
               Pipe.close pipe_w;
               return (`Die err)
             | Ok data ->
-              Deferred.whenever (Pipe.write pipe_w data);
+              if not (Pipe.is_closed pipe_w) then
+                Pipe.write_without_pushback pipe_w data;
               return `Keep
       in
       let action =
@@ -868,7 +868,12 @@ module Streaming_rpc = struct
             | Ok initial ->
               let pipe_r, pipe_w = Pipe.create () in
               Ivar.fill ivar (Ok (Ok (query_id, initial, pipe_r)));
-              Connection.closed conn >>> (fun () -> Pipe.close pipe_w);
+              (Pipe.closed pipe_r >>> fun () ->
+               if not !server_closed_pipe then abort t conn query_id);
+              Connection.close_finished conn >>> (fun () ->
+                server_closed_pipe := true;
+                Pipe.close pipe_w
+              );
               `Replace (read_updates pipe_w)
           end
         end
@@ -877,19 +882,6 @@ module Streaming_rpc = struct
     in
     Rpc_common.dispatch_raw conn ~query_id ~tag:t.tag ~version:t.version ~query_data
       ~f:response_handler
-
-  let abort t conn id =
-    let query =
-      { Query.
-        tag = t.tag;
-        version = t.version;
-        id;
-        data = to_bigstring Stream_query.bin_t `Abort;
-      }
-    in
-    ignore (
-      Connection.dispatch conn ~query : (unit,[`Closed]) Result.t
-    )
 end
 
 (* A Pipe_rpc is like a Streaming_rpc, except we don't care about initial state - thus
@@ -924,7 +916,7 @@ module Pipe_rpc = struct
     dispatch t conn query
     >>| fun result ->
     match result with
-    | Error rpc_error -> raise rpc_error
+    | Error rpc_error -> raise (Error.to_exn rpc_error)
     | Ok (Error _) -> raise Pipe_rpc_failed
     | Ok (Ok pipe_and_id) -> pipe_and_id
 

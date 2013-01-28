@@ -181,7 +181,7 @@ module type S = sig
     val create :
       ?logfun:logfun
       -> ?now:(unit -> Time.t) (** defualt: Scheduler.cycle_start *)
-      -> ?enforce_unique_remote_name:bool (** remote names must be unique, default true *)
+      -> ?enforce_unique_remote_name:bool (* defaults to true *) (** remote names must be unique *)
       -> ?is_client_ip_authorized:(string -> bool)
       (** [warn_when_free_connections_lte_pct].  If the number of free connections falls
           below this percentage of max connections an Almost_full event will be generated.
@@ -247,6 +247,8 @@ module type S = sig
       -> cutoff:unit Deferred.t
       -> ( [ `Flushed of Remote_name.t list ]
            * [ `Not_flushed of Remote_name.t list ] ) Deferred.t
+
+    val invariant : t -> unit
   end
 
   module Client : sig
@@ -256,7 +258,7 @@ module type S = sig
     val create :
       ?logfun:logfun
       -> ?now:(unit -> Time.t) (** defualt: Scheduler.cycle_start *)
-      -> ?check_remote_name:bool (** remote name must match expected remote name. default true *)
+      -> ?check_remote_name:bool (* defaults to true *) (** remote name must match expected remote name. *)
       -> ip:string
       -> port:int
       -> expected_remote_name:Remote_name.t
@@ -333,7 +335,7 @@ module Make (Z : Arg) :
       recv_version : Version.t;
       credentials : string; (* For future use *)
     }
-    with sexp_of, bin_io
+    with sexp, bin_io
 
     let create ~name ~send_version ~recv_version ~credentials =
       { name;
@@ -350,7 +352,7 @@ module Make (Z : Arg) :
     type t = {
       time_stamp: Time.t;
       body_length: int;
-    } with sexp_of, bin_io
+    } with sexp, bin_io
   end
 
   module Connection = struct
@@ -369,7 +371,7 @@ module Make (Z : Arg) :
 
   let try_with = Monitor.try_with
 
-  let ignore_errors f = whenever (try_with f >>| ignore)
+  let ignore_errors f = don't_wait_for (try_with f >>| ignore)
 
   let try_with_timeout span f =
     choose
@@ -695,7 +697,7 @@ module Make (Z : Arg) :
       logfun : logfun option;
       connections : Connections.t;
       mutable am_listening : bool;
-      socket : ([ `Bound ], Socket.inet) Socket.t;
+      socket : ([ `Bound ], Socket.Address.Inet.t) Socket.t;
       warn_free_connections_pct: float;
       mutable free_connections: int;
       mutable when_free: unit Ivar.t option;
@@ -707,13 +709,11 @@ module Make (Z : Arg) :
       mutable num_accepts : Int63.t;
     }
 
-(*
     let invariant t =
       assert (t.free_connections >= 0);
       assert (t.free_connections <= t.max_clients);
       assert ((t.free_connections = 0) = is_some t.when_free);
     ;;
-*)
 
     let flushed t ~cutoff =
       let flushes =
@@ -764,7 +764,7 @@ module Make (Z : Arg) :
       let module S = Server_msg in
       let module C = Server_msg.Control in
       let control e = Tail.extend t.tail (S.Control e) in
-      let close () = whenever (Deferred.ignore (Unix.close fd)) in
+      let close () = don't_wait_for (Deferred.ignore (Unix.close fd)) in
       if not (client_is_authorized t addr) then begin
         control (C.Unauthorized (Unix.Inet_addr.to_string addr));
         close ();
@@ -884,7 +884,8 @@ module Make (Z : Arg) :
             | Error exn ->
               Monitor.send_exn (Monitor.current ()) exn;
               upon (Clock.after wait_after_exn) loop
-            | Ok (sock, `Inet (addr, port)) ->
+            | Ok `Socket_closed -> ()
+            | Ok (`Ok (sock, `Inet (addr, port))) ->
               assert (Socket.getopt sock Socket.Opt.nodelay);
               assert (t.free_connections > 0);
               t.num_accepts <- Int63.succ t.num_accepts;
@@ -906,7 +907,7 @@ module Make (Z : Arg) :
 
     let listen_ignore_errors ?(stop = Deferred.never ()) t =
       let s = Stream.take_until (listen t) stop in
-      Stream.filter_map s ~f:(function
+      Stream.filter_map_deprecated s ~f:(function
       | Server_msg.Control _ -> None
       | Server_msg.Data x -> Some x.Read_result.data)
     ;;
@@ -922,7 +923,7 @@ module Make (Z : Arg) :
         raise (Invalid_argument "max_clients must be between 1 and 10,000");
       Deferred.create (fun result ->
         let s = Socket.create Socket.Type.tcp in
-        upon (Socket.bind s (Socket.Address.inet_addr_any ~port:listen_port))
+        upon (Socket.bind s (Socket.Address.Inet.create_bind_any ~port:listen_port))
           (fun socket ->
             let t =
               { tail = Tail.create ();
@@ -1023,7 +1024,7 @@ module Make (Z : Arg) :
             ignore_errors close
         in
         t.con <- `Connecting (fun () -> close Disconnected);
-        let address = Socket.Address.inet t.remote_ip ~port:t.remote_port in
+        let address = Socket.Address.Inet.create t.remote_ip ~port:t.remote_port in
         Tail.extend t.messages (C.Control E.Connecting);
         Monitor.try_with (fun () ->
           raise_after_timeout connect_timeout (fun () ->
@@ -1070,7 +1071,7 @@ module Make (Z : Arg) :
                     unmarshal_fun;
                     send_version;
                     name;
-                    kill = (fun () -> close (Failure "")) }
+                    kill = (fun () -> close (Failure "connection was killed")) }
                 in
                 Tail.extend t.messages (C.Control (E.Connect name));
                 t.con <- `Connected con;
@@ -1096,7 +1097,7 @@ module Make (Z : Arg) :
 
     let listen_ignore_errors ?(stop = Deferred.never ()) t =
       let s = Stream.take_until (listen t) stop in
-      Stream.filter_map s ~f:(function
+      Stream.filter_map_deprecated s ~f:(function
       | Client_msg.Control _ -> None
       | Client_msg.Data x -> Some x.Read_result.data)
 

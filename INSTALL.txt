@@ -1,5 +1,5 @@
 (* OASIS_START *)
-(* DO NOT EDIT (digest: 693a321c442ea48ffba0ef04acf5e803) *)
+(* DO NOT EDIT (digest: 52ad89aa3e7f169063a4064028db7dd6) *)
 This is the INSTALL file for the async_extra distribution.
 
 This package uses OASIS to generate its build system. See section OASIS for
@@ -9,7 +9,7 @@ Dependencies
 ============
 
 In order to compile this package, you will need:
-* ocaml (>= 3.12.1)
+* ocaml (>= 3.12.1) for all, doc async_extra
 * findlib (>= 1.2.7)
 * sexplib
 * fieldslib
