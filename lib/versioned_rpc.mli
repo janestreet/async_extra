@@ -181,56 +181,123 @@ end
 
 module Callee_converts : sig
 
-  module type S = sig
-    type query
-    type response
+  module Rpc : sig
 
-    (** implement multiple versions at once *)
-    val implement_multi :
-      ?log_not_previously_seen_version:(name:string -> int -> unit)
-      -> ('state -> query -> response Deferred.t)
-      -> 'state Implementation.t list
+    module type S = sig
+      type query
+      type response
 
-    (** all versions implemented by [implement_multi]
-        (useful for computing which old versions may be pruned) *)
-    val versions : unit -> Int.Set.t
-  end
+      (** implement multiple versions at once *)
+      val implement_multi :
+        ?log_not_previously_seen_version:(name:string -> int -> unit)
+        -> ('state -> query -> response Deferred.t)
+        -> 'state Implementation.t list
 
-  (**
-    Given a model of the types involved in a family of RPCs, this
-    functor provides a single multi-version implementation function
-    [implement_multi] in terms of that model and a mechanism for
-    registering the individual versions that [implement_multi] knows
-    about.  Registration requires knowing how to get into and out of
-    the model.
-    {v
-       Q1 -->-.         ,-->-- R1
-               \       /
-       Q2 -->-- Q --> R --->-- R2
-               /       \
-       Q3 -->-'         `-->-- R3
-    v}
-  *)
-  module Make (Model : sig
-    val name : string  (* the name of the Rpc's being unified in the model *)
-    type query
-    type response
-  end) : sig
-
-    (** add a new version to the set of versions implemented by [implement_multi]. *)
-    module Register (Version_i : sig
-      val version : int
-      type query with bin_io
-      type response with bin_io
-      val model_of_query : query -> Model.query
-      val response_of_model : Model.response -> response
-    end) : sig
-      val rpc : (Version_i.query, Version_i.response) Rpc.t
+      (** all versions implemented by [implement_multi]
+          (useful for computing which old versions may be pruned) *)
+      val versions : unit -> Int.Set.t
     end
 
-    include S with
-      type query := Model.query and
-      type response := Model.response
+    (**
+      Given a model of the types involved in a family of RPCs, this
+      functor provides a single multi-version implementation function
+      [implement_multi] in terms of that model and a mechanism for
+      registering the individual versions that [implement_multi] knows
+      about.  Registration requires knowing how to get into and out of
+      the model.
+      {v
+        Q1 -->-.         ,-->-- R1
+                \       /
+        Q2 -->-- Q --> R --->-- R2
+                /       \
+        Q3 -->-'         `-->-- R3
+      v}
+    *)
+    module Make (Model : sig
+      val name : string  (* the name of the Rpc's being unified in the model *)
+      type query
+      type response
+    end) : sig
+
+      (** add a new version to the set of versions implemented by [implement_multi]. *)
+      module Register (Version_i : sig
+        val version : int
+        type query with bin_io
+        type response with bin_io
+        val model_of_query : query -> Model.query
+        val response_of_model : Model.response -> response
+      end) : sig
+        val rpc : (Version_i.query, Version_i.response) Rpc.t
+      end
+
+      include S with
+        type query := Model.query and
+        type response := Model.response
+    end
+
+  end
+
+  module Pipe_rpc : sig
+
+    module type S = sig
+      type query
+      type response
+      type error
+
+      (** implement multiple versions at once *)
+      val implement_multi :
+        ?log_not_previously_seen_version:(name:string -> int -> unit)
+        -> ('state
+          -> query
+          -> aborted:unit Deferred.t
+          -> response Pipe.Reader.t Deferred.t)
+        -> 'state Implementation.t list
+
+      (** all versions supported by [dispatch_multi].
+          (useful for computing which old versions may be pruned) *)
+      val versions : unit -> Int.Set.t
+    end
+
+    (**
+      Given a model of the types involved in a family of Pipe_RPCs, this
+      functor provides a single multi-version implementation function
+      [implement_multi] in terms of that model and a mechanism for
+      registering the individual versions that [implement_multi] knows
+      about.  Registration requires knowing how to get into and out of
+      the model.
+      {v
+        Q1 -->-.         ,-->-- R1
+                \       /
+        Q2 -->-- Q --> R --->-- R2
+                /       \
+        Q3 -->-'         `-->-- R3
+      v}
+    *)
+    module Make (Model : sig
+      val name : string  (* the name of the Rpc's being unified in the model *)
+      type query
+      type response
+      type error
+    end) : sig
+
+      (** add a new version to the set of versions available via [implement_multi]. *)
+      module Register (Version_i : sig
+        val version : int
+        type query with bin_io
+        type response with bin_io
+        type error with bin_io
+        val model_of_query : query -> Model.query
+        val response_of_model : Model.response -> response
+      end) : sig
+        val rpc : (Version_i.query, Version_i.response, Version_i.error) Pipe_rpc.t
+      end
+
+      include S with
+        type query    := Model.query and
+        type response := Model.response and
+        type error    := Model.error
+    end
+
   end
 
 end

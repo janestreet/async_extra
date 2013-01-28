@@ -178,75 +178,168 @@ end
 
 module Callee_converts = struct
 
-  module type S = sig
-    type query
-    type response
-    val implement_multi :
-      ?log_not_previously_seen_version:(name:string -> int -> unit)
-      -> ('state -> query -> response Deferred.t)
-      -> 'state Implementation.t list
-    val versions : unit -> Int.Set.t
-  end
+  module Rpc = struct
 
-  module Make (Model : sig
-    val name : string
-    type query
-    type response
-  end) = struct
+    module type S = sig
+      type query
+      type response
+      val implement_multi :
+        ?log_not_previously_seen_version:(name:string -> int -> unit)
+        -> ('state -> query -> response Deferred.t)
+        -> 'state Implementation.t list
+      val versions : unit -> Int.Set.t
+    end
 
-    let name = Model.name
-
-    type 's impl = 's -> Model.query -> Model.response Deferred.t
-
-    type implementer =
-      { implement : 's. log_version:(int -> unit) -> 's impl -> 's Implementation.t }
-
-    let registry : (int, implementer) Hashtbl.t = Int.Table.create ~size:1 ()
-
-    let implement_multi ?log_not_previously_seen_version f =
-      let log_version =
-        match log_not_previously_seen_version with
-        | None -> ignore
-        (* prevent calling [f] more than once per version *)
-        | Some f -> Memo.general (f ~name)
-      in
-      List.map (Hashtbl.data registry) ~f:(fun i -> i.implement ~log_version f)
-
-    let versions () = Int.Set.of_list (Hashtbl.keys registry)
-
-    module Register (Version_i : sig
-      type query with bin_type_class
-      type response with bin_type_class
-      val version : int
-      val model_of_query : query -> Model.query
-      val response_of_model : Model.response -> response
+    module Make (Model : sig
+      val name : string
+      type query
+      type response
     end) = struct
 
-      open Version_i
+      let name = Model.name
 
-      let rpc = Rpc.create ~name ~version ~bin_query ~bin_response
+      type 's impl = 's -> Model.query -> Model.response Deferred.t
 
-      let () =
-        let implement ~log_version f =
-          Rpc.implement rpc (fun s q ->
-            log_version version;
-            match Result.try_with (fun () -> Version_i.model_of_query q) with
-            | Error exn ->
-              Error.raise
-                (failed_conversion (`Query, `Rpc name, `Version version, exn))
-            | Ok q ->
-              f s q
-              >>| fun r ->
-              match Result.try_with (fun () -> Version_i.response_of_model r) with
-              | Ok r -> r
+      type implementer =
+        { implement : 's. log_version:(int -> unit) -> 's impl -> 's Implementation.t }
+
+      let registry : (int, implementer) Hashtbl.t = Int.Table.create ~size:1 ()
+
+      let implement_multi ?log_not_previously_seen_version f =
+        let log_version =
+          match log_not_previously_seen_version with
+          | None -> ignore
+          (* prevent calling [f] more than once per version *)
+          | Some f -> Memo.general (f ~name)
+        in
+        List.map (Hashtbl.data registry) ~f:(fun i -> i.implement ~log_version f)
+
+      let versions () = Int.Set.of_list (Hashtbl.keys registry)
+
+      module Register (Version_i : sig
+        type query with bin_type_class
+        type response with bin_type_class
+        val version : int
+        val model_of_query : query -> Model.query
+        val response_of_model : Model.response -> response
+      end) = struct
+
+        open Version_i
+
+        let rpc = Rpc.create ~name ~version ~bin_query ~bin_response
+
+        let () =
+          let implement ~log_version f =
+            Rpc.implement rpc (fun s q ->
+              log_version version;
+              match Result.try_with (fun () -> Version_i.model_of_query q) with
+              | Error exn ->
+                Error.raise
+                  (failed_conversion (`Query, `Rpc name, `Version version, exn))
+              | Ok q ->
+                f s q
+                >>| fun r ->
+                match Result.try_with (fun () -> Version_i.response_of_model r) with
+                | Ok r -> r
+                | Error exn ->
+                  Error.raise
+                    (failed_conversion (`Response, `Rpc name, `Version version, exn))
+            )
+          in
+          match Hashtbl.find registry version with
+          | None -> Hashtbl.replace registry ~key:version ~data:{implement}
+          | Some _ -> Error.raise (multiple_registrations (`Rpc name, `Version version))
+      end
+
+    end
+
+  end
+
+  module Pipe_rpc = struct
+
+    module type S = sig
+      type query
+      type response
+      type error
+      val implement_multi :
+        ?log_not_previously_seen_version:(name:string -> int -> unit)
+        -> ('state
+          -> query
+          -> aborted:unit Deferred.t
+          -> response Pipe.Reader.t Deferred.t)
+        -> 'state Implementation.t list
+      val versions : unit -> Int.Set.t
+    end
+
+
+    module Make (Model : sig
+      val name : string
+      type query
+      type response
+    end) = struct
+
+      let name = Model.name
+
+      type 's impl =
+        's
+        -> Model.query
+        -> aborted:unit Deferred.t
+        -> Model.response Pipe.Reader.t Deferred.t
+
+      type implementer =
+        { implement : 's. log_version:(int -> unit) -> 's impl -> 's Implementation.t }
+
+      let registry = Int.Table.create ~size:1 ()
+
+      let implement_multi ?log_not_previously_seen_version f =
+        let log_version =
+          match log_not_previously_seen_version with
+          | None -> ignore
+          (* prevent calling [f] more than once per version *)
+          | Some f -> Memo.general (f ~name)
+        in
+        List.map (Hashtbl.data registry) ~f:(fun i -> i.implement ~log_version f)
+
+      let versions () = Int.Set.of_list (Int.Table.keys registry)
+
+      module Register (Version_i : sig
+        type query with bin_type_class
+        type response with bin_type_class
+        type error with bin_type_class
+        val version : int
+        val model_of_query : query -> Model.query
+        val response_of_model : Model.response -> response
+      end) = struct
+
+        open Version_i
+
+        let rpc = Pipe_rpc.create ~name ~version ~bin_query ~bin_response ~bin_error
+
+        let () =
+          let implement ~log_version f =
+            Pipe_rpc.implement rpc (fun s q ~aborted ->
+              log_version version;
+              match Result.try_with (fun () -> Version_i.model_of_query q) with
               | Error exn ->
                 Error.raise
                   (failed_conversion (`Response, `Rpc name, `Version version, exn))
-          )
-        in
-        match Hashtbl.find registry version with
-        | None -> Hashtbl.replace registry ~key:version ~data:{implement}
-        | Some _ -> Error.raise (multiple_registrations (`Rpc name, `Version version))
+              | Ok q ->
+                f s q ~aborted
+                >>| fun pipe ->
+                Ok (Pipe.map pipe ~f:(fun r ->
+                  match Result.try_with (fun () -> Version_i.response_of_model r) with
+                  | Ok r -> r
+                  | Error exn ->
+                    Error.raise
+                      (failed_conversion (`Response, `Rpc name, `Version version, exn))))
+            )
+          in
+          match Hashtbl.find registry version with
+          | None -> Hashtbl.replace registry ~key:version ~data:{implement}
+          | Some _ -> Error.raise (multiple_registrations (`Rpc name, `Version version))
+
+      end
+
     end
 
   end
@@ -280,7 +373,7 @@ module Menu = struct
     type response = (rpc_name * rpc_version) list
   end
 
-  include Callee_converts.Make (Model)
+  include Callee_converts.Rpc.Make (Model)
 
   module V1 = struct
     module T = struct
