@@ -659,9 +659,14 @@ module Connection : Connection_internal = struct
       Tcp.connect (Tcp.to_host_and_port host port)
       >>= fun (r,w) ->
       let implementations = Implementations.null () in
-      create ~implementations ~connection_state:() r w >>| function
-      | Ok t -> t
-      | Error handshake_error -> raise handshake_error)
+      create ~implementations ~connection_state:() r w >>= function
+      | Ok t -> Deferred.return t
+      | Error handshake_error ->
+        Reader.close r
+        >>= fun () ->
+        Writer.close w
+        >>= fun () ->
+        raise handshake_error)
 
   let with_client ~host ~port f =
     Monitor.try_with (fun () ->

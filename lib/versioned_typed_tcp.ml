@@ -242,6 +242,20 @@ module type S = sig
         reporting. *)
     val send_to_all_ignore_errors : t -> Send.t -> unit
 
+    (** [send_to_some t msg names] send the same message to multiple connected clients. *)
+    val send_to_some : t
+      -> Send.t
+      -> Remote_name.t list
+      -> [ `Sent (** sent successfuly to all clients *)
+           | `Dropped (** not sent successfully to any client *)
+           | `Partial_success (** sent to some clients *)] Deferred.t
+
+    (** [send_to_some_ignore_errors t msg] Just like [send_to_some] but with no error
+        reporting. *)
+    val send_to_some_ignore_errors : t -> Send.t -> Remote_name.t list -> unit
+
+    val client_send_version : t -> Remote_name.t -> Version.t option
+
     val flushed :
       t
       -> cutoff:unit Deferred.t
@@ -269,7 +283,8 @@ module type S = sig
         @return a deferred that becomes determined when the connection is established. *)
     val connect : t -> unit Deferred.t
 
-    (** If a connection is currently established, close it. *)
+    (** If a connection is currently established, close it.  Also, if we're trying to
+        connect, give up. *)
     val close_connection : t -> unit
 
     (** [listen t] @return a stream of messages from the server and errors *)
@@ -567,6 +582,21 @@ module Make (Z : Arg) :
         -> Send.t
         -> unit
 
+      val send_to_some : t
+      -> logfun:logfun option
+      -> now:(unit -> Time.t)
+      -> Send.t
+      -> Remote_name.t list
+      -> [ `Sent (** sent successfuly to all clients *)
+         | `Dropped (** not sent successfully to any client *)
+         | `Partial_success (** sent to some clients *)] Deferred.t
+
+      val send_to_some_ignore_errors : t
+      -> logfun:logfun option
+      -> now:(unit -> Time.t)
+      -> Send.t
+      -> Remote_name.t list
+      -> unit
     end = struct
 
       module C = Connection
@@ -622,14 +652,14 @@ module Make (Z : Arg) :
 
       let schedule_bigstring_threshold = 64 * 1024 (* half the size of writer's buffer *)
 
-      let send_to_all' t d ~logfun ~now =
+      let send_to_some'' d ~logfun ~now by_version is_bag_empty iter_bag =
         let module C = Connection in
         let module H = Message_header in
         let now = now () in
         let res =
-          Hashtbl.fold t.by_send_version ~init:`Init
+          Hashtbl.fold by_version ~init:`Init
             ~f:(fun ~key:_ ~data:(bag, marshal_fun) acc ->
-              if not (Bag.is_empty bag) then begin
+              if not (is_bag_empty bag) then begin
                 let res =
                   match marshal_fun d with
                   | None -> `Dropped
@@ -654,7 +684,7 @@ module Make (Z : Arg) :
                           send_raw ~writer:conn.C.writer ~hdr ~msg;
                       end
                     in
-                    Bag.iter bag ~f:(fun conn ->
+                    iter_bag bag ~f:(fun conn ->
                       send conn;
                       maybe_log ~logfun ~now ~name:conn.C.name d);
                     `Sent
@@ -679,6 +709,10 @@ module Make (Z : Arg) :
         | `Partial_success | `Dropped | `Sent as x -> x
       ;;
 
+      let send_to_all' t d ~logfun ~now =
+        send_to_some'' d ~logfun ~now t.by_send_version Bag.is_empty Bag.iter
+      ;;
+
       let send_to_all t ~logfun ~now d =
         let res = send_to_all' t d ~logfun ~now in
         Deferred.all_unit (fold t ~init:[] ~f:(fun ~name:_ ~conn acc ->
@@ -690,6 +724,45 @@ module Make (Z : Arg) :
         ignore (send_to_all' t d ~logfun ~now : [`Partial_success | `Dropped | `Sent])
       ;;
 
+      let send_to_some' t d ~logfun ~now names =
+        let tbl = Version.Table.create ~size:(Version.to_int Send.test_version) () in
+        let all_names_found =
+          List.fold names ~init:true ~f:(fun acc name ->
+            let conn = find t name in
+            match conn with
+            | None -> false
+            | Some conn ->
+              let version = conn.Connection.send_version in
+              let conns =
+                match Hashtbl.find tbl version with
+                | Some (conns, _marshal_fun) -> conns
+                | None -> []
+              in
+              Hashtbl.replace tbl ~key:version ~data:(conn::conns,
+                                                      conn.Connection.marshal_fun);
+              acc)
+        in
+        if Hashtbl.is_empty tbl then `Dropped
+        else
+          let res = send_to_some'' d ~logfun ~now tbl List.is_empty List.iter in
+          if all_names_found then
+            res
+          else
+            match res with
+            | `Sent | `Partial_success -> `Partial_success
+            | `Dropped -> `Dropped
+      ;;
+
+      let send_to_some t ~logfun ~now d names =
+        let res = send_to_some' t d ~logfun ~now names in
+        Deferred.all_unit (fold t ~init:[] ~f:(fun ~name:_ ~conn acc ->
+          Writer.flushed conn.C.writer :: acc))
+        >>| fun () -> res
+      ;;
+
+      let send_to_some_ignore_errors t ~logfun ~now d names =
+        ignore (send_to_some' t d ~logfun ~now names : [`Partial_success | `Dropped | `Sent])
+      ;;
     end
 
     type t = {
@@ -750,6 +823,14 @@ module Make (Z : Arg) :
 
     let send_to_all_ignore_errors t d =
       Connections.send_to_all_ignore_errors t.connections d ~now:t.now ~logfun:t.logfun
+    ;;
+
+    let send_to_some t d names =
+      Connections.send_to_some t.connections d ~now:t.now ~logfun:t.logfun names
+    ;;
+
+    let send_to_some_ignore_errors t d names =
+      Connections.send_to_some_ignore_errors t.connections d ~now:t.now ~logfun:t.logfun names
     ;;
 
     let client_is_authorized t ip =
@@ -948,6 +1029,13 @@ module Make (Z : Arg) :
       match Socket.getsockname t.socket with
       | `Inet (_, port) -> port
     ;;
+
+    let client_send_version t name =
+      match Connections.find t.connections name with
+      | None -> None
+      | Some conn -> Some conn.Connection.send_version
+    ;;
+
   end
 
   module Client = struct
@@ -965,7 +1053,7 @@ module Make (Z : Arg) :
         [ `Disconnected
           | `Connected of Connection.t
           | `Connecting of unit -> unit ];
-      mutable trying_to_connect : bool;
+      mutable trying_to_connect : [`No | `Yes of unit Ivar.t];
       mutable connect_complete : unit Ivar.t;
       mutable ok_to_connect : unit Ivar.t;
       now : unit -> Time.t;
@@ -990,10 +1078,14 @@ module Make (Z : Arg) :
     exception Write_error of exn with sexp
 
     let connect t =
+      assert
+        (match t.trying_to_connect with
+        | `Yes _ -> true
+        | `No    -> false);
       let module C = Client_msg in
       let module E = Client_msg.Control in
       let reset_ok_to_connect () =
-        (* Wait a while before trying again *)
+          (* Wait a while before trying again *)
         t.ok_to_connect <- Ivar.create ();
         upon
           (Clock.after wait_after_connect_failure)
@@ -1119,28 +1211,49 @@ module Make (Z : Arg) :
       | `Connecting _ -> false
       | `Connected _ -> true
 
+    let purge_queue t =
+      Queue.iter t.queue ~f:(fun (_, i) -> Ivar.fill i `Dropped);
+      Queue.clear t.queue;
+    ;;
+
     let try_connect t =
       assert (not (is_connected t));
-      if not t.trying_to_connect then begin
-        t.trying_to_connect <- true;
+      match t.trying_to_connect with
+      | `Yes _ -> ()
+      | `No ->
+        let killed = Ivar.create () in
+        (* [killed] is private to this instance of the [try_connect] loop.  This is why
+           calling [try_connect] again immediately after [close_connection] will result in
+           exactly one instance of this loop surviving. *)
+        t.trying_to_connect <- `Yes killed;
         t.connect_complete <- Ivar.create ();
         let rec loop () =
-          upon (Ivar.read t.ok_to_connect) (fun () ->
-            upon (connect t) (function
-            | Error e ->
-              t.last_connect_error <- Some e;
-              (* the connect failed, toss everything *)
-              Queue.iter t.queue ~f:(fun (_, i) -> Ivar.fill i `Dropped);
-              Queue.clear t.queue;
-              loop ()
-            | Ok () ->
-              t.last_connect_error <- None;
-              t.trying_to_connect <- false;
-              Ivar.fill t.connect_complete ();
-              send_q t))
+          (Deferred.any [Ivar.read t.ok_to_connect;
+                         Ivar.read killed])
+          >>> (fun () ->
+            (* In case when [killed] was filled, we do not do anything here.  The cleanup
+               ([purge_queue]) happened in the same async cycle as filling the [killed],
+               to avoid a possible (though unlikely) race when [send] immediately follows
+               [close_connection]--so that the old instance of this loop does not purge
+               the newly sent messages from the queue right before shutting down. *)
+            if Ivar.is_empty killed then begin
+              upon (connect t) (function
+              | Error e ->
+                t.last_connect_error <- Some e;
+                (* the connect failed, toss everything *)
+                purge_queue t;
+                loop ()
+              | Ok () ->
+                (* mstanojevic: note that we can be here even if [killed] is filled. but
+                   I think that just means that connection will drop very soon. *)
+                t.last_connect_error <- None;
+                t.trying_to_connect <- `No;
+                Ivar.fill t.connect_complete ();
+                send_q t)
+            end)
         in
         loop ()
-      end
+    ;;
 
     let send =
       let push t d =
@@ -1163,12 +1276,24 @@ module Make (Z : Arg) :
             send_q t;
             flush
           end
+    ;;
 
     let close_connection t =
+      begin match t.trying_to_connect with
+      | `No -> ()
+      | `Yes kill ->
+        Ivar.fill kill ();
+        (* drop the messages now, do not wait until the next async cycle, because a
+           [send] might follow *)
+        purge_queue t;
+        (* Ok to call [try_connect] again on a subsequent [send] *)
+        t.trying_to_connect <- `No
+      end;
       match t.con with
       | `Disconnected -> ()
       | `Connecting kill -> kill ()
       | `Connected con -> con.Connection.kill ()
+    ;;
 
     let connect t =
       match t.con with
@@ -1178,6 +1303,7 @@ module Make (Z : Arg) :
       | `Disconnected ->
         try_connect t;
         Ivar.read t.connect_complete
+    ;;
 
     let send_ignore_errors t d = ignore (send t d)
 
@@ -1186,6 +1312,7 @@ module Make (Z : Arg) :
       | `Disconnected -> `Disconnected
       | `Connecting _ -> `Connecting
       | `Connected _ -> `Connected
+    ;;
 
     let create
         ?logfun
@@ -1204,14 +1331,15 @@ module Make (Z : Arg) :
           con = `Disconnected;
           connect_complete = Ivar.create ();
           ok_to_connect = (let i = Ivar.create () in Ivar.fill i (); i);
-          trying_to_connect = false;
+          trying_to_connect = `No;
           now;
           last_connect_error = None;
         }
+    ;;
 
     let last_connect_error t = t.last_connect_error
   end
-    end
+end
 
 (** Helpers to make your types Datumable if they are binable. Works with up
     to 5 versions (easily extensible to more) *)
@@ -1247,7 +1375,7 @@ module Datumable_of_binable = struct
     include Versions
     let () = assert (low_version <= prod_version
                      && prod_version <= test_version
-                     && test_version <= Version.add low_version 5)
+                     && test_version <= Version.add low_version 4)
 
     let alloc = bigsubstring_allocator ()
 
