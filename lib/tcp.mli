@@ -1,9 +1,9 @@
 open Core.Std
 open Import
 
-(* [Tcp] supports connection to [inet] sockets and [unix] sockets.  These are two
-   different types.  We use ['a where_to_connect] to specify a socket to connect to, where
-   the ['a] identifies the type of socket. *)
+(** [Tcp] supports connection to [inet] sockets and [unix] sockets.  These are two
+    different types.  We use ['a where_to_connect] to specify a socket to connect to,
+    where the ['a] identifies the type of socket. *)
 type 'a where_to_connect constraint 'a = [< Socket.Address.t ]
 val to_host_and_port : string -> int -> Socket.Address.Inet.t where_to_connect
 val to_file          :        string -> Socket.Address.Unix.t where_to_connect
@@ -37,7 +37,7 @@ val with_connection :
 val connect_sock : 'addr where_to_connect -> ([ `Active ], 'addr) Socket.t Deferred.t
 
 
-(* [connect ~host ~port] is a convenience wrapper around [connect_sock] that returns a
+(** [connect ~host ~port] is a convenience wrapper around [connect_sock] that returns a
     reader and writer on the socket.  The reader and writer share a file descriptor, and
     so closing one will affect the other.  In particular, closing the reader before
     closing the writer will cause the writer to subsequently raise an exception when it
@@ -80,13 +80,13 @@ module Server : sig
 
   val listening_on : (_, 'listening_on) t -> 'listening_on
 
-  (* [close t] starts closing the listening socket, and returns a deferred that becomes
-     determined after [Fd.close_finished fd] on the socket's fd.  It is guaranteed that
-     [t]'s client handler will never be called after [close t].  It is ok to call [close]
-     multiple times on the same [t]; calls subsequent to the initial call will have no
-     effect, but will return the same deferred as the original call.
+  (** [close t] starts closing the listening socket, and returns a deferred that becomes
+      determined after [Fd.close_finished fd] on the socket's fd.  It is guaranteed that
+      [t]'s client handler will never be called after [close t].  It is ok to call [close]
+      multiple times on the same [t]; calls subsequent to the initial call will have no
+      effect, but will return the same deferred as the original call.
 
-     [close_finished] becomes determined after [Fd.close_finished fd] on the socket's fd,
+      [close_finished] becomes determined after [Fd.close_finished fd] on the socket's fd,
      i.e. the same deferred that [close] returns.  [close_finished] differs from [close]
      in that it does not have the side effect of initiating a close.
 

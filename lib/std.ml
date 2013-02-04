@@ -1,3 +1,4 @@
+module Command              = Command
 module File_tail            = File_tail
 module File_writer          = File_writer
 module Lock_file            = Lock_file

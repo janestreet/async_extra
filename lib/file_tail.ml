@@ -65,7 +65,7 @@ module Chunker : sig
       updates.  One creates a chunker, and then repeatedly [feed]s it data. *)
   type t with sexp_of
 
-  val invariant : t -> unit
+  include Invariant.S with type t := t
   val create : break_on_lines:bool -> t
   val feed : t -> string -> pos:int -> len:int -> Update.t Queue.t
 end = struct

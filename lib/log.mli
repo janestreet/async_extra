@@ -1,4 +1,4 @@
-(*
+(**
   A library for general logging.
 
   Although this module is fully async-safe it exposes almost no Deferreds.  This is
@@ -232,9 +232,9 @@ val of_lazy
 val message : t -> Message.t -> unit
 
 module Reader : sig
-  (* [pipe format filename] returns a pipe of all the messages in the log.  Errors
-     encountered when opening or reading the file will be thrown as exceptions into the
-     monitor current at the time pipe is called. *)
+  (** [pipe format filename] returns a pipe of all the messages in the log.  Errors
+      encountered when opening or reading the file will be thrown as exceptions into the
+      monitor current at the time pipe is called. *)
   val pipe :
        [< Output.machine_readable_format ]
     -> string

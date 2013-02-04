@@ -1,4 +1,4 @@
-(* Access to on-disk files in parallel with serving them over a TCP connection. *)
+(** Access to on-disk files in parallel with serving them over a TCP connection. *)
 
 open Core.Std
 open Import
@@ -14,7 +14,7 @@ module Server : sig
 
       The [auth] function will be called once for every client connection.  If it returns
       false the client will be disconnected immediately.  Further details of [auth] can be
-      found in the documentation for Rpc.serve. *)
+      found in the documentation for [Rpc.serve]. *)
   val serve
     :  auth:(Socket.Address.Inet.t -> bool)
     -> port:int
@@ -101,8 +101,8 @@ module Client : sig
       with bin_io
 
     val length        : t -> int
-    (* None is returned in cases where the message cannot fit into a string (original
-       message was a very large Bigstring *)
+    (** None is returned in cases where the message cannot fit into a string (original
+        message was a very large Bigstring *)
     val to_string     : t -> string option
     val to_string_exn : t -> string
     val to_bigstring  : t -> Bigstring.t
@@ -112,10 +112,10 @@ module Client : sig
     type t = (Message.t, Error.t) Result.t
   end
 
-  (* [connect ~host ~port] connect to the server at ([host],[port]) *)
+  (** [connect ~host ~port] connect to the server at ([host],[port]) *)
   val connect : host:string -> port:int -> (t, Exn.t) Result.t Deferred.t
 
-  (* [disconnect t] disconnect from t.  Pipes delivered by read/tail will be closed. *)
+  (** [disconnect t] disconnect from t.  Pipes delivered by read/tail will be closed. *)
   val disconnect : t -> unit Deferred.t
 
   (** [read t filename] provides a pipe that will be filled with messages from [filename]

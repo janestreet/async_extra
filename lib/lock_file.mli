@@ -1,3 +1,6 @@
+(** [Async.Lock_file] is a wrapper that provides async equivalents for
+    [Core.Lock_file]. *)
+
 open Import
 
 (** [create ?message path] tries to create a file at [path] containing the text [message],

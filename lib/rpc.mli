@@ -23,14 +23,13 @@ open Rpc_intf
     similar functionality. *)
 
 module Implementation : sig
-  (* A ['connection_state t] is something which knows how to respond to one query, given
-     a ['connection_state].  That is, you can create a ['connection_state t] by providing
-     a function which takes a query *and* a ['connection_state] and provides a response.
+  (** A ['connection_state t] is something which knows how to respond to one query, given
+      a ['connection_state].  That is, you can create a ['connection_state t] by providing
+      a function which takes a query *and* a ['connection_state] and provides a response.
 
-     The reason for this is that rpcs often do something like look something up in a
-     master structure.  This way, [Implementation.t]'s can be created without having
-     the master structure in your hands.
-  *)
+      The reason for this is that rpcs often do something like look something up in a
+      master structure.  This way, [Implementation.t]'s can be created without having the
+      master structure in your hands. *)
   type 'connection_state t
 
   module Description : sig
@@ -41,12 +40,12 @@ module Implementation : sig
 end
 
 module Implementations : sig
-  (* A ['connection_state Implementations.t] is something which knows how to respond to
-     many different queries. It is conceptually a package of
-     ['connection_state Implementation.t]'s. *)
+  (** A ['connection_state Implementations.t] is something which knows how to respond to
+      many different queries. It is conceptually a package of ['connection_state
+      Implementation.t]'s. *)
   type 'connection_state t
 
-  (* a server that can handle no queries *)
+  (** a server that can handle no queries *)
   val null : unit -> 'connection_state t
 
   (** [create ~implementations ~on_unknown_rpc] creates a server
@@ -56,7 +55,7 @@ module Implementations : sig
     -> on_unknown_rpc:[
     | `Raise
     | `Ignore
-    (* [rpc_tag] and [version] are the name and version of the unknown rpc *)
+    (** [rpc_tag] and [version] are the name and version of the unknown rpc *)
     | `Call of (rpc_tag:string -> version:int -> unit)
     ]
     -> ( 'connection_state t
@@ -87,7 +86,7 @@ module Rpc : sig
     -> bin_response : 'response Bin_prot.Type_class.t
     -> ('query, 'response) t
 
-  (* the same values as were passed to create. *)
+  (** the same values as were passed to create. *)
   val name    : (_, _) t -> string
   val version : (_, _) t -> int
 
@@ -132,12 +131,11 @@ module Pipe_rpc : sig
         -> ('response Pipe.Reader.t, 'error) Result.t Deferred.t)
     -> 'connection_state Implementation.t
 
-  (* This has [(..., 'error) Result.t] as its return type to represent the possibility of
-     the call itself being somehow erroneous (but understood - the outer [Or_error.t]
-     encompasses failures of that nature).  Note that this cannot be done simply by making
-     ['response] a result type, since [('response Pipe.Reader.t, 'error) Result.t] is
-     distinct from [('response, 'error) Result.t Pipe.Reader.t].
-  *)
+  (** This has [(..., 'error) Result.t] as its return type to represent the possibility of
+      the call itself being somehow erroneous (but understood - the outer [Or_error.t]
+      encompasses failures of that nature).  Note that this cannot be done simply by making
+      ['response] a result type, since [('response Pipe.Reader.t, 'error) Result.t] is
+      distinct from [('response, 'error) Result.t Pipe.Reader.t]. *)
   val dispatch
     :  ('query, 'response, 'error) t
     -> Connection.t
@@ -150,17 +148,18 @@ module Pipe_rpc : sig
     -> 'query
     -> ('response Pipe.Reader.t * Id.t) Deferred.t
 
-  (* [abort rpc connection id] given an RPC and the id returned as part of a call to
-     dispatch, abort requests that the other side of the connection stop sending
-     updates. *)
+  (** [abort rpc connection id] given an RPC and the id returned as part of a call to
+      dispatch, abort requests that the other side of the connection stop sending
+      updates. *)
   val abort : (_, _, _) t -> Connection.t -> Id.t -> unit
 
   val name : (_, _, _) t -> string
 end
 
-(* A state rpc is an easy way for two processes to synchronize a data structure by sending
-   updates over the wire.  It's basically a pipe rpc that sends/receives an initial state
-   of the data structure, and then updates, and applies the updates under the covers. *)
+(** A state rpc is an easy way for two processes to synchronize a data structure by
+    sending updates over the wire.  It's basically a pipe rpc that sends/receives an
+    initial state of the data structure, and then updates, and applies the updates under
+    the covers. *)
 module State_rpc : sig
   type ('query, 'state, 'update, 'error) t
 

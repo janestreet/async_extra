@@ -176,6 +176,8 @@ module type S = sig
   module Server : sig
     type t
 
+    include Invariant.S with type t := t
+
 
     (** create a new server, and start listening *)
     val create :
@@ -261,8 +263,6 @@ module type S = sig
       -> cutoff:unit Deferred.t
       -> ( [ `Flushed of Remote_name.t list ]
            * [ `Not_flushed of Remote_name.t list ] ) Deferred.t
-
-    val invariant : t -> unit
   end
 
   module Client : sig
