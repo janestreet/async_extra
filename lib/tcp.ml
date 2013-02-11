@@ -201,7 +201,7 @@ module Server = struct
           assert (num_connections <= t.max_connections)))
         ~accept_is_pending:ignore
     with exn ->
-      failwiths "invariant failed" (exn, t) <:sexp_of< exn * (__, __) t >>
+      failwiths "invariant failed" (exn, t) <:sexp_of< exn * (_, _) t >>
   ;;
 
   let fd t = Socket.fd t.socket
