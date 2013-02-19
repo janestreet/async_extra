@@ -390,17 +390,15 @@ module type Connection = Connection with module Implementations := Implementatio
 module type Connection_internal = sig
   include Connection
 
-  type response_handler =
-    Response.t
-    -> [ `Keep
-       | `Remove
-       | `Replace of response_handler
-       | `Die of Rpc_error.t
-       ] Deferred.t
+  module Response_handler : sig
+    type t
+
+    val create : (Response.t -> [ `keep | `remove of unit Rpc_result.t ] Deferred.t) -> t
+  end
 
   val dispatch
-    :  ?response_handler:response_handler
-    -> t
+    :  t
+    -> response_handler:Response_handler.t option
     -> query:Query.t
     -> (unit, [`Closed]) Result.t
 end
@@ -408,18 +406,54 @@ end
 module Connection : Connection_internal = struct
   module Implementations = Implementations
 
-  type response_handler =
-    Response.t
-    -> [ `Keep
-       | `Remove
-       | `Replace of response_handler
-       | `Die of Rpc_error.t
-       ] Deferred.t
+  module Response_handler : sig
+    type t with sexp_of
+
+    val create : (Response.t -> [ `keep | `remove of unit Rpc_result.t ] Deferred.t) -> t
+
+    val update :
+      t
+      -> Response.t
+      -> [ `already_removed
+         | `keep
+         | `remove of unit Rpc_result.t
+         ] Deferred.t
+  end = struct
+    type t =
+      { f : (Response.t
+             -> [ `keep | `remove of unit Rpc_result.t ] Deferred.t) sexp_opaque
+      ; mutable has_been_removed : bool
+      ; throttle : Throttle.t
+      } with sexp_of
+
+    let create f =
+      let throttle = Throttle.create
+        ~continue_on_error:false
+        ~max_concurrent_jobs:1
+      in
+      { f; has_been_removed = false; throttle }
+
+    let update t response =
+      Throttle.enqueue t.throttle (fun () ->
+        if t.has_been_removed
+        then return `already_removed
+        else begin
+          t.f response
+          >>| fun decision ->
+          begin match decision with
+          | `remove _ -> t.has_been_removed <- true
+          | `keep -> ()
+          end;
+          (decision :> [ `already_removed
+                       | `keep
+                       | `remove of unit Rpc_result.t ])
+        end)
+  end
 
   type t =
     { reader                   : Reader.t;
       writer                   : Writer.t;
-      open_queries             : (Query_id.t, response_handler sexp_opaque) Hashtbl.t;
+      open_queries             : (Query_id.t, Response_handler.t) Hashtbl.t;
       (* [open_streaming_responses] is only used to fill the
          [aborted] ivar on the server side *)
       open_streaming_responses : (Query_id.t, unit Ivar.t) Hashtbl.t;
@@ -440,14 +474,13 @@ module Connection : Connection_internal = struct
 
   let bytes_to_write t = Writer.bytes_to_write t.writer
 
-  let dispatch ?response_handler t ~query =
+  let dispatch t ~response_handler ~query =
     match writer t with
     | Error `Closed -> Error `Closed
     | Ok writer ->
       Writer.write_bin_prot writer Message.bin_writer_t (Message.Query query);
       Option.iter response_handler ~f:(fun response_handler ->
-        Hashtbl.replace t.open_queries ~key:query.Query.id ~data:response_handler
-      );
+        Hashtbl.replace t.open_queries ~key:query.Query.id ~data:response_handler);
       Ok ()
 
   let handle_query t ~query =
@@ -459,23 +492,22 @@ module Connection : Connection_internal = struct
       ~aborted:(Ivar.read t.close_started)
 
   let handle_response t response =
+    let unknown_query_id () =
+      `Stop (Error (Rpc_error.Unknown_query_id response.Response.id))
+    in
     match Hashtbl.find t.open_queries response.Response.id with
-    | None ->
-      Deferred.return (`Stop (Error (Rpc_error.Unknown_query_id response.Response.id)))
-    | Some f ->
-      f response >>| fun action ->
-      begin
-        match action with
-        | `Remove ->
-          Hashtbl.remove t.open_queries response.Response.id;
-          `Continue
-        | `Keep ->
-          `Continue
-        | `Replace f ->
-          Hashtbl.replace t.open_queries ~key:response.Response.id ~data:f;
-          `Continue
-        | `Die err ->
-          `Stop (Error err)
+    | None -> return (unknown_query_id ())
+    | Some response_handler ->
+      begin Response_handler.update response_handler response
+      >>| function
+      | `keep -> `Continue
+      | `already_removed -> unknown_query_id ()
+      | `remove removal_circumstances ->
+        Hashtbl.remove t.open_queries response.Response.id;
+        begin match removal_circumstances with
+        | Ok () -> `Continue
+        | Error e -> `Stop (Error e)
+        end
       end
 
   let handle_msg t msg =
@@ -486,8 +518,7 @@ module Connection : Connection_internal = struct
       match handle_query t ~query with
       | `Continue -> `Continue
       (* This [`Stop] does indicate an error, but [handle_query] handled it already. *)
-      | `Stop -> `Stop Result.ok_unit
-    )
+      | `Stop -> `Stop (Ok ()))
 
   let close_finished t = Ivar.read t.close_finished
 
@@ -580,15 +611,16 @@ module Connection : Connection_internal = struct
                 Hashtbl.iter t.open_queries
                   ~f:(fun ~key:query_id ~data:response_handler ->
                     don't_wait_for (Deferred.ignore (
-                      response_handler
+                      Response_handler.update
+                        response_handler
                         { Response.
                           id = query_id;
                           data = Result.Error error
                         })));
               Rpc_error.raise error);
-          Scheduler.within ~monitor (fun () ->
-            every ~stop:(Ivar.read t.close_started) (sec 10.) heartbeat;
-            loop (read_message ()))
+            Scheduler.within ~monitor (fun () ->
+              every ~stop:(Ivar.read t.close_started) (sec 10.) heartbeat;
+              loop (read_message ()))
           end;
           Ok t
         | Some i -> Error (Handshake_error.Negotiated_unexpected_version i)
@@ -695,7 +727,8 @@ module Rpc_common = struct
       }
     in
     begin
-      match Connection.dispatch conn ~query ~response_handler:(f response_ivar) with
+      let response_handler = Some (f response_ivar) in
+      match Connection.dispatch conn ~query ~response_handler with
       | Ok () -> ()
       | Error `Closed -> Ivar.fill response_ivar (Error Rpc_error.Connection_closed)
     end;
@@ -736,14 +769,14 @@ module Rpc = struct
     }
 
   let dispatch t conn query =
-    let response_handler ivar response =
+    let response_handler ivar = Connection.Response_handler.create (fun response ->
       let response =
         response.Response.data >>=~ fun data ->
           of_bigstring t.bin_response data
             ~location:"client-side rpc response un-bin-io'ing"
       in
       Ivar.fill ivar response;
-      return `Remove
+      return (`remove (Ok ())))
     in
     let query_data = to_bigstring t.bin_query query in
     let query_id = Query_id.create () in
@@ -813,8 +846,19 @@ module Streaming_rpc = struct
       }
     in
     ignore (
-      Connection.dispatch conn ~query : (unit,[`Closed]) Result.t
+      Connection.dispatch conn ~query ~response_handler:None : (unit,[`Closed]) Result.t
     )
+
+  module Response_state = struct
+    module State = struct
+      type 'a t =
+      | Waiting_for_initial_response
+      | Writing_updates_to_pipe of 'a Pipe.Writer.t
+    end
+
+    type 'a t =
+      { mutable state : 'a State.t }
+  end
 
   let dispatch t conn query =
     let query_data = to_bigstring Stream_query.bin_t
@@ -822,12 +866,17 @@ module Streaming_rpc = struct
     in
     let query_id = Query_id.create () in
     let server_closed_pipe = ref false in
-    let response_handler ivar response =
-      let read_updates pipe_w response =
-        match response.Response.data with
+    let open Response_state in
+    let state =
+      { state = State.Waiting_for_initial_response }
+    in
+    let response_handler ivar = Connection.Response_handler.create (fun response ->
+      match state.state with
+      | State.Writing_updates_to_pipe pipe_w ->
+        begin match response.Response.data with
         | Error err ->
           Pipe.close pipe_w;
-          return (`Die err)
+          return (`remove (Error err))
         | Ok data ->
           let data = of_bigstring Stream_response_data.bin_t data
             ~location:"client-side streaming_rpc response un-bin-io'ing"
@@ -836,11 +885,11 @@ module Streaming_rpc = struct
           | Error err ->
             server_closed_pipe := true;
             Pipe.close pipe_w;
-            return (`Die err)
+            return (`remove (Error err))
           | Ok `Eof ->
             server_closed_pipe := true;
             Pipe.close pipe_w;
-            return `Remove
+            return (`remove (Ok ()))
           | Ok (`Ok data) ->
             let data = of_bigstring t.bin_update_response data
               ~location:"client-side streaming_rpc response un-bin-io'ing"
@@ -848,30 +897,30 @@ module Streaming_rpc = struct
             match data with
             | Error err ->
               Pipe.close pipe_w;
-              return (`Die err)
+              return (`remove (Error err))
             | Ok data ->
               if not (Pipe.is_closed pipe_w) then
                 Pipe.write_without_pushback pipe_w data;
-              return `Keep
-      in
-      let action =
-        match response.Response.data with
+              return `keep
+        end
+      | State.Waiting_for_initial_response -> return (
+        begin match response.Response.data with
         | Error err ->
           Ivar.fill ivar (Error err);
-          `Die err
-        | Ok initial_msg -> begin
+          `remove (Error err)
+        | Ok initial_msg ->
           let initial = of_bigstring
             (Initial_message.bin_t t.bin_initial_response t.bin_error_response)
             initial_msg
             ~location:"client-side streaming_rpc initial_response un-bin-io'ing"
           in
-          match initial with
-          | Error err -> `Die err
-          | Ok initial_msg -> begin
-            match initial_msg.Initial_message.initial with
+          begin match initial with
+          | Error err -> `remove (Error err)
+          | Ok initial_msg ->
+            begin match initial_msg.Initial_message.initial with
             | Error err ->
               Ivar.fill ivar (Ok (Error err));
-              `Remove
+              `remove (Ok ())
             | Ok initial ->
               let pipe_r, pipe_w = Pipe.create () in
               Ivar.fill ivar (Ok (Ok (query_id, initial, pipe_r)));
@@ -879,13 +928,12 @@ module Streaming_rpc = struct
                if not !server_closed_pipe then abort t conn query_id);
               Connection.close_finished conn >>> (fun () ->
                 server_closed_pipe := true;
-                Pipe.close pipe_w
-              );
-              `Replace (read_updates pipe_w)
+                Pipe.close pipe_w);
+              state.state <- State.Writing_updates_to_pipe pipe_w;
+              `keep
+            end
           end
-        end
-      in
-      return action
+        end))
     in
     Rpc_common.dispatch_raw conn ~query_id ~tag:t.tag ~version:t.version ~query_data
       ~f:response_handler
