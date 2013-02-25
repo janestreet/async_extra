@@ -154,6 +154,7 @@ module Pipe_rpc : sig
   val abort : (_, _, _) t -> Connection.t -> Id.t -> unit
 
   val name : (_, _, _) t -> string
+  val version : (_, _, _) t -> int
 end
 
 (** A state rpc is an easy way for two processes to synchronize a data structure by
@@ -194,4 +195,5 @@ module State_rpc : sig
   val abort : (_, _, _, _) t -> Connection.t -> Id.t -> unit
 
   val name : (_, _, _, _) t -> string
+  val version : (_, _, _, _) t -> int
 end

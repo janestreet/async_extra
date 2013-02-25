@@ -978,6 +978,7 @@ module Pipe_rpc = struct
   let abort = Streaming_rpc.abort
 
   let name t = Rpc_tag.to_string t.Streaming_rpc.tag
+  let version t = t.Streaming_rpc.version
 end
 
 module State_rpc = struct
@@ -1020,4 +1021,5 @@ module State_rpc = struct
   let abort = Streaming_rpc.abort
 
   let name t = Rpc_tag.to_string t.Streaming_rpc.tag
+  let version t = t.Streaming_rpc.version
 end
