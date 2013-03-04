@@ -689,7 +689,7 @@ module Connection : Connection_internal = struct
   let client ~host ~port =
     Monitor.try_with (fun () ->
       Tcp.connect (Tcp.to_host_and_port host port)
-      >>= fun (r,w) ->
+      >>= fun (_, r, w) ->
       let implementations = Implementations.null () in
       create ~implementations ~connection_state:() r w >>= function
       | Ok t -> Deferred.return t

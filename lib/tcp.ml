@@ -83,7 +83,8 @@ type 'a with_connect_options =
 let connect ?buffer_age_limit ?interrupt ?reader_buffer_size ?timeout where_to_connect =
   connect_sock ?interrupt ?timeout where_to_connect
   >>| fun s ->
-  reader_writer_of_sock ?buffer_age_limit ?reader_buffer_size s
+  let r, w = reader_writer_of_sock ?buffer_age_limit ?reader_buffer_size s in
+  s, r, w
 ;;
 
 let collect_errors writer f =
@@ -105,9 +106,9 @@ let with_connection
     ?buffer_age_limit ?interrupt ?reader_buffer_size ?timeout
     where_to_connect f =
   connect_sock ?interrupt ?timeout where_to_connect
-  >>= fun s ->
-  let r,w    = reader_writer_of_sock ?buffer_age_limit ?reader_buffer_size s in
-  let res    = collect_errors w (fun () -> f r w) in
+  >>= fun socket ->
+  let r, w = reader_writer_of_sock ?buffer_age_limit ?reader_buffer_size socket in
+  let res = collect_errors w (fun () -> f socket r w) in
   Deferred.any [
     res >>| (fun (_ : ('a, exn) Result.t) -> ());
     Reader.close_finished r;

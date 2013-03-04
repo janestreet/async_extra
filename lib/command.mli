@@ -3,7 +3,9 @@
 
 open Import
 
-include (module type of Core.Std.Command)
+include module type of Core.Std.Command
+  with type t      = Core.Std.Command.t
+  with module Spec = Core.Std.Command.Spec
 
 (** [async_basic] is exactly the same as [Core.Command.basic], except that the function it
     wraps returns [unit Deferred.t], instead of [unit].  [async_basic] will also start the
@@ -12,6 +14,6 @@ include (module type of Core.Std.Command)
 val async_basic
   :  summary:string
   -> ?readme:(unit -> string)
-  -> ('a, unit -> unit Deferred.t) Core.Std.Command.Spec.t
+  -> ('a, unit -> unit Deferred.t) Spec.t
   -> 'a
-  -> Core.Std.Command.t
+  -> t

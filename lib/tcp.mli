@@ -16,16 +16,19 @@ type 'a with_connect_options =
   -> 'a
 
 (** [with_connection ~host ~port f] looks up host from a string (using DNS as needed),
-    connects, then calls [f] passing in a reader and a writer for the connected socket.
+    connects, then calls [f], passing the connected socket and a reader and writer for it.
     When the deferred returned by [f] is determined, or any exception is thrown, the
-    socket (and reader and writer) are closed.  The return deferred is fulfilled after f
-    has finished processing and the file descriptor for the socket is closed.  If
-    [interrupt] is supplied then the connection attempt will be aborted if interrupt is
-    fulfilled before the connection has been established.  Similarly, all connection
-    attempts have a timeout (default 30s), that can be overridden with [timeout]. *)
+    socket, reader and writer are closed.  The return deferred is fulfilled after f has
+    finished processing and the file descriptor for the socket is closed.  If [interrupt]
+    is supplied then the connection attempt will be aborted if interrupt is fulfilled
+    before the connection has been established.  Similarly, all connection attempts have a
+    timeout (default 30s), that can be overridden with [timeout].
+
+    It is fine for [f] to ignore the supplied socket and just use the reader and writer.
+    The socket is there to make it convenient to call [Socket] functions. *)
 val with_connection :
-  ( _ where_to_connect
-    -> (Reader.t -> Writer.t -> 'a Deferred.t)
+  ( 'addr where_to_connect
+    -> (([ `Active ], 'addr) Socket.t -> Reader.t -> Writer.t -> 'a Deferred.t)
     -> 'a Deferred.t
   ) with_connect_options
 
@@ -37,17 +40,20 @@ val with_connection :
 val connect_sock : 'addr where_to_connect -> ([ `Active ], 'addr) Socket.t Deferred.t
 
 
-(** [connect ~host ~port] is a convenience wrapper around [connect_sock] that returns a
-    reader and writer on the socket.  The reader and writer share a file descriptor, and
-    so closing one will affect the other.  In particular, closing the reader before
-    closing the writer will cause the writer to subsequently raise an exception when it
-    attempts to flush internally-buffered bytes to the OS, due to a closed fd.  You should
-    close the [Writer] first to avoid this problem.
+(** [connect ~host ~port] is a convenience wrapper around [connect_sock] that returns the
+    socket, and a reader and writer for the socket.  The reader and writer share a file
+    descriptor, and so closing one will affect the other.  In particular, closing the
+    reader before closing the writer will cause the writer to subsequently raise an
+    exception when it attempts to flush internally-buffered bytes to the OS, due to a
+    closed fd.  You should close the [Writer] first to avoid this problem.
 
-    If possible, use [with_connection], which automatically handles closing. *)
+    If possible, use [with_connection], which automatically handles closing.
+
+    It is fine to ignore the returned socket and just use the reader and writer.  The
+    socket is there to make it convenient to call [Socket] functions. *)
 val connect :
-  ( _ where_to_connect
-    -> (Reader.t * Writer.t) Deferred.t
+  ( 'addr where_to_connect
+    -> (([ `Active ], 'addr) Socket.t * Reader.t * Writer.t) Deferred.t
   ) with_connect_options
 
 (** A [Where_to_listen] describes the socket that a tcp server should listen on. *)
