@@ -37,6 +37,11 @@ module Implementation : sig
   end
 
   val description : _ t -> Description.t
+
+  (** We may want to use an ['a t] implementation (perhaps provided by someone else) in a
+      ['b t] context. We can do this as long as we can map our state into the state
+      expected by the original implementer. *)
+  val lift : 'a t -> f:('b -> 'a) -> 'b t
 end
 
 module Implementations : sig

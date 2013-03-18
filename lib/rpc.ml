@@ -88,8 +88,8 @@ let (>>|~) = Result.(>>|)
 (* Commute Result and Deferred. *)
 let defer_result : 'a 'b. ('a Deferred.t,'b) Result.t -> ('a,'b) Result.t Deferred.t =
   function
-    | Error _ as err -> return err
-    | Ok d -> d >>| fun x -> Ok x
+  | Error _ as err -> return err
+  | Ok d -> d >>| fun x -> Ok x
 
 open Protocol
 
@@ -120,8 +120,8 @@ end = struct
 
   let make_try_with try_with (>>|) constructor ~location f =
     try_with f >>| function
-      | Ok x -> x
-      | Error exn -> Error (constructor (sexp_of_located_error {location; exn}))
+    | Ok x -> x
+    | Error exn -> Error (constructor (sexp_of_located_error {location; exn}))
 
   let try_with ~location f = make_try_with
     (Monitor.try_with ?name:None)
@@ -191,6 +191,15 @@ module Implementation = struct
   end
 
   let description t = {Description.name = Rpc_tag.to_string t.tag; version = t.version }
+
+  let lift t ~f =
+    { t with f =
+        match t.f with
+        | F.Rpc impl ->
+          F.Rpc (fun state str -> impl (f state) str)
+        | F.Pipe_rpc impl ->
+          F.Pipe_rpc (fun state str ~aborted -> impl (f state) str ~aborted)
+    }
 end
 
 module Implementations : sig
