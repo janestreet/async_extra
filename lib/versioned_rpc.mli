@@ -2,7 +2,7 @@
     different types at different versions *)
 (**
   This module contains infrastructure code for managing RPCs which evolve
-  over time to use different types at different versions.  Two scenarios
+  over time to use different types at different versions.  Three scenarios
   are supported
     {ul
       {li The {i caller} is responsible for managing versions and
@@ -16,13 +16,23 @@
           account.
       }
       {li The {i callee} is responsible for managing versions and
-          is called by
+          callers need not bother themselves with any versions.
 
           The proto-typical example of this scenario is an assistant
           from one system calling out the commander of another system
           In this scenario, the assistants each know a single version
           of the rpc to call and the commander has to implement them
           all.
+      }
+      {li Both {i caller} and {i callee} cooperate to decide which version to use, each
+          one being able to use some subset of all possible versions.
+
+          The proto-typical example of this scenario is when two systems developed
+          independently with their rpc types defined in some shared library which has yet
+          another independent rollout schedule.  In this case one may roll out a new rpc
+          version (V) in the shared library (L) and then the caller and callee systems can
+          each upgrade to the new version of L supporting version V at their own pace,
+          with version V only being exercised once both caller and callee have upgraded.
       }
     }
 
@@ -325,4 +335,68 @@ module Menu : sig
   (** find what versions of a particular rpc are supported *)
   val supported_versions : t -> rpc_name:string -> Int.Set.t
 
+end
+
+
+module Both_convert : sig
+
+  (** [Both_convert] rpcs combine features of both caller-converts and callee-converts
+      versioning schemes in such a way that one can smoothly add a new version of the rpc
+      to a shared library, and it doesn't matter whether the callee or caller upgrades to
+      the latest version of the shared library first, the new version will not be
+      exercised until both sides support it.
+
+      {[
+                      (conv)   (conv)                          (conv)   (conv)
+                      caller   callee                          callee   caller
+                      |        |                               |        |
+                      |        |                               |        |
+         Q.caller ---->-- Q1 -->-.             (impl)        .->-- R1 -->---- R.caller
+                 \                \            callee       /                /
+                  \--->-- Q2 -->---\           |           /--->-- R2 -->---/
+                   \                \          |          /                /
+                    `->-- Q3 -->---- Q.callee --> R.callee ---->-- R3 -->-'
+      ]}
+  *)
+
+  module Connection_with_menu : sig
+    type t
+    val create : Connection.t -> t Deferred.Or_error.t
+    val connection : t -> Connection.t
+    val menu : t -> Menu.t
+  end
+
+  module Plain (Model : sig
+    val name : string
+    module Caller : sig type query type response end
+    module Callee : sig type query type response end
+  end) : sig
+
+    open Model
+
+    module Register (Version : sig
+      val version : int
+      type query    with bin_io
+      type response with bin_io
+      val query_of_caller_model : Caller.query -> query
+      val callee_model_of_query :                 query -> Callee.query
+      val response_of_callee_model : Callee.response -> response
+      val caller_model_of_response :                    response -> Caller.response
+    end) : sig
+    end
+
+    (** multi-version dispatch *)
+    val dispatch_multi :
+      Connection_with_menu.t -> Caller.query -> Caller.response Or_error.t Deferred.t
+
+    (** implement multiple versions at once *)
+    val implement_multi
+      :  ?log_not_previously_seen_version:(name:string -> int -> unit)
+      -> ('state -> Callee.query -> Callee.response Deferred.t)
+      -> 'state Implementation.t list
+
+    (** all supported versions. useful for detecting old versions which may be pruned *)
+    val versions : unit -> Int.Set.t
+
+  end
 end

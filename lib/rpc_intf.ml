@@ -98,12 +98,23 @@ module type Connection = sig
     -> unit
     -> ('address, 'listening_on) Tcp.Server.t Deferred.t
 
-  (** [client ~host ~port] connects to the server at ([host],[port]) and returns the
+  module Client_implementations : sig
+    type 's t = {
+      connection_state : 's;
+      implementations : 's Implementations.t;
+    }
+
+    val null : unit -> unit t
+  end
+
+  (** [client ~host ~port ()] connects to the server at ([host],[port]) and returns the
       connection or an Error if a connection could not be made.  It is the responsibility
       of the caller to eventually call close. *)
   val client
     :  host:string
     -> port:int
+    -> ?implementations:_ Client_implementations.t
+    -> unit
     -> (t, Exn.t) Result.t Deferred.t
 
   (** [with_client ~host ~port f] connects to the server at ([host],[port]) and runs f
@@ -111,6 +122,7 @@ module type Connection = sig
   val with_client
     :  host:string
     -> port:int
+    -> ?implementations:_ Client_implementations.t
     -> (t -> 'a Deferred.t)
     -> ('a, Exn.t) Result.t Deferred.t
 end

@@ -695,12 +695,33 @@ module Connection : Connection_internal = struct
           Deferred.unit
       end)
 
-  let client ~host ~port =
+  module Client_implementations = struct
+    type 's t = {
+      connection_state : 's;
+      implementations : 's Implementations.t;
+    }
+
+    let null () = {
+      connection_state = ();
+      implementations = Implementations.null ();
+    }
+  end
+
+  let client ~host ~port ?implementations () =
     Monitor.try_with (fun () ->
       Tcp.connect (Tcp.to_host_and_port host port)
       >>= fun (_, r, w) ->
-      let implementations = Implementations.null () in
-      create ~implementations ~connection_state:() r w >>= function
+      begin
+        match implementations with
+        | None ->
+          let {Client_implementations.connection_state; implementations} =
+            Client_implementations.null ()
+          in
+          create r w ~implementations ~connection_state
+        | Some {Client_implementations.connection_state; implementations} ->
+          create r w ~implementations ~connection_state
+      end
+      >>= function
       | Ok t -> Deferred.return t
       | Error handshake_error ->
         Reader.close r
@@ -709,9 +730,9 @@ module Connection : Connection_internal = struct
         >>= fun () ->
         raise handshake_error)
 
-  let with_client ~host ~port f =
+  let with_client ~host ~port ?implementations f =
     Monitor.try_with (fun () ->
-      client ~host ~port
+      client ~host ~port ?implementations ()
       >>= fun res ->
       begin match res with
       | Error e -> return (Error e)

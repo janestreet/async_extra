@@ -419,3 +419,82 @@ module Menu = struct
 
 end
 
+module Both_convert = struct
+
+  module Connection_with_menu = struct
+
+    type t = {
+      connection : Connection.t;
+      menu : Menu.t;
+    } with fields
+
+    let create connection =
+      let open Deferred.Or_error.Monad_infix in
+      Menu.request connection
+      >>| fun menu ->
+      {connection; menu}
+
+  end
+
+  module Plain (Model : sig
+    val name : string
+    module Caller : sig type query type response end
+    module Callee : sig type query type response end
+  end) = struct
+    open Model
+
+    module Caller = Caller_converts.Rpc.Make (struct let name = name include Caller end)
+    module Callee = Callee_converts.Rpc.Make (struct let name = name include Callee end)
+
+    TEST = Int.Set.equal (Caller.versions ()) (Callee.versions ())
+
+    module Register (Version : sig
+      open Model
+      val version : int
+      type query    with bin_io
+      type response with bin_io
+      val query_of_caller_model : Caller.query -> query
+      val callee_model_of_query :                 query -> Callee.query
+      val response_of_callee_model : Callee.response -> response
+      val caller_model_of_response :                    response -> Caller.response
+    end) = struct
+      include Callee.Register (struct
+        include Version
+        let model_of_query    = callee_model_of_query
+        let response_of_model = response_of_callee_model
+      end)
+      include Caller.Register (struct
+        include Version
+        let query_of_model    = query_of_caller_model
+        let model_of_response = caller_model_of_response
+      end)
+      TEST = Int.Set.equal (Caller.versions ()) (Callee.versions ())
+    end
+
+    let most_recent_common_version ~rpc_name ~caller_versions ~callee_versions =
+      match Set.max_elt (Set.inter callee_versions caller_versions) with
+      | Some version -> Ok version
+      | None ->
+        Or_error.error "caller and callee share no common versions for rpc"
+          ( `Rpc rpc_name
+          , `Caller_versions caller_versions
+          , `Callee_versions callee_versions )
+          (<:sexp_of< [`Rpc of string]
+                    * [`Caller_versions of Int.Set.t]
+                    * [`Callee_versions of Int.Set.t] >>)
+
+    let dispatch_multi {Connection_with_menu.connection; menu} query =
+      let open Deferred.Or_error.Monad_infix in
+      let rpc_name = Model.name in
+      let caller_versions = Caller.versions () in
+      let callee_versions = Menu.supported_versions menu ~rpc_name in
+      return (most_recent_common_version ~rpc_name ~caller_versions ~callee_versions)
+      >>= fun version ->
+      Caller.dispatch_multi ~version connection query
+
+    let implement_multi = Callee.implement_multi
+
+    let versions () = Caller.versions () (* = Callee.versions () *)
+
+  end
+end
