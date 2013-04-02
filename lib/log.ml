@@ -40,10 +40,11 @@ module Rotation = struct
      responsibililty of the caller to should_rotate.
   *)
   type t = {
-    messages : int option;
-    size  : Byte_units.t option;
-    time  : (Time.Ofday.t * Zone.t) option;
-    keep  : [ `All | `Newer_than of Time.Span.t | `At_least of int ];
+    messages      : int option;
+    size          : Byte_units.t option;
+    time          : (Time.Ofday.t * Zone.t) option;
+    keep          : [ `All | `Newer_than of Time.Span.t | `At_least of int ];
+    naming_scheme : [ `Numbered | `Timestamped ]
   } with sexp,fields
 
   let should_rotate t ~last_messages ~last_size ~last_time =
@@ -64,6 +65,7 @@ module Rotation = struct
           let current_time  = Time.now () in
           acc || (current_time >= rotation_time && last_time <= rotation_time))
       ~keep:(fun acc _ -> acc)
+      ~naming_scheme:(fun acc _ -> acc)
   ;;
 end
 
@@ -273,97 +275,147 @@ end = struct
       -> Rotation.t
       -> t
   end = struct
-    let filename ~dirname ~basename number =
-      if number = 0 then
-        dirname ^/ sprintf "%s.log" basename
-      else
-        dirname ^/ sprintf "%s.%i.log" basename number
-    ;;
+    module type Id_intf = sig
+      type t
+      val create : unit -> t
+      val rotate_one : t -> t
 
-    let parse_filename_number ~basename filename =
-      if Filename.basename filename = basename ^ ".log" then Some 0
-      else begin
-        let open Option.Monad_infix in
-        String.chop_prefix (Filename.basename filename) ~prefix:(basename ^ ".")
-        >>= fun num_dot_log ->
-        String.chop_suffix num_dot_log ~suffix:".log"
-        >>= fun num ->
-        try Some (Int.of_string num) with _ -> None
-      end
-    ;;
+      val to_string_opt : t -> string option
+      val of_string_opt : string option -> t option
+      val ascending : t -> t -> int
+    end
 
-    let current_log_files ~dirname ~basename =
-      Sys.readdir dirname
-      >>| fun files ->
-      List.filter_map (Array.to_list files) ~f:(fun filename ->
-        let filename = dirname ^/ filename in
-        Option.(parse_filename_number ~basename filename >>| fun num -> num, filename))
-    ;;
+    module Make (Id:Id_intf) = struct
+      let make_filename ~dirname ~basename id =
+        match Id.to_string_opt id with
+        | None   -> dirname ^/ sprintf "%s.log" basename
+        | Some s -> dirname ^/ sprintf "%s.%s.log" basename s
+      ;;
 
-    let maybe_delete_old_logs ~dirname ~basename keep =
-      begin match keep with
-      | `All -> return []
-      | `Newer_than span ->
+      let parse_filename_id ~basename filename =
+        if Filename.basename filename = basename ^ ".log" then Id.of_string_opt None
+        else begin
+          let open Option.Monad_infix in
+          String.chop_prefix (Filename.basename filename) ~prefix:(basename ^ ".")
+          >>= fun id_dot_log ->
+          String.chop_suffix id_dot_log ~suffix:".log"
+          >>= fun id ->
+          Id.of_string_opt (Some id)
+        end
+      ;;
+
+      let current_log_files ~dirname ~basename =
+        Sys.readdir dirname
+        >>| fun files ->
+        List.filter_map (Array.to_list files) ~f:(fun filename ->
+          let filename = dirname ^/ filename in
+          Option.(parse_filename_id ~basename filename >>| fun id -> id, filename))
+      ;;
+
+      let maybe_delete_old_logs ~dirname ~basename keep =
+        begin match keep with
+        | `All -> return []
+        | `Newer_than span ->
+          current_log_files ~dirname ~basename
+          >>= fun files ->
+          let cutoff = Time.sub (Time.now ()) span in
+          Deferred.List.filter files ~f:(fun (_,filename) ->
+            Unix.stat filename
+            >>| fun stats -> Time.(<) stats.Unix.Stats.mtime cutoff)
+        | `At_least i ->
+          current_log_files ~dirname ~basename
+          >>| fun files ->
+          List.drop (List.sort files ~cmp:(fun (i1,_) (i2,_) -> Id.ascending i1 i2)) i
+        end
+        >>= Deferred.List.iter ~f:(fun (_i,filename) -> Unix.unlink filename)
+      ;;
+
+      let rotate ~dirname ~basename keep =
         current_log_files ~dirname ~basename
         >>= fun files ->
-        let cutoff = Time.sub (Time.now ()) span in
-        Deferred.List.filter files ~f:(fun (_,filename) ->
-          Unix.stat filename
-          >>| fun stats -> Time.(<) stats.Unix.Stats.mtime cutoff)
-      | `At_least i ->
-        current_log_files ~dirname ~basename
-        >>| fun files ->
-        List.drop (List.sort files ~cmp:(fun (n1,_) (n2,_) -> Int.ascending n1 n2)) i
-      end
-      >>= Deferred.List.iter ~f:(fun (_n,filename) -> Unix.unlink filename)
-    ;;
+        let files =
+          List.rev (List.sort files ~cmp:(fun (i1,_) (i2, _) -> Id.ascending i1 i2))
+        in
+        Deferred.List.iter files ~f:(fun (id, src) ->
+          let id' = Id.rotate_one id in
+          if Id.ascending id id' <> 0
+          then Unix.rename ~src ~dst:(make_filename ~dirname ~basename id')
+          else Deferred.unit)
+        >>= fun () ->
+        maybe_delete_old_logs ~dirname ~basename keep
+      ;;
 
-    let rotate ~dirname ~basename keep =
-      current_log_files ~dirname ~basename
-      >>= fun files ->
-      let files =
-        List.rev (List.sort files ~cmp:(fun (n1,_) (n2, _) -> Int.compare n1 n2))
-      in
-      Deferred.List.iter files ~f:(fun (num, src) ->
-        Unix.rename ~src ~dst:(filename ~dirname ~basename (num + 1)))
-      >>= fun () ->
-      maybe_delete_old_logs ~dirname ~basename keep
-    ;;
+      let create format ~basename rotation =
+        let last_messages  = ref 0 in
+        let last_size      = ref 0 in
+        let filename       = ref "" in
+        let last_time      = ref (Time.now ()) in
+        let basename, dirname =
+        (* Fix dirname, because cwd may change *)
+          match Filename.is_absolute basename with
+          | true  -> Filename.basename basename, return (Filename.dirname basename)
+          | false -> basename, Sys.getcwd ()
+        in
+        let finished_rotation =
+          dirname >>= fun dirname ->
+          filename := (make_filename ~dirname ~basename (Id.create ()));
+          rotate ~dirname ~basename rotation.Rotation.keep
+          >>| const dirname
+        in
+        fun msgs ->
+          finished_rotation >>= fun dirname ->
+          begin
+            if
+              Rotation.should_rotate rotation ~last_messages:!last_messages
+                ~last_size:(Byte_units.create `Bytes (Float.of_int !last_size))
+                ~last_time:!last_time
+            then begin
+              rotate ~dirname ~basename rotation.Rotation.keep
+              >>| fun () ->
+              filename := make_filename ~dirname ~basename (Id.create ())
+            end
+            else Deferred.unit
+          end
+          >>= fun () ->
+          File.write' format ~filename:(!filename) msgs
+          >>| fun size ->
+          last_messages := !last_messages + 1;
+          last_size     := !last_size + Int63.to_int_exn size;
+          last_time     := Time.now ()
+      ;;
+    end
+
+    module Numbered = Make (struct
+      type t            = int
+      let create        = const 0
+      let rotate_one    = (+) 1
+      let to_string_opt = function 0 -> None | x -> Some (Int.to_string x)
+      let ascending     = Int.ascending
+
+      let of_string_opt = function
+        | None   -> Some 0
+        | Some s -> try Some (Int.of_string s) with _ -> None
+      ;;
+    end)
+
+    module Timestamped = Make (struct
+      type t               = Time.t
+      let create           = Time.now
+      let rotate_one       = ident
+      let to_string_opt ts = Some (Time.to_filename_string ts)
+      let ascending        = Time.ascending
+
+      let of_string_opt    = function
+        | None   -> None
+        | Some s -> try Some (Time.of_filename_string s) with _ -> None
+      ;;
+    end)
 
     let create format ~basename rotation =
-      let last_messages  = ref 0 in
-      let last_size      = ref 0 in
-      let last_time      = ref (Time.now ()) in
-      let basename, dirname =
-        (* Fix dirname, because cwd may change *)
-        match Filename.is_absolute basename with
-        | true -> Filename.basename basename, return (Filename.dirname basename)
-        | false -> basename, Sys.getcwd ()
-      in
-      let finished_rotation =
-        dirname >>= fun dirname ->
-        let filename = filename ~dirname ~basename 0 in
-        rotate ~dirname ~basename rotation.Rotation.keep >>| fun () ->
-        (dirname, filename)
-      in
-      fun msgs ->
-        finished_rotation >>= fun (dirname, filename) ->
-        begin
-          if
-            Rotation.should_rotate rotation ~last_messages:!last_messages
-              ~last_size:(Byte_units.create `Bytes (Float.of_int !last_size))
-              ~last_time:!last_time
-          then rotate ~dirname ~basename rotation.Rotation.keep
-          else Deferred.unit
-        end
-        >>= fun () ->
-        File.write' format ~filename msgs
-        >>| fun size ->
-        last_messages := !last_messages + 1;
-        last_size     := !last_size + Int63.to_int_exn size;
-        last_time     := Time.now ()
+      match rotation.Rotation.naming_scheme with
+      | `Numbered    -> Numbered.create format ~basename rotation
+      | `Timestamped -> Timestamped.create format ~basename rotation
     ;;
-
   end
 
   let rotating_file = Rotating_file.create

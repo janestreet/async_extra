@@ -57,10 +57,11 @@ module Rotation : sig
     carefully.
   *)
   type t = {
-    messages : int option;
-    size  : Byte_units.t option;
-    time  : (Time.Ofday.t * Zone.t) option;
-    keep  : [ `All | `Newer_than of Time.Span.t | `At_least of int ];
+    messages      : int option;
+    size          : Byte_units.t option;
+    time          : (Time.Ofday.t * Zone.t) option;
+    keep          : [ `All | `Newer_than of Time.Span.t | `At_least of int ];
+    naming_scheme : [ `Numbered | `Timestamped ]
   } with sexp
 end
 

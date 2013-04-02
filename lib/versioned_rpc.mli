@@ -130,7 +130,10 @@ module Caller_converts : sig
       type response
       type error
 
-      (** multi-version dispatch *)
+      (** multi-version dispatch
+
+          The return type varies slightly from [Rpc.Pipe_rpc.dispatch] to make it clear
+          that conversion of each individual element in the returned pipe may fail. *)
       val dispatch_multi :
         version:int
         -> Connection.t
@@ -260,7 +263,7 @@ module Callee_converts : sig
         -> ('state
           -> query
           -> aborted:unit Deferred.t
-          -> response Pipe.Reader.t Deferred.t)
+          -> (response Pipe.Reader.t, error) Result.t Deferred.t)
         -> 'state Implementation.t list
 
       (** all versions supported by [dispatch_multi].
@@ -298,6 +301,7 @@ module Callee_converts : sig
         type error with bin_io
         val model_of_query : query -> Model.query
         val response_of_model : Model.response -> response
+        val error_of_model : Model.error -> error
       end) : sig
         val rpc : (Version_i.query, Version_i.response, Version_i.error) Pipe_rpc.t
       end

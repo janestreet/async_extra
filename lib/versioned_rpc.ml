@@ -156,11 +156,9 @@ module Caller_converts = struct
                       match Result.try_with (fun () -> Version_i.model_of_response r) with
                       | Ok r -> Ok r
                       | Error exn ->
-                        Error (failed_conversion
-                          ( `Response
-                          , `Rpc name
-                          , `Version version
-                          , exn)))
+                        Error
+                          (failed_conversion
+                             (`Response, `Rpc name, `Version version, exn)))
                   in
                   Ok (Ok (pipe, id))
           in
@@ -266,7 +264,7 @@ module Callee_converts = struct
         -> ('state
           -> query
           -> aborted:unit Deferred.t
-          -> response Pipe.Reader.t Deferred.t)
+          -> (response Pipe.Reader.t, error) Result.t Deferred.t)
         -> 'state Implementation.t list
       val versions : unit -> Int.Set.t
     end
@@ -276,6 +274,7 @@ module Callee_converts = struct
       val name : string
       type query
       type response
+      type error
     end) = struct
 
       let name = Model.name
@@ -284,7 +283,7 @@ module Callee_converts = struct
         's
         -> Model.query
         -> aborted:unit Deferred.t
-        -> Model.response Pipe.Reader.t Deferred.t
+        -> (Model.response Pipe.Reader.t, Model.error) Result.t Deferred.t
 
       type implementer =
         { implement : 's. log_version:(int -> unit) -> 's impl -> 's Implementation.t }
@@ -309,6 +308,7 @@ module Callee_converts = struct
         val version : int
         val model_of_query : query -> Model.query
         val response_of_model : Model.response -> response
+        val error_of_model : Model.error -> error
       end) = struct
 
         open Version_i
@@ -325,13 +325,20 @@ module Callee_converts = struct
                   (failed_conversion (`Response, `Rpc name, `Version version, exn))
               | Ok q ->
                 f s q ~aborted
-                >>| fun pipe ->
-                Ok (Pipe.map pipe ~f:(fun r ->
-                  match Result.try_with (fun () -> Version_i.response_of_model r) with
-                  | Ok r -> r
+                >>| function
+                | Ok pipe ->
+                  Ok (Pipe.map pipe ~f:(fun r ->
+                    match Result.try_with (fun () -> Version_i.response_of_model r) with
+                    | Ok r -> r
+                    | Error exn ->
+                      Error.raise
+                        (failed_conversion (`Response, `Rpc name, `Version version, exn))))
+                | Error error ->
+                  match Result.try_with (fun () -> Version_i.error_of_model error) with
+                  | Ok error -> Error error
                   | Error exn ->
                     Error.raise
-                      (failed_conversion (`Response, `Rpc name, `Version version, exn))))
+                      (failed_conversion (`Error, `Rpc name, `Version version, exn))
             )
           in
           match Hashtbl.find registry version with

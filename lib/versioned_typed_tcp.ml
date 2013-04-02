@@ -490,34 +490,16 @@ module Make (Z : Arg) :
   ;;
 
   exception Eof with sexp
+  exception Unconsumed_data of string with sexp
 
   let handle_incoming
       ~logfun ~remote_name ~ip ~con
       (* functions to extend the tail (with various messages) *)
       ~extend_disconnect ~extend_parse_error ~extend_data =
     let module C = Connection in
-    let module H = Message_header in
     Stream.iter (Monitor.errors (Writer.monitor con.C.writer)) ~f:(fun e ->
       con.C.kill ();
       extend_disconnect remote_name e);
-    let upon_ok a f =
-      upon a (function
-      | Error e ->
-        con.C.kill ();
-        extend_disconnect remote_name e
-      | Ok `Eof ->
-        con.C.kill ();
-        extend_disconnect remote_name Eof
-      | Ok (`Ok msg) -> f msg)
-    in
-    let alloc = bigsubstring_allocator () in
-    let read_header () = Reader.read_bin_prot con.C.reader H.bin_reader_t in
-    let get_substring hdr = alloc hdr.H.body_length in
-    let read_ss ss =
-      Reader.really_read_bigsubstring con.C.reader ss >>| function
-      | `Ok -> `Ok ()
-      | `Eof _ -> `Eof
-    in
     let extend ~time_sent ~time_received data =
       begin match logfun with
       | None -> ()
@@ -534,22 +516,67 @@ module Make (Z : Arg) :
           time_sent;
         }
     in
-    let rec loop () =
-      upon_ok (Monitor.try_with read_header) (fun hdr ->
-        let msg_ss = get_substring hdr in
-        upon_ok (Monitor.try_with (fun () -> read_ss msg_ss)) (fun () ->
-          let res = try Ok (con.C.unmarshal_fun msg_ss) with e -> Error e in
-          begin match res with
-          | Ok (Some msg) ->
-            let time_received = Reader.last_read_time con.C.reader in
-            let time_sent = hdr.H.time_stamp in
-            extend ~time_received ~time_sent msg
-          | Ok None -> ()
-          | Error exn -> extend_parse_error remote_name (Exn.to_string exn)
-          end;
-          loop ()))
+    let len_len = 8 in
+    let pos_ref = ref 0 in
+    let rec handle_chunk ~consumed buf ~pos ~len =
+      if len = 0 then
+        return `Continue
+      else if len_len > len then
+        return (`Consumed (consumed, `Need len_len))
+      else begin
+        pos_ref := pos;
+        (* header has two fields, [time_stamp] which is 8 bytes over bin_io, and
+           [body_length] which is variable length encoded int that can in theory be 1 to 8
+           bytes over bin_io, but in practice it doesn't take more than 3 bytes *)
+        let hdr_len = Bin_prot.Read_ml.bin_read_int_64bit buf ~pos_ref in
+        if len_len + hdr_len > len then
+          return (`Consumed (consumed, `Need (len_len + hdr_len)))
+        else begin
+          let hdr =
+            try
+              Ok (Message_header.bin_reader_t.Bin_prot.Type_class.read buf ~pos_ref)
+            with
+              exn -> Error exn
+          in
+          match hdr with
+          | Error exn ->
+            return (`Stop exn)
+          | Ok hdr ->
+            let body_len = hdr.Message_header.body_length in
+            let msg_len = len_len + hdr_len + body_len in
+            if msg_len > len then
+              return (`Consumed (consumed, `Need msg_len))
+            else begin
+              let body = Bigsubstring.create buf ~pos:(!pos_ref) ~len:body_len in
+              begin match try Ok (con.C.unmarshal_fun body) with ex -> Error ex with
+              | Error exn ->
+                extend_parse_error remote_name (Exn.to_string exn);
+              | Ok None -> ()
+              | Ok (Some msg) ->
+                let time_received = Reader.last_read_time con.C.reader in
+                let time_sent = hdr.Message_header.time_stamp in
+                extend ~time_received ~time_sent msg
+              end;
+              handle_chunk
+                ~consumed:(consumed + msg_len)
+                buf
+                ~pos:(pos + msg_len)
+                ~len:(len - msg_len)
+            end
+        end
+      end
     in
-    loop ()
+    Reader.read_one_chunk_at_a_time_until_eof con.C.reader
+      ~handle_chunk:(handle_chunk ~consumed:0)
+    >>> (fun result ->
+    con.C.kill ();
+    let exn =
+      match result with
+      | `Eof -> Eof
+      | `Stopped exn -> exn
+      | `Eof_with_unconsumed_data data -> (Unconsumed_data data)
+    in
+    extend_disconnect remote_name exn)
   ;;
 
   module Server = struct
