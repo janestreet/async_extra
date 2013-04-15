@@ -34,7 +34,7 @@ module Message : sig
 end
 
 module Rotation : sig
-  (* description of bounderies for file rotation.
+  (* description of boundaries for file rotation.
 
      If all fields are None the file will never be rotated.  Any field set to Some _ will
      cause rotation to happen when that boundary is crossed.  Multiple boundaries may be

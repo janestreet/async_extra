@@ -313,6 +313,8 @@ module type S = sig
     (** [last_connect_error t] returns the error (if any) that happened on the
         last connection attempt. *)
     val last_connect_error : t -> exn option
+
+    val flushed : t -> [ `Flushed | `Pending of Time.t Deferred.t ]
   end
 end
 
@@ -1210,6 +1212,17 @@ module Make (Z : Arg) :
           >>| function
           | Error e -> close e; Error e
           | Ok x -> Ok x
+    ;;
+
+    let flushed t =
+      match t.con with
+      | `Disconnected
+      | `Connecting _  -> `Flushed
+      | `Connected con ->
+        if 0 = Writer.bytes_to_write con.Connection.writer then
+          `Flushed
+        else
+          `Pending (Writer.flushed_time con.Connection.writer)
     ;;
 
     let listen t = Tail.collect t.messages
