@@ -432,7 +432,7 @@ module Connection : Connection_internal = struct
       { f : (Response.t
              -> [ `keep | `remove of unit Rpc_result.t ] Deferred.t) sexp_opaque
       ; mutable has_been_removed : bool
-      ; throttle : Throttle.t
+      ; throttle : unit Throttle.t
       } with sexp_of
 
     let create f =
