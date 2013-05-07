@@ -370,37 +370,54 @@ module Both_convert : sig
     val menu : t -> Menu.t
   end
 
-  module Plain (Model : sig
-    val name : string
-    module Caller : sig type query type response end
-    module Callee : sig type query type response end
-  end) : sig
+  module Plain : sig
+    module type S = sig
+      type caller_query
+      type caller_response
+      type callee_query
+      type callee_response
 
-    open Model
+      (** multi-version dispatch *)
+      val dispatch_multi :
+        Connection_with_menu.t -> caller_query -> caller_response Or_error.t Deferred.t
 
-    module Register (Version : sig
-      val version : int
-      type query    with bin_io
-      type response with bin_io
-      val query_of_caller_model : Caller.query -> query
-      val callee_model_of_query :                 query -> Callee.query
-      val response_of_callee_model : Callee.response -> response
-      val caller_model_of_response :                    response -> Caller.response
-    end) : sig
+      (** implement multiple versions at once *)
+      val implement_multi
+        :  ?log_not_previously_seen_version:(name:string -> int -> unit)
+        -> ('state -> callee_query -> callee_response Deferred.t)
+        -> 'state Implementation.t list
+
+      (** all supported versions. useful for detecting old versions which may be pruned *)
+      val versions : unit -> Int.Set.t
+
     end
 
-    (** multi-version dispatch *)
-    val dispatch_multi :
-      Connection_with_menu.t -> Caller.query -> Caller.response Or_error.t Deferred.t
+    module Make (Model : sig
+      val name : string
+      module Caller : sig type query type response end
+      module Callee : sig type query type response end
+    end) : sig
 
-    (** implement multiple versions at once *)
-    val implement_multi
-      :  ?log_not_previously_seen_version:(name:string -> int -> unit)
-      -> ('state -> Callee.query -> Callee.response Deferred.t)
-      -> 'state Implementation.t list
+      open Model
 
-    (** all supported versions. useful for detecting old versions which may be pruned *)
-    val versions : unit -> Int.Set.t
+      module Register (Version : sig
+        val version : int
+        type query    with bin_io
+        type response with bin_io
+        val query_of_caller_model : Caller.query -> query
+        val callee_model_of_query :                 query -> Callee.query
+        val response_of_callee_model : Callee.response -> response
+        val caller_model_of_response :                    response -> Caller.response
+      end) : sig
+      end
+
+      include S with
+        type caller_query    := Caller.query    and
+        type caller_response := Caller.response and
+        type callee_query    := Callee.query    and
+        type callee_response := Callee.response
+
+    end
 
   end
 end
