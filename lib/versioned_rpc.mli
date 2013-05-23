@@ -66,6 +66,38 @@ open Import
 
 open Rpc
 
+(* Over the network discovery of rpc names and versions supported by a callee.
+
+   This is used by the [dispatch_multi] functions in [Caller_converts] and
+   [Both_convert] to dynamically determine the most appropriate version to use.
+*)
+module Menu : sig
+
+  type t (** a directory of supported rpc names and versions. *)
+
+  (** [add impls] extends a list of rpc implementations with an additional
+      rpc implementation for providing a [Menu.t] when one is requested
+      via [Menu.request]. *)
+  val add : 's Implementation.t list -> 's Implementation.t list
+
+  (** request an rpc version menu from an rpc connection *)
+  val request : Connection.t -> t Or_error.t Deferred.t
+
+  (** find what rpcs are supported *)
+  val supported_rpcs : t -> Implementation.Description.t list
+
+  (** find what versions of a particular rpc are supported *)
+  val supported_versions : t -> rpc_name:string -> Int.Set.t
+
+end
+
+module Connection_with_menu : sig
+  type t (** an rpc connection paired with the menu of rpcs one may call on it *)
+  val create : Connection.t -> t Deferred.Or_error.t
+  val connection : t -> Connection.t
+  val menu : t -> Menu.t
+end
+
 module Caller_converts : sig
 
   module Rpc : sig
@@ -75,9 +107,12 @@ module Caller_converts : sig
       type query
       type response
 
+      val deprecated_dispatch_multi :
+             version:int -> Connection.t -> query -> response Or_error.t Deferred.t
+
       (** multi-version dispatch *)
       val dispatch_multi :
-        version:int -> Connection.t -> query -> response Or_error.t Deferred.t
+        Connection_with_menu.t -> query -> response Or_error.t Deferred.t
 
       (** all versions supported by [dispatch_multi].
           (useful for computing which old versions may be pruned) *)
@@ -132,11 +167,18 @@ module Caller_converts : sig
 
       (** multi-version dispatch
 
+
           The return type varies slightly from [Rpc.Pipe_rpc.dispatch] to make it clear
           that conversion of each individual element in the returned pipe may fail. *)
+
+      val deprecated_dispatch_multi :
+        version:int -> Connection.t -> query ->
+          ( response Or_error.t Pipe.Reader.t * Pipe_rpc.Id.t
+           , error
+           ) Result.t Or_error.t Deferred.t
+
       val dispatch_multi :
-        version:int
-        -> Connection.t
+        Connection_with_menu.t
         -> query
         -> ( response Or_error.t Pipe.Reader.t * Pipe_rpc.Id.t
            , error
@@ -191,6 +233,7 @@ module Caller_converts : sig
   end
 
 end
+
 
 module Callee_converts : sig
 
@@ -315,33 +358,6 @@ module Callee_converts : sig
   end
 
 end
-
-(** machinery for communicating names and versions of supported rpcs from
-    within the rpc protocol itself.
-
-    This is useful for dynamically determining the most appropriate version number
-    to pass [dispatch_multi]. when using [Caller_converts]-style versioned rpcs *)
-module Menu : sig
-
-  type t (** a directory of supported rpc names and versions. *)
-
-  (** [add impls] extends a list of rpc implementations with an additional
-      rpc implementation for providing a [Menu.t] when one is requested
-      via [Menu.request]. *)
-  val add : 's Implementation.t list -> 's Implementation.t list
-
-  (** request an rpc version menu from an rpc connection *)
-  val request : Connection.t -> t Or_error.t Deferred.t
-
-  (** find what rpcs are supported *)
-  val supported_rpcs : t -> Implementation.Description.t list
-
-  (** find what versions of a particular rpc are supported *)
-  val supported_versions : t -> rpc_name:string -> Int.Set.t
-
-end
-
-
 module Both_convert : sig
 
   (** [Both_convert] rpcs combine features of both caller-converts and callee-converts
@@ -362,13 +378,6 @@ module Both_convert : sig
                     `->-- Q3 -->---- Q.callee --> R.callee ---->-- R3 -->-'
       ]}
   *)
-
-  module Connection_with_menu : sig
-    type t
-    val create : Connection.t -> t Deferred.Or_error.t
-    val connection : t -> Connection.t
-    val menu : t -> Menu.t
-  end
 
   module Plain : sig
     module type S = sig
@@ -392,24 +401,25 @@ module Both_convert : sig
 
     end
 
-    module Make (Model : sig
-      val name : string
-      module Caller : sig type query type response end
-      module Callee : sig type query type response end
+  
+  module Make (Model : sig
+    val name : string
+    module Caller : sig type query type response end
+    module Callee : sig type query type response end
+  end) : sig
+
+    open Model
+
+    module Register (Version : sig
+      val version : int
+      type query    with bin_io
+      type response with bin_io
+      val query_of_caller_model : Caller.query -> query
+      val callee_model_of_query :                 query -> Callee.query
+      val response_of_callee_model : Callee.response -> response
+      val caller_model_of_response :                    response -> Caller.response
     end) : sig
-
-      open Model
-
-      module Register (Version : sig
-        val version : int
-        type query    with bin_io
-        type response with bin_io
-        val query_of_caller_model : Caller.query -> query
-        val callee_model_of_query :                 query -> Callee.query
-        val response_of_callee_model : Callee.response -> response
-        val caller_model_of_response :                    response -> Caller.response
-      end) : sig
-      end
+    end
 
       include S with
         type caller_query    := Caller.query    and
@@ -418,6 +428,5 @@ module Both_convert : sig
         type callee_response := Callee.response
 
     end
-
   end
 end

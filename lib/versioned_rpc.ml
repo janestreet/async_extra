@@ -20,160 +20,6 @@ let unknown_version x =
   Error.create "unknown rpc version" x
     <:sexp_of< string * int >>
 
-module Caller_converts = struct
-
-  module Rpc = struct
-
-    module type S = sig
-      type query
-      type response
-      val dispatch_multi :
-        version:int -> Connection.t -> query -> response Or_error.t Deferred.t
-      val versions : unit -> Int.Set.t
-    end
-
-    module Make (Model : sig
-      val name : string
-      type query
-      type response
-    end) = struct
-
-      let name = Model.name
-
-      let registry = Int.Table.create ~size:1 ()
-
-      let dispatch_multi ~version conn query =
-        match Hashtbl.find registry version with
-        | None -> return (Error (unknown_version (name, version)))
-        | Some dispatch -> dispatch conn query
-
-      let versions () = Int.Set.of_list (Int.Table.keys registry)
-
-      module Register (Version_i : sig
-        type query with bin_type_class
-        type response with bin_type_class
-        val version : int
-        val query_of_model : Model.query -> query
-        val model_of_response : response -> Model.response
-      end) = struct
-
-        open Version_i
-
-        let rpc = Rpc.create ~name ~version ~bin_query ~bin_response
-
-        let () =
-          let dispatch conn q =
-            match Result.try_with (fun () -> Version_i.query_of_model q) with
-            | Error exn ->
-              return
-                (Error (failed_conversion (`Query, `Rpc name, `Version version, exn)))
-            | Ok q ->
-              Rpc.dispatch rpc conn q
-              >>| fun result ->
-              Result.bind result (fun r ->
-                match Result.try_with (fun () -> Version_i.model_of_response r) with
-                | Ok r -> Ok r
-                | Error exn ->
-                  Error (failed_conversion (`Response, `Rpc name, `Version version, exn)))
-          in
-          match Hashtbl.find registry version with
-          | None -> Hashtbl.replace registry ~key:version ~data:dispatch
-          | Some _ -> Error.raise (multiple_registrations (`Rpc name, `Version version))
-
-      end
-
-    end
-
-  end
-
-  module Pipe_rpc = struct
-
-    module type S = sig
-      type query
-      type response
-      type error
-      val dispatch_multi :
-        version:int
-        -> Connection.t
-        -> query
-        -> ( response Or_error.t Pipe.Reader.t * Pipe_rpc.Id.t
-           , error
-           ) Result.t Or_error.t Deferred.t
-      val versions : unit -> Int.Set.t
-    end
-
-    module Make (Model : sig
-                   val name : string
-                   type query
-                   type response
-                   type error
-                 end) = struct
-
-      let name = Model.name
-
-      let registry = Int.Table.create ~size:1 ()
-
-      let dispatch_multi ~version conn query =
-        match Hashtbl.find registry version with
-        | None -> return (Error (unknown_version (name, version)))
-        | Some dispatch -> dispatch conn query
-
-      let versions () = Int.Set.of_list (Int.Table.keys registry)
-
-      module Register (Version_i : sig
-                         type query with bin_type_class
-                         type response with bin_type_class
-                         type error with bin_type_class
-                         val version : int
-                         val query_of_model : Model.query -> query
-                         val model_of_response : response -> Model.response
-                         val model_of_error : error -> Model.error
-                       end) = struct
-
-        open Version_i
-
-        let rpc = Pipe_rpc.create ~name ~version ~bin_query ~bin_response ~bin_error
-
-        let () =
-          let dispatch conn q =
-            match Result.try_with (fun () -> Version_i.query_of_model q) with
-            | Error exn ->
-              return
-                (Error (failed_conversion (`Query, `Rpc name, `Version version, exn)))
-            | Ok q ->
-              Pipe_rpc.dispatch rpc conn q
-              >>| fun result ->
-              match result with
-              | Error exn -> Error exn
-              | Ok (Error e) ->
-                (match Result.try_with (fun () -> Version_i.model_of_error e) with
-                 | Ok e' -> Ok (Error e')
-                 | Error exn ->
-                   Error (failed_conversion (`Error, `Rpc name, `Version version, exn)))
-              | Ok (Ok (pipe, id)) ->
-                let pipe =
-                  Pipe.map pipe ~f:(fun r ->
-                    match Result.try_with (fun () -> Version_i.model_of_response r) with
-                    | Ok r -> Ok r
-                    | Error exn ->
-                      Error
-                        (failed_conversion
-                           (`Response, `Rpc name, `Version version, exn)))
-                in
-                Ok (Ok (pipe, id))
-          in
-          match Hashtbl.find registry version with
-          | None -> Hashtbl.replace registry ~key:version ~data:dispatch
-          | Some _ -> Error.raise (multiple_registrations (`Rpc name, `Version version))
-
-      end
-
-    end
-
-  end
-
-end
-
 module Callee_converts = struct
 
   module Rpc = struct
@@ -189,10 +35,10 @@ module Callee_converts = struct
     end
 
     module Make (Model : sig
-                   val name : string
-                   type query
-                   type response
-                 end) = struct
+      val name : string
+      type query
+      type response
+    end) = struct
 
       let name = Model.name
 
@@ -215,12 +61,12 @@ module Callee_converts = struct
       let versions () = Int.Set.of_list (Hashtbl.keys registry)
 
       module Register (Version_i : sig
-                         type query with bin_type_class
-                         type response with bin_type_class
-                         val version : int
-                         val model_of_query : query -> Model.query
-                         val response_of_model : Model.response -> response
-                       end) = struct
+        type query with bin_type_class
+        type response with bin_type_class
+        val version : int
+        val model_of_query : query -> Model.query
+        val response_of_model : Model.response -> response
+      end) = struct
 
         open Version_i
 
@@ -262,20 +108,19 @@ module Callee_converts = struct
       val implement_multi :
         ?log_not_previously_seen_version:(name:string -> int -> unit)
         -> ('state
-            -> query
-            -> aborted:unit Deferred.t
-            -> (response Pipe.Reader.t, error) Result.t Deferred.t)
+          -> query
+          -> aborted:unit Deferred.t
+          -> (response Pipe.Reader.t, error) Result.t Deferred.t)
         -> 'state Implementation.t list
       val versions : unit -> Int.Set.t
     end
 
-
     module Make (Model : sig
-                   val name : string
-                   type query
-                   type response
-                   type error
-                 end) = struct
+      val name : string
+      type query
+      type response
+      type error
+    end) = struct
 
       let name = Model.name
 
@@ -302,14 +147,14 @@ module Callee_converts = struct
       let versions () = Int.Set.of_list (Int.Table.keys registry)
 
       module Register (Version_i : sig
-                         type query with bin_type_class
-                         type response with bin_type_class
-                         type error with bin_type_class
-                         val version : int
-                         val model_of_query : query -> Model.query
-                         val response_of_model : Model.response -> response
-                         val error_of_model : Model.error -> error
-                       end) = struct
+        type query with bin_type_class
+        type response with bin_type_class
+        type error with bin_type_class
+        val version : int
+        val model_of_query : query -> Model.query
+        val response_of_model : Model.response -> response
+        val error_of_model : Model.error -> error
+      end) = struct
 
         open Version_i
 
@@ -326,19 +171,19 @@ module Callee_converts = struct
               | Ok q ->
                 f s q ~aborted
                 >>| function
-                  | Ok pipe ->
-                    Ok (Pipe.map pipe ~f:(fun r ->
-                      match Result.try_with (fun () -> Version_i.response_of_model r) with
-                      | Ok r -> r
-                      | Error exn ->
-                        Error.raise
-                          (failed_conversion (`Response, `Rpc name, `Version version, exn))))
-                  | Error error ->
-                    match Result.try_with (fun () -> Version_i.error_of_model error) with
-                    | Ok error -> Error error
+                | Ok pipe ->
+                  Ok (Pipe.map pipe ~f:(fun r ->
+                    match Result.try_with (fun () -> Version_i.response_of_model r) with
+                    | Ok r -> r
                     | Error exn ->
                       Error.raise
-                        (failed_conversion (`Error, `Rpc name, `Version version, exn))
+                        (failed_conversion (`Response, `Rpc name, `Version version, exn))))
+                | Error error ->
+                  match Result.try_with (fun () -> Version_i.error_of_model error) with
+                  | Ok error -> Error error
+                  | Error exn ->
+                    Error.raise
+                      (failed_conversion (`Error, `Rpc name, `Version version, exn))
             )
           in
           match Hashtbl.find registry version with
@@ -357,17 +202,17 @@ module Menu = struct
 
   (***************** some prohibitions for this module ******************
 
-                     (1) !!! never prune old versions of this rpc !!!
+    (1) !!! never prune old versions of this rpc !!!
 
-                     It is too fundamental to the workings of various versioning
-                     schemes and it probably won't change very much anyway.
+        It is too fundamental to the workings of various versioning
+        schemes and it probably won't change very much anyway.
 
-                     (2) !!! only ever say "with bin_io" on built-in ocaml types !!!
+    (2) !!! only ever say "with bin_io" on built-in ocaml types !!!
 
-                     Examples of built-in types are int, list, string, etc.
+        Examples of built-in types are int, list, string, etc.
 
-                     This is to protect ourselves against changes to Core data
-                     structures, for example.
+        This is to protect ourselves against changes to Core data
+        structures, for example.
 
    *********************************************************************)
 
@@ -426,22 +271,213 @@ module Menu = struct
 
 end
 
-module Both_convert = struct
+module Connection_with_menu = struct
 
-  module Connection_with_menu = struct
+  type t = {
+    connection : Connection.t;
+    menu : Menu.t;
+  } with fields
 
-    type t = {
-      connection : Connection.t;
-      menu : Menu.t;
-    } with fields
+  let create connection =
+    let open Deferred.Or_error.Monad_infix in
+    Menu.request connection
+    >>| fun menu ->
+    {connection; menu}
 
-    let create connection =
-      let open Deferred.Or_error.Monad_infix in
-      Menu.request connection
-      >>| fun menu ->
-      {connection; menu}
+end
+
+module Caller_converts = struct
+
+  let most_recent_common_version ~rpc_name ~caller_versions ~callee_versions =
+    match Set.max_elt (Set.inter callee_versions caller_versions) with
+    | Some version -> Ok version
+    | None ->
+      Or_error.error "caller and callee share no common versions for rpc"
+        ( `Rpc rpc_name
+        , `Caller_versions caller_versions
+        , `Callee_versions callee_versions )
+        (<:sexp_of< [`Rpc of string]
+                  * [`Caller_versions of Int.Set.t]
+                  * [`Callee_versions of Int.Set.t] >>)
+
+  let dispatch_with_specific_version ~version ~connection ~name ~query ~registry =
+    match Hashtbl.find registry version with
+    | None -> return (Error (unknown_version (name, version)))
+    | Some dispatch -> dispatch connection query
+
+  let dispatch_with_version_menu {Connection_with_menu.connection; menu} query
+        ~name ~versions ~registry =
+    let open Deferred.Or_error.Monad_infix in
+    let caller_versions = Menu.supported_versions menu ~rpc_name:name in
+    let callee_versions = versions () in
+    return (most_recent_common_version ~rpc_name:name ~caller_versions ~callee_versions)
+    >>= fun version ->
+    dispatch_with_specific_version ~version ~connection ~name ~query ~registry
+
+  module Rpc = struct
+
+    module type S = sig
+      type query
+      type response
+      val deprecated_dispatch_multi :
+          version:int -> Connection.t -> query -> response Or_error.t Deferred.t
+
+      val dispatch_multi :
+        Connection_with_menu.t -> query -> response Or_error.t Deferred.t
+      val versions : unit -> Int.Set.t
+    end
+
+    module Make (Model : sig
+                   val name : string
+                   type query
+                   type response
+                 end) = struct
+
+      let name = Model.name
+
+      let registry = Int.Table.create ~size:1 ()
+
+      let versions () = Int.Set.of_list (Int.Table.keys registry)
+
+      let dispatch_multi conn_with_menu query =
+        dispatch_with_version_menu conn_with_menu query ~name ~versions ~registry
+
+      let deprecated_dispatch_multi ~version connection query =
+        dispatch_with_specific_version ~version ~connection ~query ~name ~registry
+
+      module Register (Version_i : sig
+                         type query with bin_type_class
+                         type response with bin_type_class
+                         val version : int
+                         val query_of_model : Model.query -> query
+                         val model_of_response : response -> Model.response
+                       end) = struct
+
+        open Version_i
+
+        let rpc = Rpc.create ~name ~version ~bin_query ~bin_response
+
+        let () =
+          let dispatch conn q =
+            match Result.try_with (fun () -> Version_i.query_of_model q) with
+            | Error exn ->
+              return
+                (Error (failed_conversion (`Query, `Rpc name, `Version version, exn)))
+            | Ok q ->
+              Rpc.dispatch rpc conn q
+              >>| fun result ->
+              Result.bind result (fun r ->
+                match Result.try_with (fun () -> Version_i.model_of_response r) with
+                | Ok r -> Ok r
+                | Error exn ->
+                  Error (failed_conversion (`Response, `Rpc name, `Version version, exn)))
+          in
+          match Hashtbl.find registry version with
+          | None -> Hashtbl.replace registry ~key:version ~data:dispatch
+          | Some _ -> Error.raise (multiple_registrations (`Rpc name, `Version version))
+
+      end
+
+    end
 
   end
+
+  module Pipe_rpc = struct
+
+    module type S = sig
+      type query
+      type response
+      type error
+      val deprecated_dispatch_multi :
+        version:int -> Connection.t -> query ->
+          ( response Or_error.t Pipe.Reader.t * Pipe_rpc.Id.t
+           , error
+           ) Result.t Or_error.t Deferred.t
+
+      val dispatch_multi :
+        Connection_with_menu.t
+        -> query
+        -> ( response Or_error.t Pipe.Reader.t * Pipe_rpc.Id.t
+           , error
+           ) Result.t Or_error.t Deferred.t
+      val versions : unit -> Int.Set.t
+    end
+
+    module Make (Model : sig
+                   val name : string
+                   type query
+                   type response
+                   type error
+                 end) = struct
+
+      let name = Model.name
+
+      let registry = Int.Table.create ~size:1 ()
+
+      let versions () = Int.Set.of_list (Int.Table.keys registry)
+
+      let dispatch_multi conn_with_menu query =
+        dispatch_with_version_menu conn_with_menu query ~name ~versions ~registry
+
+      let deprecated_dispatch_multi ~version connection query =
+        dispatch_with_specific_version ~version ~connection ~query ~name ~registry
+
+      module Register (Version_i : sig
+        type query with bin_type_class
+        type response with bin_type_class
+        type error with bin_type_class
+        val version : int
+        val query_of_model : Model.query -> query
+        val model_of_response : response -> Model.response
+        val model_of_error : error -> Model.error
+      end) = struct
+
+        open Version_i
+
+        let rpc = Pipe_rpc.create ~name ~version ~bin_query ~bin_response ~bin_error
+
+        let () =
+          let dispatch conn q =
+            match Result.try_with (fun () -> Version_i.query_of_model q) with
+            | Error exn ->
+              return
+                (Error (failed_conversion (`Query, `Rpc name, `Version version, exn)))
+            | Ok q ->
+              Pipe_rpc.dispatch rpc conn q
+              >>| fun result ->
+                match result with
+                | Error exn -> Error exn
+                | Ok (Error e) ->
+                  (match Result.try_with (fun () -> Version_i.model_of_error e) with
+                  | Ok e' -> Ok (Error e')
+                  | Error exn ->
+                    Error (failed_conversion (`Error, `Rpc name, `Version version, exn)))
+                | Ok (Ok (pipe, id)) ->
+                  let pipe =
+                    Pipe.map pipe ~f:(fun r ->
+                      match Result.try_with (fun () -> Version_i.model_of_response r) with
+                      | Ok r -> Ok r
+                      | Error exn ->
+                        Error
+                          (failed_conversion
+                             (`Response, `Rpc name, `Version version, exn)))
+                  in
+                  Ok (Ok (pipe, id))
+          in
+          match Hashtbl.find registry version with
+          | None -> Hashtbl.replace registry ~key:version ~data:dispatch
+          | Some _ -> Error.raise (multiple_registrations (`Rpc name, `Version version))
+
+      end
+
+    end
+
+  end
+
+end
+
+module Both_convert = struct
+
   module Plain = struct
     module type S = sig
       type caller_query
@@ -458,14 +494,13 @@ module Both_convert = struct
         -> 'state Implementation.t list
 
       val versions : unit -> Int.Set.t
-
     end
 
     module Make (Model : sig
-                   val name : string
-                   module Caller : sig type query type response end
-                   module Callee : sig type query type response end
-                 end) = struct
+      val name : string
+      module Caller : sig type query type response end
+      module Callee : sig type query type response end
+    end) = struct
       open Model
 
       module Caller = Caller_converts.Rpc.Make (struct let name = name include Caller end)
@@ -474,15 +509,15 @@ module Both_convert = struct
       TEST = Int.Set.equal (Caller.versions ()) (Callee.versions ())
 
       module Register (Version : sig
-                         open Model
-                         val version : int
-                         type query    with bin_io
-                         type response with bin_io
-                         val query_of_caller_model : Caller.query -> query
-                         val callee_model_of_query :                 query -> Callee.query
-                         val response_of_callee_model : Callee.response -> response
-                         val caller_model_of_response :                    response -> Caller.response
-                       end) = struct
+        open Model
+        val version : int
+        type query    with bin_io
+        type response with bin_io
+        val query_of_caller_model : Caller.query -> query
+        val callee_model_of_query :                 query -> Callee.query
+        val response_of_callee_model : Callee.response -> response
+        val caller_model_of_response :                    response -> Caller.response
+      end) = struct
         include Callee.Register (struct
           include Version
           let model_of_query    = callee_model_of_query
@@ -496,33 +531,13 @@ module Both_convert = struct
         TEST = Int.Set.equal (Caller.versions ()) (Callee.versions ())
       end
 
-      let most_recent_common_version ~rpc_name ~caller_versions ~callee_versions =
-        match Set.max_elt (Set.inter callee_versions caller_versions) with
-        | Some version -> Ok version
-        | None ->
-          Or_error.error "caller and callee share no common versions for rpc"
-            ( `Rpc rpc_name
-            , `Caller_versions caller_versions
-            , `Callee_versions callee_versions )
-            (<:sexp_of< [`Rpc of string]
-                       * [`Caller_versions of Int.Set.t]
-                       * [`Callee_versions of Int.Set.t] >>)
-
-      let dispatch_multi {Connection_with_menu.connection; menu} query =
-        let open Deferred.Or_error.Monad_infix in
-        let rpc_name = Model.name in
-        let caller_versions = Caller.versions () in
-        let callee_versions = Menu.supported_versions menu ~rpc_name in
-        return (most_recent_common_version ~rpc_name ~caller_versions ~callee_versions)
-        >>= fun version ->
-        Caller.dispatch_multi ~version connection query
+      let dispatch_multi = Caller.dispatch_multi
 
       let implement_multi = Callee.implement_multi
 
       (* Note: Caller.versions is the same as Callee.versions, so it doesn't matter which
-         one we call here *)
+        one we call here *)
       let versions () = Caller.versions ()
-
     end
   end
 end
