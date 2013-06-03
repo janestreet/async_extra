@@ -1,0 +1,66 @@
+(** A table of sequencers indexed by key, so that at any moment for each key there is at
+    most one job running.
+
+    An ['a Sequencer_table.Make(Key).t] is similar in concept to:
+
+    {[
+      { mutable state : 'a option;
+        jobs  : 'a option Throttle.Sequencer.t;
+      } Key.Table.t
+    ]}
+
+    It allows one to run jobs that are indexed by a key, while allowing jobs with distinct
+    keys to run simultaneously, and ensuring that for any given key, at most one job with
+    that key is running at a time.  A sequencer table maintains optional state for each
+    key, and supplies that state to each running job indexed by that key.
+
+    The implementation of a sequencer table is optimized for having a large number of keys
+    with state, while only a few keys with active jobs at any given time.  So, it is
+    implemented with two tables, one of states and one of sequencers:
+
+    {[
+      { states : 'a Key.Table.t;
+        jobs   : ('a option -> unit Deferred.t) Sequencer.t Key.Table.t;
+      }
+    ]}
+
+    The implementation automatically adds a sequencer to the [jobs] table, if necessary,
+    when one adds a job, and automatically removes a sequencer from the [jobs] table
+    whenever the sequencer has no jobs to run.
+
+    The implementation does not automatically release state; one must call [set_state t
+    ~key None].
+*)
+
+open Core.Std
+open Import
+
+module Make (Key : Hashable) : sig
+
+  type 'a t
+
+  val create : unit -> _ t
+
+  (** [enqueue t ~key f] enqueues [f] for [key].  [f] will be called with the state of
+      [key] when invoked.  If there is no pending job for [key], [f] will be called
+      immediately.  If [f] raises, then the exception will be raised to the monitor in
+      effect when [enqueue] was called.  Subsequent jobs for [key] will proceed. *)
+  val enqueue : 'a t -> key:Key.t -> ('a option -> 'b Deferred.t) -> 'b Deferred.t
+
+  (** [set_state t key state_opt] sets the state for [key] immediately.  The state will be
+      kept internally until set to [None] *)
+  val set_state : 'a t -> key:Key.t -> 'a option -> unit
+
+  val find_state : 'a t -> Key.t -> 'a option
+
+  (** [num_unfinished_jobs t key] returns the number of jobs for [key] including including
+      pending and running. *)
+  val num_unfinished_jobs : _ t -> Key.t -> int
+
+  (** [mem t key] returns [true] if there is state or an pending/running job *)
+  val mem : _ t -> Key.t -> bool
+
+  (** Fold over keys with states or pending/running jobs. It's safe to mutate ([enqueue]
+      or [set_state]) when folding *)
+  val fold : 'a t -> init:'b -> f:('b -> key:Key.t -> 'a option -> 'b) -> 'b
+end

@@ -263,6 +263,8 @@ module type S = sig
       -> cutoff:unit Deferred.t
       -> ( [ `Flushed of Remote_name.t list ]
            * [ `Not_flushed of Remote_name.t list ] ) Deferred.t
+
+    val shutdown : t -> unit Deferred.t
   end
 
   module Client : sig
@@ -832,6 +834,10 @@ module Make (Z : Arg) :
           ~f:(function `Flushed c -> `Fst c | `Not_flushed c -> `Snd c)
       in
       `Flushed flushed, `Not_flushed not_flushed
+    ;;
+
+    let shutdown t =
+      Fd.close (Socket.fd t.socket)
     ;;
 
     let send t name d =

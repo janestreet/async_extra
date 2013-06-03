@@ -5,6 +5,7 @@ module Lock_file            = Lock_file
 module Log                  = Log
 module Persistent_singleton = Persistent_singleton
 module Rpc                  = Rpc
+module Sequencer_table      = Sequencer_table
 module Tcp                  = Tcp
 module Tcp_file             = Tcp_file
 module Typed_tcp            = Typed_tcp
