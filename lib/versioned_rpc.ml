@@ -308,8 +308,8 @@ module Caller_converts = struct
   let dispatch_with_version_menu {Connection_with_menu.connection; menu} query
         ~name ~versions ~registry =
     let open Deferred.Or_error.Monad_infix in
-    let caller_versions = Menu.supported_versions menu ~rpc_name:name in
-    let callee_versions = versions () in
+    let callee_versions = Menu.supported_versions menu ~rpc_name:name in
+    let caller_versions = versions () in
     return (most_recent_common_version ~rpc_name:name ~caller_versions ~callee_versions)
     >>= fun version ->
     dispatch_with_specific_version ~version ~connection ~name ~query ~registry

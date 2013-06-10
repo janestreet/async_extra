@@ -207,7 +207,7 @@ module Server = struct
         >>> function
         | `Aborted | `Read Stream.Nil -> stop_tailing ()
         | `Read (Stream.Cons (msg, rest)) ->
-          send_msg_to_client w msg >>> fun () -> loop (Stream.of_raw rest)
+          send_msg_to_client w msg >>> fun () -> loop rest
       in
       loop stream)
 
