@@ -74,7 +74,7 @@ let unpack_from_reader unpack_buffer reader =
   let result =
     (* In rare situations, a reader can asynchronously raise.  We'd rather not raise here,
        since we have a natural place to report the error in [result] itself. *)
-    try_with (fun () -> Reader.read_one_chunk_at_a_time_until_eof reader ~handle_chunk)
+    try_with (fun () -> Reader.read_one_chunk_at_a_time reader ~handle_chunk)
     >>| fun res ->
     Pipe.close output_writer;
     match res with

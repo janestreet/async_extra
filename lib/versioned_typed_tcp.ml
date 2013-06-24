@@ -570,7 +570,7 @@ module Make (Z : Arg) :
         end
       end
     in
-    Reader.read_one_chunk_at_a_time_until_eof con.C.reader
+    Reader.read_one_chunk_at_a_time con.C.reader
       ~handle_chunk:(handle_chunk ~consumed:0)
     >>> (fun result ->
     con.C.kill ();

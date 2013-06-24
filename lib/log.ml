@@ -593,7 +593,7 @@ let printf ?tags ?level t k =
 ;;
 
 let sexp ?tags ?level t v to_sexp =
-  of_lazy ?tags ?level t (Lazy.lazy_from_fun (fun () -> Sexp.to_string_mach (to_sexp v)))
+  of_lazy ?tags ?level t (lazy (Sexp.to_string_mach (to_sexp v)))
 ;;
 
 let raw ?tags t k   = printf ?tags t k
