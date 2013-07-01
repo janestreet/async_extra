@@ -1,4 +1,5 @@
 module Command              = Command
+module Dynamic_port_writer  = Dynamic_port_writer
 module File_tail            = File_tail
 module File_writer          = File_writer
 module Lock_file            = Lock_file
