@@ -178,7 +178,8 @@ module Output : sig
   val create : (Message.t Queue.t -> unit Deferred.t) -> t
   val apply : t -> Message.t Queue.t -> unit Deferred.t
 
-  val screen        : t
+  val stdout        : unit -> t
+  val stderr        : unit -> t
   val writer        : format -> Writer.t -> t
   val file          : format -> filename:string -> t
   val rotating_file : format -> basename:string -> Rotation.t -> t
@@ -209,37 +210,6 @@ end = struct
       Message.write_write_only_text msg w
     end;
   ;;
-
-  module Screen : sig
-    val write : t
-  end = struct
-    let write =
-      (fun msgs ->
-        let flush_stdout = ref false in
-        let flush_stderr = ref false in
-        let stdout () =
-          flush_stdout := true;
-          Lazy.force Writer.stdout
-        in
-        let stderr () =
-          flush_stderr := true;
-          Lazy.force Writer.stderr
-        in
-        Queue.iter msgs ~f:(fun m ->
-          let out =
-            match Message.level m with
-            | None       -> stdout ()
-            | Some level ->
-              match level with
-              | `Error         -> stderr ()
-              | `Info | `Debug -> stdout ()
-          in
-          basic_write `Text out m);
-        if !flush_stdout then Writer.flushed (stdout ()) else Deferred.unit
-        >>= fun () ->
-        if !flush_stderr then Writer.flushed (stderr ()) else Deferred.unit)
-    ;;
-  end
 
   module File : sig
     val write' : format -> filename:string -> (Message.t Queue.t -> Int63.t Deferred.t)
@@ -421,7 +391,8 @@ end = struct
   let rotating_file = Rotating_file.create
   let file          = File.create
   let writer        = Writer.create
-  let screen        = Screen.write
+  let stdout        = Memo.unit (fun () -> Writer.create `Text (Lazy.force Async_unix.Writer.stdout))
+  let stderr        = Memo.unit (fun () -> Writer.create `Text (Lazy.force Async_unix.Writer.stderr))
 end
 
 (* A log is a pipe that can take one of three messages.
@@ -635,7 +606,7 @@ module type Global_intf = sig
 end
 
 module Make_global(Empty : sig end) : Global_intf = struct
-  let log               = lazy (create ~level:`Info ~output:[Output.screen])
+  let log               = lazy (create ~level:`Info ~output:[Output.stderr ()])
   let set_level level   = set_level (Lazy.force log) level
   let set_output output = set_output (Lazy.force log) output
 
@@ -655,7 +626,8 @@ module Blocking : sig
     type t
 
     val create : (Message.t -> unit) -> t
-    val screen : t
+    val stdout : t
+    val stderr : t
   end
 
   val set_level  : Level.t -> unit
@@ -670,26 +642,13 @@ end = struct
 
     let create = ident
 
-    module Screen : sig
-      val write : (Message.t -> unit)
-    end = struct
-      let write = (fun msg ->
-        match Message.level msg with
-        | None ->
-          Printf.printf "%s\n%!" (Message.to_write_only_text msg);
-        | Some l ->
-          if l = `Error then
-            Printf.eprintf "%s\n%!" (Message.to_write_only_text msg)
-          else
-            Printf.printf "%s\n%!" (Message.to_write_only_text msg))
-      ;;
-    end
-
-    let screen = Screen.write
+    let write print = (fun msg -> print (Message.to_write_only_text msg))
+    let stdout      = write (Printf.printf "%s\n%!")
+    let stderr      = write (Printf.eprintf "%s\n%!")
   end
 
   let level : Level.t ref = ref `Info
-  let write = ref Output.Screen.write
+  let write = ref Output.stderr
 
   let set_level l = level := l
 

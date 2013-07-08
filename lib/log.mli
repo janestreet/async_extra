@@ -84,7 +84,8 @@ module Output : sig
   *)
   val create : (Message.t Queue.t -> unit Deferred.t) -> t
 
-  val screen        : t
+  val stdout        : unit -> t
+  val stderr        : unit -> t
   (* see Async_extended.Syslog for syslog output *)
   val writer        : format -> Writer.t -> t
   val file          : format -> filename:string -> t
@@ -101,7 +102,8 @@ module Blocking : sig
   module Output : sig
     type t
 
-    val screen : t
+    val stdout : t
+    val stderr : t
     (* see Async_extended.Syslog for syslog output *)
 
     val create : (Message.t -> unit) -> t
