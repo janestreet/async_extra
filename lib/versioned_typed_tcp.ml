@@ -180,8 +180,8 @@ module type S = sig
 
 
     (** create a new server, and start listening *)
-    val create :
-      ?logfun:logfun
+    val create
+      :  ?logfun:logfun
       -> ?now:(unit -> Time.t) (** defualt: Scheduler.cycle_start *)
       -> ?enforce_unique_remote_name:bool (* defaults to true *) (** remote names must be unique *)
       -> ?is_client_ip_authorized:(string -> bool)
@@ -222,8 +222,8 @@ module type S = sig
         system.  It is possible that the deferred will never become
         determined, for example in the case that the other side hangs,
         but does not drop the connection. *)
-    val send :
-      t -> Remote_name.t -> Send.t -> [ `Sent of Time.t | `Dropped ] Deferred.t
+    val send
+      : t -> Remote_name.t -> Send.t -> [ `Sent of Time.t | `Dropped ] Deferred.t
 
     (** [send_ignore_errors t client msg] Just like send, but does not report
         results. Your message will probably be sent successfully
@@ -237,8 +237,8 @@ module type S = sig
     val send_to_all : t
       -> Send.t
       -> [ `Sent (** sent successfuly to all clients *)
-           | `Dropped (** not sent successfully to any client *)
-           | `Partial_success (** sent to some clients *)] Deferred.t
+         | `Dropped (** not sent successfully to any client *)
+         | `Partial_success (** sent to some clients *)] Deferred.t
 
     (** [send_to_all_ignore_errors t msg] Just like [send_to_all] but with no error
         reporting. *)
@@ -249,8 +249,9 @@ module type S = sig
       -> Send.t
       -> Remote_name.t list
       -> [ `Sent (** sent successfuly to all clients *)
-           | `Dropped (** not sent successfully to any client *)
-           | `Partial_success (** sent to some clients *)] Deferred.t
+         | `Dropped (** not sent successfully to any client *)
+         | `Partial_success (** sent to some clients *)
+         ] Deferred.t
 
     (** [send_to_some_ignore_errors t msg] Just like [send_to_some] but with no error
         reporting. *)
@@ -258,11 +259,12 @@ module type S = sig
 
     val client_send_version : t -> Remote_name.t -> Version.t option
 
-    val flushed :
-      t
+    val flushed
+      :  t
       -> cutoff:unit Deferred.t
       -> ( [ `Flushed of Remote_name.t list ]
-           * [ `Not_flushed of Remote_name.t list ] ) Deferred.t
+           * [ `Not_flushed of Remote_name.t list ]
+         ) Deferred.t
 
     val shutdown : t -> unit Deferred.t
   end
@@ -271,8 +273,8 @@ module type S = sig
     type t
 
     (** create a new (initially disconnected) client *)
-    val create :
-      ?logfun:logfun
+    val create
+      :  ?logfun:logfun
       -> ?now:(unit -> Time.t) (** defualt: Scheduler.cycle_start *)
       -> ?check_remote_name:bool (* defaults to true *) (** remote name must match expected remote name. *)
       -> ip:string
@@ -593,19 +595,21 @@ module Make (Z : Arg) :
       val add : t -> name:Remote_name.t -> conn:Connection.t -> unit
       val remove : t -> Remote_name.t -> unit
 
-      val fold :
-        t
+      val fold
+        : t
         -> init:'a
         -> f:(name:Remote_name.t -> conn:Connection.t -> 'a-> 'a)
         -> 'a
 
-      val send_to_all : t
-      -> logfun:logfun option
-      -> now:(unit -> Time.t)
-      -> Send.t
-      -> [ `Sent (** sent successfuly to all clients *)
-         | `Dropped (** not sent successfully to any client *)
-         | `Partial_success (** sent to some clients *)] Deferred.t
+      val send_to_all
+        :  t
+        -> logfun:logfun option
+        -> now:(unit -> Time.t)
+        -> Send.t
+        -> [ `Sent (** sent successfuly to all clients *)
+           | `Dropped (** not sent successfully to any client *)
+           | `Partial_success (** sent to some clients *)
+           ] Deferred.t
 
       val send_to_all_ignore_errors : t
         -> logfun:logfun option
@@ -614,20 +618,20 @@ module Make (Z : Arg) :
         -> unit
 
       val send_to_some : t
-      -> logfun:logfun option
-      -> now:(unit -> Time.t)
-      -> Send.t
-      -> Remote_name.t list
-      -> [ `Sent (** sent successfuly to all clients *)
-         | `Dropped (** not sent successfully to any client *)
-         | `Partial_success (** sent to some clients *)] Deferred.t
+        -> logfun:logfun option
+        -> now:(unit -> Time.t)
+        -> Send.t
+        -> Remote_name.t list
+        -> [ `Sent (** sent successfuly to all clients *)
+           | `Dropped (** not sent successfully to any client *)
+           | `Partial_success (** sent to some clients *)] Deferred.t
 
       val send_to_some_ignore_errors : t
-      -> logfun:logfun option
-      -> now:(unit -> Time.t)
-      -> Send.t
-      -> Remote_name.t list
-      -> unit
+        -> logfun:logfun option
+        -> now:(unit -> Time.t)
+        -> Send.t
+        -> Remote_name.t list
+        -> unit
     end = struct
 
       module C = Connection

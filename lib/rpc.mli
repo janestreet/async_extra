@@ -188,8 +188,8 @@ module State_rpc : sig
         -> (('state * 'update Pipe.Reader.t), 'error) Result.t Deferred.t)
     -> 'connection_state Implementation.t
 
-  val dispatch :
-    ('query, 'state, 'update, 'error) t
+  val dispatch
+    :  ('query, 'state, 'update, 'error) t
     -> Connection.t
     -> 'query
     -> update:('state -> 'update -> 'state)

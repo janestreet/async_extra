@@ -205,21 +205,20 @@ end
 module Implementations : sig
   type 'a t
 
-  val create :
-    implementations:'connection_state Implementation.t list
-    -> on_unknown_rpc:[
-    | `Raise
-    | `Ignore
-    | `Call of (rpc_tag:string -> version:int -> unit)
-    ]
+  val create
+    :  implementations:'connection_state Implementation.t list
+    -> on_unknown_rpc:[ `Raise
+                      | `Ignore
+                      | `Call of (rpc_tag:string -> version:int -> unit)
+                      ]
     -> ( 'connection_state t
        , [`Duplicate_implementations of Implementation.Description.t list]
        ) Result.t
 
   val null : unit -> 'a t
 
-  val query_handler :
-    'a t
+  val query_handler
+    :  'a t
     -> (unit
         -> connection_state:'a
         -> query:Query.t
@@ -228,13 +227,12 @@ module Implementations : sig
         -> aborted:unit Deferred.t
         -> [ `Continue | `Stop ])
 
-  val create_exn :
-    implementations:'connection_state Implementation.t list
-    -> on_unknown_rpc:[
-    | `Raise
-    | `Ignore
-    | `Call of (rpc_tag:string -> version:int -> unit)
-    ]
+  val create_exn
+    :  implementations:'connection_state Implementation.t list
+    -> on_unknown_rpc:[ `Raise
+                      | `Ignore
+                      | `Call of (rpc_tag:string -> version:int -> unit)
+                      ]
     -> 'connection_state t
 end = struct
   type 'a t = {
@@ -420,8 +418,8 @@ module Connection : Connection_internal = struct
 
     val create : (Response.t -> [ `keep | `remove of unit Rpc_result.t ] Deferred.t) -> t
 
-    val update :
-      t
+    val update
+      :  t
       -> Response.t
       -> [ `already_removed
          | `keep

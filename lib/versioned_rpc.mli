@@ -107,12 +107,12 @@ module Caller_converts : sig
       type query
       type response
 
-      val deprecated_dispatch_multi :
-             version:int -> Connection.t -> query -> response Or_error.t Deferred.t
+      val deprecated_dispatch_multi
+        : version:int -> Connection.t -> query -> response Or_error.t Deferred.t
 
       (** multi-version dispatch *)
-      val dispatch_multi :
-        Connection_with_menu.t -> query -> response Or_error.t Deferred.t
+      val dispatch_multi
+        : Connection_with_menu.t -> query -> response Or_error.t Deferred.t
 
       (** all versions supported by [dispatch_multi].
           (useful for computing which old versions may be pruned) *)
@@ -171,14 +171,16 @@ module Caller_converts : sig
           The return type varies slightly from [Rpc.Pipe_rpc.dispatch] to make it clear
           that conversion of each individual element in the returned pipe may fail. *)
 
-      val deprecated_dispatch_multi :
-        version:int -> Connection.t -> query ->
-          ( response Or_error.t Pipe.Reader.t * Pipe_rpc.Id.t
+      val deprecated_dispatch_multi
+        :  version:int
+        -> Connection.t
+        -> query
+        -> ( response Or_error.t Pipe.Reader.t * Pipe_rpc.Id.t
            , error
            ) Result.t Or_error.t Deferred.t
 
-      val dispatch_multi :
-        Connection_with_menu.t
+      val dispatch_multi
+        : Connection_with_menu.t
         -> query
         -> ( response Or_error.t Pipe.Reader.t * Pipe_rpc.Id.t
            , error
@@ -244,8 +246,8 @@ module Callee_converts : sig
       type response
 
       (** implement multiple versions at once *)
-      val implement_multi :
-        ?log_not_previously_seen_version:(name:string -> int -> unit)
+      val implement_multi
+        :  ?log_not_previously_seen_version:(name:string -> int -> unit)
         -> ('state -> query -> response Deferred.t)
         -> 'state Implementation.t list
 
@@ -301,12 +303,12 @@ module Callee_converts : sig
       type error
 
       (** implement multiple versions at once *)
-      val implement_multi :
-        ?log_not_previously_seen_version:(name:string -> int -> unit)
+      val implement_multi
+        :  ?log_not_previously_seen_version:(name:string -> int -> unit)
         -> ('state
-          -> query
-          -> aborted:unit Deferred.t
-          -> (response Pipe.Reader.t, error) Result.t Deferred.t)
+            -> query
+            -> aborted:unit Deferred.t
+            -> (response Pipe.Reader.t, error) Result.t Deferred.t)
         -> 'state Implementation.t list
 
       (** all versions supported by [dispatch_multi].
@@ -387,8 +389,8 @@ module Both_convert : sig
       type callee_response
 
       (** multi-version dispatch *)
-      val dispatch_multi :
-        Connection_with_menu.t -> caller_query -> caller_response Or_error.t Deferred.t
+      val dispatch_multi
+        : Connection_with_menu.t -> caller_query -> caller_response Or_error.t Deferred.t
 
       (** implement multiple versions at once *)
       val implement_multi
@@ -401,7 +403,7 @@ module Both_convert : sig
 
     end
 
-  
+
   module Make (Model : sig
     val name : string
     module Caller : sig type query type response end

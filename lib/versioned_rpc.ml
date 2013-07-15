@@ -27,8 +27,8 @@ module Callee_converts = struct
     module type S = sig
       type query
       type response
-      val implement_multi :
-        ?log_not_previously_seen_version:(name:string -> int -> unit)
+      val implement_multi
+        :  ?log_not_previously_seen_version:(name:string -> int -> unit)
         -> ('state -> query -> response Deferred.t)
         -> 'state Implementation.t list
       val versions : unit -> Int.Set.t
@@ -105,12 +105,12 @@ module Callee_converts = struct
       type query
       type response
       type error
-      val implement_multi :
-        ?log_not_previously_seen_version:(name:string -> int -> unit)
+      val implement_multi
+        :  ?log_not_previously_seen_version:(name:string -> int -> unit)
         -> ('state
-          -> query
-          -> aborted:unit Deferred.t
-          -> (response Pipe.Reader.t, error) Result.t Deferred.t)
+            -> query
+            -> aborted:unit Deferred.t
+            -> (response Pipe.Reader.t, error) Result.t Deferred.t)
         -> 'state Implementation.t list
       val versions : unit -> Int.Set.t
     end
@@ -319,11 +319,11 @@ module Caller_converts = struct
     module type S = sig
       type query
       type response
-      val deprecated_dispatch_multi :
-          version:int -> Connection.t -> query -> response Or_error.t Deferred.t
+      val deprecated_dispatch_multi
+        : version:int -> Connection.t -> query -> response Or_error.t Deferred.t
 
-      val dispatch_multi :
-        Connection_with_menu.t -> query -> response Or_error.t Deferred.t
+      val dispatch_multi
+        : Connection_with_menu.t -> query -> response Or_error.t Deferred.t
       val versions : unit -> Int.Set.t
     end
 
@@ -388,14 +388,16 @@ module Caller_converts = struct
       type query
       type response
       type error
-      val deprecated_dispatch_multi :
-        version:int -> Connection.t -> query ->
-          ( response Or_error.t Pipe.Reader.t * Pipe_rpc.Id.t
+      val deprecated_dispatch_multi
+        :  version:int
+        -> Connection.t
+        -> query
+        -> ( response Or_error.t Pipe.Reader.t * Pipe_rpc.Id.t
            , error
            ) Result.t Or_error.t Deferred.t
 
-      val dispatch_multi :
-        Connection_with_menu.t
+      val dispatch_multi
+        :  Connection_with_menu.t
         -> query
         -> ( response Or_error.t Pipe.Reader.t * Pipe_rpc.Id.t
            , error
@@ -485,8 +487,8 @@ module Both_convert = struct
       type caller_response
       type callee_response
 
-      val dispatch_multi :
-        Connection_with_menu.t -> caller_query -> caller_response Or_error.t Deferred.t
+      val dispatch_multi
+        : Connection_with_menu.t -> caller_query -> caller_response Or_error.t Deferred.t
 
       val implement_multi
         :  ?log_not_previously_seen_version:(name:string -> int -> unit)

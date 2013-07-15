@@ -11,13 +11,13 @@ module type Arg = Sexpable
 module type S = sig
   type persistent_singleton
 
-  val load :
-    string
+  val load
+    :  string
     -> default:persistent_singleton
     -> persistent_singleton Deferred.t
 
-  val save :
-    string
+  val save
+    :  string
     -> value:persistent_singleton
     -> unit Deferred.t
 end

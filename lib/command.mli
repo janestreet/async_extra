@@ -17,3 +17,17 @@ val async_basic
   -> ('a, unit -> unit Deferred.t) Spec.t
   -> 'a
   -> t
+
+(** To create an [Arg_type.t] that uses auto-completion and uses async to compute the
+    possible completions, one should use:
+
+    {[
+      Arg_type.create ~complete of_string
+    ]}
+
+    With this, the [complete] function is only called when the executable is
+    auto-completing, not for ordinary execution.  This improves performance, and also
+    means that the async scheduler isn't started for ordinary execution of the command,
+    which makes it possible for the command to daemonize (which requires the scheduler to
+    not have been started).
+*)

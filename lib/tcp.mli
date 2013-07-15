@@ -9,7 +9,7 @@ val to_host_and_port : string -> int -> Socket.Address.Inet.t where_to_connect
 val to_file          :        string -> Socket.Address.Unix.t where_to_connect
 
 type 'a with_connect_options =
-     ?buffer_age_limit:[ `At_most of Time.Span.t | `Unlimited ]
+  ?buffer_age_limit:[ `At_most of Time.Span.t | `Unlimited ]
   -> ?interrupt:unit Deferred.t
   -> ?reader_buffer_size:int
   -> ?timeout: Time.Span.t
@@ -26,11 +26,11 @@ type 'a with_connect_options =
 
     It is fine for [f] to ignore the supplied socket and just use the reader and writer.
     The socket is there to make it convenient to call [Socket] functions. *)
-val with_connection :
-  ( 'addr where_to_connect
-    -> (([ `Active ], 'addr) Socket.t -> Reader.t -> Writer.t -> 'a Deferred.t)
-    -> 'a Deferred.t
-  ) with_connect_options
+val with_connection
+  : ( 'addr where_to_connect
+      -> (([ `Active ], 'addr) Socket.t -> Reader.t -> Writer.t -> 'a Deferred.t)
+      -> 'a Deferred.t
+    ) with_connect_options
 
 (** [connect_sock ~host ~port] opens a TCP connection to the specified hostname
     and port, returning the socket.
@@ -51,10 +51,10 @@ val connect_sock : 'addr where_to_connect -> ([ `Active ], 'addr) Socket.t Defer
 
     It is fine to ignore the returned socket and just use the reader and writer.  The
     socket is there to make it convenient to call [Socket] functions. *)
-val connect :
-  ( 'addr where_to_connect
-    -> (([ `Active ], 'addr) Socket.t * Reader.t * Writer.t) Deferred.t
-  ) with_connect_options
+val connect
+  : ( 'addr where_to_connect
+      -> (([ `Active ], 'addr) Socket.t * Reader.t * Writer.t) Deferred.t
+    ) with_connect_options
 
 (** A [Where_to_listen] describes the socket that a tcp server should listen on. *)
 module Where_to_listen : sig

@@ -62,11 +62,11 @@ module type S = sig
   val listen : t -> Server_read_result.t Pipe.Reader.t
   val listen_ignore_errors : t -> (Client_id.t * Client_message.t) Pipe.Reader.t
   val close : t -> Client_id.t -> unit
-  val flushed_time :
-    t -> Client_id.t -> [ `Client_not_found | `Flushed of Time.t Deferred.t ]
+  val flushed_time
+    : t -> Client_id.t -> [ `Client_not_found | `Flushed of Time.t Deferred.t ]
   val has_client_id : t -> Client_id.t -> bool
-  val send :
-    t -> Client_id.t -> Server_message.t -> [`Sent of Time.t | `Drop of exn] Deferred.t
+  val send
+    : t -> Client_id.t -> Server_message.t -> [`Sent of Time.t | `Drop of exn] Deferred.t
   val send_ignore_errors : t -> Client_id.t -> Server_message.t -> unit
   val send_to_all : t -> Server_message.t -> unit
   val client_addr_port : t -> Client_id.t -> (Unix.Inet_addr.t * int) option

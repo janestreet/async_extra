@@ -102,8 +102,8 @@ end
     [null_read_tolerance] determines how long the tailing must observe null reads
     before it will report a [Delayed_due_to_null_reads_for] warning.
  *)
-val create :
-  ?read_buf_len:int (* default 32k *)
+val create
+  :  ?read_buf_len:int (* default 32k *)
   -> ?read_delay:Time.Span.t (* default 0.5s *)
   -> ?retry_null_reads:bool (* defaults to true *)
   -> ?break_on_lines:bool (* defaults to true *)
