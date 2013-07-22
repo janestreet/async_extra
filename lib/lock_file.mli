@@ -1,6 +1,7 @@
 (** [Async.Lock_file] is a wrapper that provides async equivalents for
     [Core.Lock_file]. *)
 
+open Core.Std
 open Import
 
 (** [create ?message path] tries to create a file at [path] containing the text [message],
@@ -35,3 +36,22 @@ val waiting_create
 (** [is_locked path] returns true when the file at [path] exists and is locked, false
     otherwise. *)
 val is_locked : string -> bool Deferred.t
+
+(** [Nfs] has analogs of functions in {!Core.Lock_file.Nfs}; see there for documentation.
+    In addition to adding [Deferred]'s, [blocking_create] was renamed [waiting_create] to
+    avoid the impression that it blocks async. *)
+module Nfs : sig
+  val create         : ?message : string -> string -> bool Deferred.t
+  val create_exn     : ?message : string -> string -> unit Deferred.t
+  val waiting_create : ?message : string -> string -> unit Deferred.t
+  val unlock_safely  : string -> unit Deferred.t
+
+  val critical_section
+    : ?message : string
+    -> string
+    -> f : (unit -> 'a Deferred.t)
+    -> 'a Deferred.t
+
+  val get_hostname_and_pid : string -> (string * Pid.t) option Deferred.t
+  val get_message          : string ->  string          option Deferred.t
+end

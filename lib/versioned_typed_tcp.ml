@@ -503,9 +503,17 @@ module Make (Z : Arg) :
       (* functions to extend the tail (with various messages) *)
       ~extend_disconnect ~extend_parse_error ~extend_data =
     let module C = Connection in
+    Writer.set_raise_when_consumer_leaves con.C.writer false;
+    upon (Writer.consumer_left con.C.writer) con.C.kill;
+    (* Benign errors like EPIPE and ECONNRESET will not be raised, so we are left with
+       only serious errors ("man 2 write" lists EBADF, EFAULT, EFBIG, EINVAL, EIO, ENOSPC,
+       all of which point to either a bug in async or to a pretty bad state of the
+       system).  We close the connection and propagate the error up. *)
     Stream.iter (Monitor.errors (Writer.monitor con.C.writer)) ~f:(fun e ->
       con.C.kill ();
-      extend_disconnect remote_name e);
+      (* As opposed to [raise], this will continue propagating subsequent exceptions. *)
+      (* This can't lead to an infinite loop because con.C.writer is not exposed *)
+      Monitor.send_exn (Monitor.current ()) e);
     let extend ~time_sent ~time_received data =
       begin match logfun with
       | None -> ()

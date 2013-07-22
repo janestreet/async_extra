@@ -10,6 +10,7 @@ module Sequencer_table      = Sequencer_table
 module Tcp                  = Tcp
 module Tcp_file             = Tcp_file
 module Typed_tcp            = Typed_tcp
+module Udp                  = Udp
 module Unpack_sequence      = Unpack_sequence
 module User_and_group       = User_and_group
 module Versioned_rpc        = Versioned_rpc
