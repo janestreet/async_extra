@@ -23,8 +23,8 @@ module Server : sig
   (** [open_file filename] open a file for writing.  The filename given should
       be a real path on the server, and will create a real file there *)
   val open_file
-    :  ?append:bool (* defaults to false *)
-    -> ?dos_format:bool (* defaults to false *)
+    :  ?append:bool (** default is [false] *)
+    -> ?dos_format:bool (** default is [false] *)
     -> string
     -> File.t Deferred.t
 
@@ -40,9 +40,9 @@ module Server : sig
   val stop_serving : File.t -> unit
 
   (** [close t] closes the file t for writing.  If [stop_serving] is false
-      (default is true) the file will be left on disk and will still be served
+      (default is [true]) the file will be left on disk and will still be served
       to clients on a create request. *)
-  val close : ?stop_serving:bool (* defaults to true *) -> File.t -> unit Deferred.t
+  val close : ?stop_serving:bool (** default is [true] *) -> File.t -> unit Deferred.t
 
   (** [write_message t msg] write [msg] to [t].  [msg] is assumed to contain no
       newlines except possibly at the end.  A newline will be added to the end
@@ -68,7 +68,7 @@ module Server : sig
       [t].  When the deferred returned by [f] is determined, [t] will be
       closed. *)
   val with_file
-    :  ?append:bool (* defaults to false *)
+    :  ?append:bool (** default is [false] *)
     -> string
     -> f:(File.t -> 'a Deferred.t)
     -> 'a Deferred.t

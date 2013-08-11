@@ -183,7 +183,7 @@ module type S = sig
     val create
       :  ?logfun:logfun
       -> ?now:(unit -> Time.t) (** defualt: Scheduler.cycle_start *)
-      -> ?enforce_unique_remote_name:bool (* defaults to true *) (** remote names must be unique *)
+      -> ?enforce_unique_remote_name:bool (** default is [true] *) (** remote names must be unique *)
       -> ?is_client_ip_authorized:(string -> bool)
       (** [warn_when_free_connections_lte_pct].  If the number of free connections falls
           below this percentage of max connections an Almost_full event will be generated.
@@ -276,7 +276,7 @@ module type S = sig
     val create
       :  ?logfun:logfun
       -> ?now:(unit -> Time.t) (** defualt: Scheduler.cycle_start *)
-      -> ?check_remote_name:bool (* defaults to true *) (** remote name must match expected remote name. *)
+      -> ?check_remote_name:bool (** default is [true] *) (** remote name must match expected remote name. *)
       -> ip:string
       -> port:int
       -> expected_remote_name:Remote_name.t

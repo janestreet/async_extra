@@ -89,7 +89,7 @@ module type Connection = sig
     -> initial_connection_state:('address -> 's)
     -> where_to_listen:('address, 'listening_on) Tcp.Where_to_listen.t
     -> ?auth:('address -> bool)
-    (* Default is `Ignore *)
+    (** default is [`Ignore] *)
     -> ?on_handshake_error:[
       | `Raise
       | `Ignore

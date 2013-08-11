@@ -10,8 +10,8 @@ open Import
     the process dies.*)
 val create
   :  ?message:string
-  -> ?close_on_exec : bool (* defaults to true *)
-  -> ?unlink_on_exit : bool (* defaults to false *)
+  -> ?close_on_exec : bool (** default is [true] *)
+  -> ?unlink_on_exit : bool (** default is [false] *)
   -> string
   -> bool Deferred.t
 
@@ -19,8 +19,8 @@ val create
     failure instead of returning a boolean value *)
 val create_exn
   :  ?message:string
-  -> ?close_on_exec : bool (* defaults to true *)
-  -> ?unlink_on_exit : bool (* defaults to false *)
+  -> ?close_on_exec : bool (** default is [true] *)
+  -> ?unlink_on_exit : bool (** default is [false] *)
   -> string
   -> unit Deferred.t
 
@@ -28,8 +28,8 @@ val create_exn
     Equivalent to [Core.Std.Lock_file.blocking_create]. *)
 val waiting_create
   :  ?message:string
-  -> ?close_on_exec : bool (* defaults to true *)
-  -> ?unlink_on_exit : bool (* defaults to false *)
+  -> ?close_on_exec : bool (** default is [true] *)
+  -> ?unlink_on_exit : bool (** default is [false] *)
   -> string
   -> unit Deferred.t
 

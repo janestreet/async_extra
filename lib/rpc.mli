@@ -95,6 +95,9 @@ module Rpc : sig
   val name    : (_, _) t -> string
   val version : (_, _) t -> int
 
+  val bin_query    : ('query, _)    t -> 'query    Bin_prot.Type_class.t
+  val bin_response : (_, 'response) t -> 'response Bin_prot.Type_class.t
+
   val implement
     :  ('query, 'response) t
     -> ('connection_state
@@ -127,6 +130,10 @@ module Pipe_rpc : sig
     -> bin_response : 'response Bin_prot.Type_class.t
     -> bin_error    : 'error    Bin_prot.Type_class.t
     -> ('query, 'response, 'error) t
+
+  val bin_query    : ('query, _, _) t    -> 'query    Bin_prot.Type_class.t
+  val bin_response : (_, 'response, _) t -> 'response Bin_prot.Type_class.t
+  val bin_error    : (_, _, 'error) t    -> 'error    Bin_prot.Type_class.t
 
   val implement
     :  ('query, 'response, 'error) t
@@ -179,6 +186,11 @@ module State_rpc : sig
     -> bin_update : 'update Bin_prot.Type_class.t
     -> bin_error  : 'error  Bin_prot.Type_class.t
     -> ('query, 'state, 'update, 'error) t
+
+  val bin_query  : ('query, _, _, _)  t -> 'query  Bin_prot.Type_class.t
+  val bin_state  : (_, 'state, _, _)  t -> 'state  Bin_prot.Type_class.t
+  val bin_update : (_, _, 'update, _) t -> 'update Bin_prot.Type_class.t
+  val bin_error  : (_, _, _, 'error)  t -> 'error  Bin_prot.Type_class.t
 
   val implement
     :  ('query, 'state, 'update, 'error) t

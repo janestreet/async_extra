@@ -50,8 +50,8 @@ module type S = sig
 
   val create
     :  ?max_pending_connections:int
-    -> ?verbose:bool (* defaults to false *)
-    -> ?log_disconnects:bool (* defaults to true *)
+    -> ?verbose:bool (** default is [false] *)
+    -> ?log_disconnects:bool (** default is [true] *)
     -> ?buffer_age_limit:[ `At_most of Time.Span.t | `Unlimited ]
     -> port:int
     -> auth:(Unix.Inet_addr.t -> int -> [`Allow | `Deny of string option] Deferred.t)

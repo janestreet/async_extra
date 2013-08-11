@@ -14,7 +14,7 @@ open Import
 type t with sexp_of
 
 (** [create file] opens [file], creating it if it doesn't exist. *)
-val create : ?append:bool (* defaults to true *) -> string -> t Deferred.t
+val create : ?append:bool (** default is [true] *) -> string -> t Deferred.t
 
 (** [write t s] writes [s] to the file. *)
 val write : t -> string -> unit
@@ -25,7 +25,7 @@ val schedule_bigstring : t -> Bigstring.t -> unit
 
 val write_bin_prot : t -> 'a Bin_prot.Type_class.writer -> 'a -> unit
 
-val write_sexp : ?hum:bool (* defaults to false *) -> t -> Sexp.t -> unit
+val write_sexp : ?hum:bool (** default is [false] *) -> t -> Sexp.t -> unit
 
 val monitor : t -> Monitor.t
 

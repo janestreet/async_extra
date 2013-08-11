@@ -781,6 +781,9 @@ module Rpc = struct
   let name t = Rpc_tag.to_string t.tag
   let version t = t.version
 
+  let bin_query t = t.bin_query
+  let bin_response t = t.bin_response
+
   let implement t f =
     let f c query_bigstring =
       let query = of_bigstring t.bin_query query_bigstring
@@ -981,6 +984,10 @@ module Pipe_rpc = struct
       ~bin_initial_response: Unit.bin_t
       ~bin_update_response:  bin_response
 
+  let bin_query t = t.Streaming_rpc.bin_query
+  let bin_response t = t.Streaming_rpc.bin_update_response
+  let bin_error t = t.Streaming_rpc.bin_error_response
+
   let implement t f =
     Streaming_rpc.implement t (fun a query ~aborted ->
       f a query ~aborted >>| fun x ->
@@ -1021,6 +1028,11 @@ module State_rpc = struct
     Streaming_rpc.create ~name ~version ~bin_query
       ~bin_initial_response:bin_state
       ~bin_update_response:bin_update
+
+  let bin_query t = t.Streaming_rpc.bin_query
+  let bin_state t = t.Streaming_rpc.bin_initial_response
+  let bin_update t = t.Streaming_rpc.bin_update_response
+  let bin_error t = t.Streaming_rpc.bin_error_response
 
   let implement = Streaming_rpc.implement
 

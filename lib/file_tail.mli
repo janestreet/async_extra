@@ -103,13 +103,13 @@ end
     before it will report a [Delayed_due_to_null_reads_for] warning.
  *)
 val create
-  :  ?read_buf_len:int (* default 32k *)
-  -> ?read_delay:Time.Span.t (* default 0.5s *)
-  -> ?retry_null_reads:bool (* defaults to true *)
-  -> ?break_on_lines:bool (* defaults to true *)
-  -> ?ignore_inode_change:bool (* defaults to false *)
-  -> ?start_at:[ `Beginning | `End | `Pos of Int64.t ] (* default [`Beginning] *)
-  -> ?eof_latency_tolerance:Time.Span.t (* default 5s *)
-  -> ?null_read_tolerance:Time.Span.t (* default 0s *)
+  :  ?read_buf_len:int                                  (** default 32k *)
+  -> ?read_delay:Time.Span.t                            (** default 0.5s *)
+  -> ?retry_null_reads:bool                             (** default is [true] *)
+  -> ?break_on_lines:bool                               (** default is [true] *)
+  -> ?ignore_inode_change:bool                          (** default is [false] *)
+  -> ?start_at:[ `Beginning | `End | `Pos of Int64.t ]  (** default [`Beginning] *)
+  -> ?eof_latency_tolerance:Time.Span.t                 (** default 5s *)
+  -> ?null_read_tolerance:Time.Span.t                   (** default 0s *)
   -> string
   -> Update.t Pipe.Reader.t

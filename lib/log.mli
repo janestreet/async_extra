@@ -1,23 +1,22 @@
-(**
-  A library for general logging.
+(** A library for general logging.
 
-  Although this module is fully async-safe it exposes almost no Deferreds.  This is
-  partially a design choice to minimize the impact of logging in code, and partially the
-  result of organic design (i.e. older versions of this interface did the same thing).
+    Although this module is fully async-safe it exposes almost no Deferreds.  This is
+    partially a design choice to minimize the impact of logging in code, and partially the
+    result of organic design (i.e. older versions of this interface did the same thing).
 
-  A (limited) Blocking module is supplied in Global to accomodate the portion of a program
-  that runs outside of Async.
+    A (limited) [Blocking] module is supplied to accomodate the portion of a program that
+    runs outside of Async.
 *)
 open Core.Std
 open Import
 
 module Level : sig
-  (* Describes both the level of a log and the level of a message sent to a log.  There is
-     an ordering to levels (`Debug < `Info < `Error), and a log set to a level will never
-     display messages at a lower log level. *)
+  (** Describes both the level of a log and the level of a message sent to a log.  There
+      is an ordering to levels (`Debug < `Info < `Error), and a log set to a level will
+      never display messages at a lower log level. *)
   type t = [
     | `Debug
-    | `Info  (* default level *)
+    | `Info  (** default level *)
     | `Error ]
     with sexp
 
@@ -34,23 +33,24 @@ module Message : sig
 end
 
 module Rotation : sig
-  (* description of boundaries for file rotation.
+  (** description of boundaries for file rotation.
 
-     If all fields are None the file will never be rotated.  Any field set to Some _ will
-     cause rotation to happen when that boundary is crossed.  Multiple boundaries may be
-     set.  Log rotation always causses incrementing rotation conditions (e.g. size) to
-     reset.
+      If all fields are [None] the file will never be rotated.  Any field set to [Some]
+      will cause rotation to happen when that boundary is crossed.  Multiple boundaries
+      may be set.  Log rotation always causses incrementing rotation conditions
+      (e.g. size) to reset.
 
-     The condition [keep] is special and does not follow the rules above.  When a log is
-     rotated [keep] is examined and logs that do not fall under its instructions are
-     deleted.  This deletion takes place on rotation only, and so may not happen.  The
-     meaning of keep options are:
-       | `All -> never delete
-       | `Newer_than span ->
-         delete files with a timestamp older than (Time.sub (Time.now ()) span).  This
+      The condition [keep] is special and does not follow the rules above.  When a log is
+      rotated [keep] is examined and logs that do not fall under its instructions are
+      deleted.  This deletion takes place on rotation only, and so may not happen.  The
+      meaning of keep options are:
+
+      - [`All] -- never delete
+      - [`Newer_than span] --
+         delete files with a timestamp older than [Time.sub (Time.now ()) span].  This
          normally means keeping files that contain at least one message logged within
          span.  If span is short enough this option can delete a just rotated file.
-       | `At_least i -> keep the i most recent files
+      - [`At_least i] -- keep the i most recent files
 
     WARNING: The rotating file functionality of Log is the most poorly tested, and in many
     ways the most complex.  Before using this mode in anger you should test failure cases
@@ -86,14 +86,14 @@ module Output : sig
 
   val stdout        : unit -> t
   val stderr        : unit -> t
-  (* see Async_extended.Syslog for syslog output *)
+  (** see {!Async_extended.Syslog} for syslog output. *)
   val writer        : format -> Writer.t -> t
   val file          : format -> filename:string -> t
   val rotating_file : format -> basename:string -> Rotation.t -> t
 end
 
 module Blocking : sig
-  (* Async programs often have a non-async portion that runs before the scheduler begins
+  (** Async programs often have a non-async portion that runs before the scheduler begins
       to capture command line options, do setup, read configs, etc.  This module provides
       limited global logging functions to be used during that period.  Calling these
       functions after the scheduler has started will raise an exception.  They otherwise
@@ -104,7 +104,8 @@ module Blocking : sig
 
     val stdout : t
     val stderr : t
-    (* see Async_extended.Syslog for syslog output *)
+
+    (** See {!Async_extended.Syslog} for syslog output. *)
 
     val create : (Message.t -> unit) -> t
   end
@@ -128,7 +129,7 @@ end
 
 type t
 
-(* An interface for singleton logs *)
+(** An interface for singleton logs *)
 module type Global_intf = sig
   val log : t Lazy.t
 
@@ -165,13 +166,13 @@ module type Global_intf = sig
   val message : Message.t -> unit
 end
 
-(* This functor can be called to generate "singleton" logging modules *)
-module Make_global(Empty : sig end) : Global_intf
+(** This functor can be called to generate "singleton" logging modules *)
+module Make_global (Empty : sig end) : Global_intf
 
-(* Programs that want simplistic single-channel logging can open this module.  It
-   provides a global logging facility to a single output type at a single level.
-   More nuanced logging can be had by using the functions that operate on a
-   distinct Log.t type. *)
+(** Programs that want simplistic single-channel logging can open this module.  It
+    provides a global logging facility to a single output type at a single level.  More
+    nuanced logging can be had by using the functions that operate on a distinct Log.t
+    type. *)
 module Global : Global_intf
 
 (** [set_level] sets the level of the given log.  Messages sent at a level less than the
