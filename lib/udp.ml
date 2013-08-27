@@ -12,6 +12,7 @@ module Config = struct
     ; init : write_buffer
     ; before : write_buffer -> unit
     ; after : write_buffer -> unit
+    ; stop : unit Deferred.t
     } with fields
 
   let create
@@ -19,9 +20,10 @@ module Config = struct
         ?(init = Iobuf.create ~len:capacity)
         ?(before = Iobuf.flip_lo)
         ?(after = Iobuf.reset)
+        ?(stop = Deferred.never ())
         ()
     =
-    { capacity; init; before; after }
+    { capacity; init; before; after; stop }
 end
 
 let fail buf message a sexp_of_a =
@@ -51,13 +53,16 @@ let sendto () =
   |> Or_error.map ~f:(fun sendto ->
     (fun fd buf addr ->
        let addr = Unix.Socket.Address.to_sockaddr addr in
+       let stop = Ivar.create () in
        (* Iobuf.sendto_nonblocking_no_sigpipe returns EAGAIN and EWOULDBLOCK through an
           option rather than an exception. *)
-       Fd.ready_fold fd ~stop:Option.is_some ~init:None `Write ~f:(fun _ desc ->
-         sendto buf desc addr)
+       Fd.ready_fold fd ~stop:(Ivar.read stop) ~init:`None `Write ~f:(fun _ desc ->
+         match sendto buf desc addr with
+         | None -> `None
+         | Some _ -> Ivar.fill stop (); `Some)
        >>| function
-       | None -> fail buf "Closed" addr <:sexp_of< Core.Std.Unix.sockaddr >>
-       | Some _ -> ()))
+       | `None -> fail buf "Closed" addr <:sexp_of< Core.Std.Unix.sockaddr >>
+       | `Some -> ()))
 ;;
 
 let bind ?ifname addr =
@@ -81,7 +86,8 @@ let bind_any () =
 ;;
 
 let recvfrom_loop_with_buffer_replacement ?(config = Config.create ()) fd callback =
-  Fd.ready_fold fd ~init:(Config.init config) `Read ~f:(fun buf desc ->
+  let stop = Config.stop config in
+  Fd.ready_fold ~stop fd ~init:(Config.init config) `Read ~f:(fun buf desc ->
     let buf_len_before = Iobuf.length buf in
     let len, addr = Iobuf.recvfrom_assume_fd_is_nonblocking buf desc in
     if len <> buf_len_before - Iobuf.length buf
@@ -107,7 +113,8 @@ let recvfrom_loop ?config fd callback =
 
 (* We don't care about the address, so read instead of recvfrom. *)
 let read_loop_with_buffer_replacement ?(config = Config.create ()) fd callback =
-  Fd.ready_fold fd ~init:(Config.init config) `Read ~f:(fun buf desc ->
+  let stop = Config.stop config in
+  Fd.ready_fold ~stop fd ~init:(Config.init config) `Read ~f:(fun buf desc ->
     let buf_len_before = Iobuf.length buf in
     let len = Iobuf.read_assume_fd_is_nonblocking buf desc in
     if len <> buf_len_before - Iobuf.length buf
@@ -150,7 +157,9 @@ let recvmmsg_loop =
                  (Socket.Address.to_sockaddr (`Inet (Unix.Inet_addr.bind_any, 0))))
           else None
         in
-        Fd.ready_fold fd ~init:() `Read ~f:(fun () desc ->
+          let stop = Config.stop config in
+
+        Fd.ready_fold ~stop fd ~init:() `Read ~f:(fun () desc ->
           let count = recvmmsg ?srcs desc bufs in
           if count > Array.length bufs
           then

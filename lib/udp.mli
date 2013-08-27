@@ -3,7 +3,7 @@
 
     Defaults are chosen for typical UDP applications.  Buffering is via [Iobuf]
     conventions, where a typical packet-handling loop iteration is
-    read-[flip]-process-[reset].
+    read-[flip_lo]-process-[reset].
 
     For zero-copy [Bigstring.t] transfers, we must ensure no buffering between the receive
     loop and caller.  So, an interface like [Tcp.connect], with something like
@@ -36,13 +36,16 @@ val default_capacity : int
     when doing buffer management in the callback.  One can also specify an action, such as
     [~after:Iobuf.compact] for use with [read_loop] on a connection-oriented socket or
     file.  It's often convenient to use the same interface for UDP, TCP, and file variants
-    of the same protocol. *)
+    of the same protocol.
+
+    [stop] terminates a typical loop as soon as possible, when it becomes determined. *)
 module Config : sig
   type t =
     { capacity : int
     ; init : write_buffer
     ; before : write_buffer -> unit
     ; after : write_buffer -> unit
+    ; stop : unit Deferred.t
     } with fields
 
   val create
@@ -50,6 +53,7 @@ module Config : sig
     -> ?init:write_buffer               (** default is [Iobuf.create ~len:capacity] *)
     -> ?before:(write_buffer -> unit)   (** default is [Iobuf.flip_lo] *)
     -> ?after:(write_buffer -> unit)    (** default is [Iobuf.reset] *)
+    -> ?stop:(unit Deferred.t)          (** default is [Deferred.never] *)
     -> unit
     -> t
 end

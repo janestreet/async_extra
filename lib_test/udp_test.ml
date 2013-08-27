@@ -44,6 +44,29 @@ let with_socks expected sexp_of f =
              (List.sexp_of_t sexp_of)
              (List.sexp_of_t sexp_of))
 
+let tests = tests @ [
+  "stop smoke", (fun () ->
+    let prefix = ["a"; "b"] in
+    let suffix = ["c"; "d"] in
+    with_socks prefix <:sexp_of< string >> (fun ~sock1 ~sock2 ~effect ~addr1:_ ~addr2 ->
+      match sendto () with
+      | Error e -> eprintf "%s\n" (Error.to_string_hum e); Deferred.unit
+      | Ok sendto ->
+        Deferred.all_unit [
+          (Deferred.List.iter ~how:`Sequential (prefix @ suffix)
+             ~f:(fun str ->
+               sendto (Socket.fd sock1) (Iobuf.of_string str) addr2
+               >>= fun () ->
+               after (Time.Span.of_us 1.)));
+          (let sign = Ivar.create () in
+           let stop = Ivar.read sign in
+           read_loop ~config:(Config.create ~stop ()) (Socket.fd sock2) (fun buf ->
+             let str = Iobuf.to_string buf in
+             effect str;
+             if String.equal str (List.last_exn prefix) then Ivar.fill sign ()));
+        ]));
+]
+
 let with_fsts send expected sexp_of receiver =
   match send with
   | Error e -> eprintf "%s\n" (Error.to_string_hum e); Deferred.unit
