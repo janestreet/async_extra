@@ -47,7 +47,7 @@ module Rotation = struct
     naming_scheme : [ `Numbered | `Timestamped ]
   } with sexp,fields
 
-  let should_rotate t ~last_messages ~last_size ~last_time =
+  let should_rotate t ~last_messages ~last_size ~last_time ~current_time =
     Fields.fold ~init:false
       ~messages:(fun acc field ->
         match Field.get field t with
@@ -62,7 +62,6 @@ module Rotation = struct
         | None -> acc
         | Some (rotation_ofday,zone) ->
           let rotation_time = Time.of_date_ofday zone (Date.today ()) rotation_ofday in
-          let current_time  = Time.now () in
           acc || (current_time >= rotation_time && last_time <= rotation_time))
       ~keep:(fun acc _ -> acc)
       ~naming_scheme:(fun acc _ -> acc)
@@ -334,11 +333,12 @@ end = struct
         in
         fun msgs ->
           finished_rotation >>= fun dirname ->
+          let current_time = Time.now () in
           begin
             if
               Rotation.should_rotate rotation ~last_messages:!last_messages
                 ~last_size:(Byte_units.create `Bytes (Float.of_int !last_size))
-                ~last_time:!last_time
+                ~last_time:!last_time ~current_time
             then begin
               rotate ~dirname ~basename rotation.Rotation.keep
               >>| fun () ->
@@ -351,7 +351,7 @@ end = struct
           >>| fun size ->
           last_messages := !last_messages + 1;
           last_size     := !last_size + Int63.to_int_exn size;
-          last_time     := Time.now ()
+          last_time     := current_time
       ;;
     end
 
