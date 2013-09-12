@@ -1,0 +1,25 @@
+# OASIS_START
+# DO NOT EDIT (digest: d540f7c8ada23f62d471c7612f41d4ec)
+Command
+Dynamic_port_writer
+File_tail
+File_writer
+Import
+Lock_file
+Log
+Persistent_singleton
+Rpc
+Rpc_intf
+Sequencer_table
+Std
+Tcp
+Tcp_file
+Typed_tcp
+Typed_tcp_intf
+Udp
+Unpack_sequence
+User_and_group
+Versioned_rpc
+Versioned_typed_tcp
+Weak_hashtbl
+# OASIS_STOP
