@@ -42,7 +42,7 @@ module Rotation = struct
   type t = {
     messages      : int option;
     size          : Byte_units.t option;
-    time          : (Time.Ofday.t * Zone.t) option;
+    time          : (Time.Ofday.t * Time.Zone.t) option;
     keep          : [ `All | `Newer_than of Time.Span.t | `At_least of int ];
     naming_scheme : [ `Numbered | `Timestamped ]
   } with sexp,fields
@@ -655,12 +655,13 @@ end = struct
   let set_output output = write := output
 
   let write msg =
-    if Scheduler.is_running () then
-      failwith "Log.Global.Blocking function called after scheduler started";
-    match Message.level msg with
+    begin match Message.level msg with
     | None   -> !write msg
     | Some l ->
       if Level.equal_or_more_verbose_than !level l then !write msg
+    end;
+    if Scheduler.is_running () then
+      failwith "Log.Global.Blocking function called after scheduler started";
   ;;
 
   let gen ?(tags=[]) level k =
