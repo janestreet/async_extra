@@ -70,4 +70,5 @@ module type S = sig
   val send_ignore_errors : t -> Client_id.t -> Server_message.t -> unit
   val send_to_all : t -> Server_message.t -> unit
   val client_addr_port : t -> Client_id.t -> (Unix.Inet_addr.t * int) option
+  val port : t -> int
 end

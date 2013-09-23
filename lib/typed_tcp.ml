@@ -39,6 +39,7 @@ module Make (Arg : Arg) = struct
     socket : ([ `Passive ], Socket.Address.Inet.t) Socket.t;
     auth : Unix.Inet_addr.t -> int -> [`Allow | `Deny of string option] Deferred.t;
     buffer_age_limit : [ `At_most of Time.Span.t | `Unlimited ] option;
+    server_port : int;
   }
 
   let try_with = Monitor.try_with
@@ -182,7 +183,8 @@ module Make (Arg : Arg) = struct
       | Error e ->
         Unix.close (Socket.fd s) >>| fun () -> raise e
       | Ok s ->
-        let s = Socket.listen s ?max_pending_connections in
+        let server_port = Socket.Address.Inet.port (Socket.getsockname s) in
+        let s           = Socket.listen s ?max_pending_connections in
         let result_reader, result_writer = Pipe.create () in
         let t =
           { verbose;
@@ -194,10 +196,13 @@ module Make (Arg : Arg) = struct
             socket = s;
             auth = auth;
             buffer_age_limit;
+            server_port;
           }
         in
         return t
   ;;
+
+  let port t = t.server_port
 
   let client_addr_port t id =
     Option.map (Hashtbl.find t.clients id) ~f:(fun cl ->

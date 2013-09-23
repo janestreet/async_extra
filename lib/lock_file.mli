@@ -44,7 +44,7 @@ module Nfs : sig
   val create         : ?message : string -> string -> bool Deferred.t
   val create_exn     : ?message : string -> string -> unit Deferred.t
   val waiting_create : ?message : string -> string -> unit Deferred.t
-  val unlock_safely  : string -> unit Deferred.t
+  val unlock_exn     : string -> unit Deferred.t
 
   val critical_section
     : ?message : string

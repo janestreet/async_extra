@@ -43,7 +43,9 @@ module Make (Key : Hashable) = struct
         let queue = Queue.create () in
         Queue.enqueue queue job;
         Hashtbl.replace t.jobs ~key ~data:queue;
-        run_jobs_until_none_remain t ~key queue
+        (* never start a job in the same async job *)
+        upon Deferred.unit (fun () ->
+          run_jobs_until_none_remain t ~key queue);
     )
     >>| function
     | Error exn -> raise (Monitor.extract_exn exn)
@@ -78,6 +80,18 @@ TEST_MODULE = struct
   let (=) = Pervasives.(=)
 
   exception Abort of int
+
+
+  TEST_UNIT =
+    Thread_safe.block_on_async_exn (fun () ->
+      let t = T.create () in
+      let i = ref 0 in
+      let res = T.enqueue t ~key:0 (fun _ -> incr i; Deferred.unit) in
+      (* don't run a job immediately *)
+      assert (!i = 0);
+      res >>| fun () ->
+      assert (!i = 1)
+    )
 
   TEST_UNIT =
     Thread_safe.block_on_async_exn (fun () ->

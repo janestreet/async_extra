@@ -29,8 +29,8 @@ module Nfs = struct
     In_thread.run (fun () -> Core.Std.Lock_file.Nfs.get_message path)
   ;;
 
-  let unlock_safely path =
-    In_thread.run (fun () -> Core.Std.Lock_file.Nfs.unlock_safely path)
+  let unlock_exn path =
+    In_thread.run (fun () -> Core.Std.Lock_file.Nfs.unlock_exn path)
   ;;
 
   let create ?message path =
@@ -54,6 +54,6 @@ module Nfs = struct
   let critical_section ?message path ~f =
     create_exn ?message path
     >>= fun () ->
-    Monitor.protect f ~finally:(fun () -> unlock_safely path)
+    Monitor.protect f ~finally:(fun () -> unlock_exn path)
   ;;
 end
