@@ -24,10 +24,12 @@ val create_exn
   -> string
   -> unit Deferred.t
 
-(** [wait_create ~path ~message] becomes determined when the file at [path] gets locked.
-    Equivalent to [Core.Std.Lock_file.blocking_create]. *)
+(** [waiting_create path] repeatedly tries to lock [path], becoming determined when [path]
+    is locked or raising when [abort] becomes determined.  Similar to
+    [Core.Std.Lock_file.blocking_create]. *)
 val waiting_create
-  :  ?message:string
+  :  ?abort : unit Deferred.t (** default is [Deferred.never ()] *)
+  -> ?message:string
   -> ?close_on_exec : bool (** default is [true] *)
   -> ?unlink_on_exit : bool (** default is [false] *)
   -> string
@@ -43,12 +45,19 @@ val is_locked : string -> bool Deferred.t
 module Nfs : sig
   val create         : ?message : string -> string -> bool Deferred.t
   val create_exn     : ?message : string -> string -> unit Deferred.t
-  val waiting_create : ?message : string -> string -> unit Deferred.t
+
+  val waiting_create
+    :  ?abort:unit Deferred.t  (** default is [Deferred.never ()]. *)
+    -> ?message : string
+    -> string
+    -> unit Deferred.t
+
   val unlock_exn     : string -> unit Deferred.t
 
   val critical_section
-    : ?message : string
+    :  ?message : string
     -> string
+    -> abort:unit Deferred.t
     -> f : (unit -> 'a Deferred.t)
     -> 'a Deferred.t
 

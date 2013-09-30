@@ -542,7 +542,7 @@ module Make (Z : Arg) :
         (* header has two fields, [time_stamp] which is 8 bytes over bin_io, and
            [body_length] which is variable length encoded int that can in theory be 1 to 8
            bytes over bin_io, but in practice it doesn't take more than 3 bytes *)
-        let hdr_len = Bin_prot.Read_ml.bin_read_int_64bit buf ~pos_ref in
+        let hdr_len = Bin_prot.Read.bin_read_int_64bit buf ~pos_ref in
         if len_len + hdr_len > len then
           return (`Consumed (consumed, `Need (len_len + hdr_len)))
         else begin
