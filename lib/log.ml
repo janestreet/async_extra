@@ -169,8 +169,8 @@ module Output : sig
      of type: Level.t -> string -> unit Deferred.t.  It is the responsibility of the write
      function to contain all state, and to clean up after itself.
   *)
-  type machine_readable_format = [`Sexp | `Bin_prot ]
-  type format = [ machine_readable_format | `Text ]
+  type machine_readable_format = [`Sexp | `Bin_prot ] with sexp
+  type format = [ machine_readable_format | `Text ] with sexp
 
   type t with sexp_of
 
@@ -185,8 +185,8 @@ module Output : sig
 
   val combine : t list -> t
 end = struct
-  type machine_readable_format = [`Sexp | `Bin_prot ]
-  type format = [ machine_readable_format | `Text ]
+  type machine_readable_format = [`Sexp | `Bin_prot ] with sexp
+  type format = [ machine_readable_format | `Text ] with sexp
 
   type t = Message.t Queue.t -> unit Deferred.t
 
