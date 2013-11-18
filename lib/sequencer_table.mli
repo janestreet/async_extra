@@ -42,9 +42,17 @@ module Make (Key : Hashable) : sig
   val create : unit -> _ t
 
   (** [enqueue t ~key f] enqueues [f] for [key].  [f] will be called with the state of
-      [key] when invoked.  It is guaranteed that [f] will not be called immediately.  If
-      [f] raises, then the exception will be raised to the monitor in effect when
-      [enqueue] was called.  Subsequent jobs for [key] will proceed. *)
+      [key] when invoked.
+
+      Invariant 1: it is guaranteed that [f] will not be called immediately.
+
+      Invariant 2: if [f] raises, then the exception will be raised to the monitor in
+      effect when [enqueue] was called.  Subsequent jobs for [key] will proceed.
+
+      Invariant 3: to avoid race, there are no deferred operations between finding the
+      state and calling [f] with the state found.  Otherwise, the user would need to
+      consider the race that the state passed to [f] might have been changed by
+      [set_state]. *)
   val enqueue : 'a t -> key:Key.t -> ('a option -> 'b Deferred.t) -> 'b Deferred.t
 
   (** [set_state t key state_opt] sets the state for [key] immediately.  The state will be

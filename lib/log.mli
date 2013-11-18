@@ -86,10 +86,11 @@ module Output : sig
 
   val stdout        : unit -> t
   val stderr        : unit -> t
-  (** see {!Async_extended.Syslog} for syslog output. *)
   val writer        : format -> Writer.t -> t
   val file          : format -> filename:string -> t
   val rotating_file : format -> basename:string -> Rotation.t -> t
+  (** see {!Async_extended.Syslog} for syslog output. *)
+  (** See {!Textutils.Console} for colorized console output. *)
 end
 
 module Blocking : sig
@@ -106,6 +107,7 @@ module Blocking : sig
     val stderr : t
 
     (** See {!Async_extended.Syslog} for syslog output. *)
+    (** See {!Textutils.Console} for colorized console output. *)
 
     val create : (Message.t -> unit) -> t
   end

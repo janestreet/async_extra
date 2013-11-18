@@ -43,7 +43,7 @@ val is_locked : string -> bool Deferred.t
     In addition to adding [Deferred]'s, [blocking_create] was renamed [waiting_create] to
     avoid the impression that it blocks async. *)
 module Nfs : sig
-  val create         : ?message : string -> string -> bool Deferred.t
+  val create         : ?message : string -> string -> unit Deferred.Or_error.t
   val create_exn     : ?message : string -> string -> unit Deferred.t
 
   val waiting_create
@@ -53,6 +53,7 @@ module Nfs : sig
     -> unit Deferred.t
 
   val unlock_exn     : string -> unit Deferred.t
+  val unlock         : string -> unit Deferred.Or_error.t
 
   val critical_section
     :  ?message : string

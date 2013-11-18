@@ -1,4 +1,5 @@
 module Command              = Command
+module Cpu_usage            = Cpu_usage
 module Dynamic_port_writer  = Dynamic_port_writer
 module File_tail            = File_tail
 module File_writer          = File_writer

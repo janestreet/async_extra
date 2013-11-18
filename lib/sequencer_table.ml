@@ -1,6 +1,8 @@
 open Core.Std
 open Import
 
+let debug_on_find_state = ref ignore
+
 module Make (Key : Hashable) = struct
   type 'a t =
     { states : 'a Key.Table.t
@@ -20,8 +22,11 @@ module Make (Key : Hashable) = struct
     match Queue.peek queue with
     | None -> Hashtbl.remove t.jobs key
     | Some job ->
-      job (Hashtbl.find t.states key)
-      >>> fun () ->
+      (* The state of [key] is found and fed to [job] immediately; there should be no
+         deferred in between. *)
+      let state = Hashtbl.find t.states key in
+      !debug_on_find_state ();
+      job state >>> fun () ->
       assert (phys_equal (Queue.dequeue_exn queue) job);
       run_jobs_until_none_remain t ~key queue;
   ;;
@@ -33,8 +38,10 @@ module Make (Key : Hashable) = struct
 
   let enqueue t ~key f =
     Deferred.create (fun ivar ->
+      (* when job is called, [f] is invoked immediately, there shall be no deferred in
+         between *)
       let job state_opt =
-        Monitor.try_with (fun () -> f state_opt) >>| Ivar.fill ivar
+        Monitor.try_with ~run:`Now (fun () -> f state_opt) >>| Ivar.fill ivar
       in
       match Hashtbl.find t.jobs key with
       | Some queue ->
@@ -81,16 +88,33 @@ TEST_MODULE = struct
 
   exception Abort of int
 
-
   TEST_UNIT =
+    (* don't run a job immediately *)
     Thread_safe.block_on_async_exn (fun () ->
       let t = T.create () in
       let i = ref 0 in
       let res = T.enqueue t ~key:0 (fun _ -> incr i; Deferred.unit) in
-      (* don't run a job immediately *)
       assert (!i = 0);
       res >>| fun () ->
       assert (!i = 1)
+    )
+
+  TEST_UNIT =
+    (* no deferred between finding state and running the job *)
+    (* let [enqueue] function, when [Monitor.try_with] did not take [~run:`Now], then this
+       unit test failed to pass *)
+    Thread_safe.block_on_async_exn (fun () ->
+      let t = T.create () in
+      let i = ref `init in
+      debug_on_find_state := (fun () ->
+        Deferred.unit >>> fun () -> i := `deferred_determined
+      );
+      T.enqueue t ~key:0 (fun _ ->
+        <:test_eq<[`init | `deferred_determined]>> !i `init;
+        Deferred.unit
+      )
+      >>| fun () ->
+      debug_on_find_state := ignore
     )
 
   TEST_UNIT =

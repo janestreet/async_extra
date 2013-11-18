@@ -54,18 +54,24 @@ module Nfs = struct
     In_thread.run (fun () -> Core.Std.Lock_file.Nfs.unlock_exn path)
   ;;
 
+  let unlock path =
+    In_thread.run (fun () -> Core.Std.Lock_file.Nfs.unlock path)
+  ;;
+
   let create ?message path =
     In_thread.run (fun () -> Core.Std.Lock_file.Nfs.create ?message path)
   ;;
 
   let create_exn ?message path =
-    create ?message path
-    >>| fun b ->
-    if not b then failwiths "Lock_file.Nfs.create" path <:sexp_of< string >>
+    In_thread.run (fun () -> Core.Std.Lock_file.Nfs.create_exn ?message path)
   ;;
 
   let waiting_create ?(abort = Deferred.never ()) ?message path =
-    repeat_with_abort ~abort ~f:(fun () -> create ?message path)
+    repeat_with_abort ~abort ~f:(fun () ->
+      create ?message path
+      >>| function
+        | Ok ()   -> true
+        | Error _ -> false)
     >>| fail_on_abort path
   ;;
 

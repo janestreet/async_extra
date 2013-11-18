@@ -33,7 +33,7 @@ module Level = struct
 end
 
 module Rotation = struct
-  (* description of bounderies for file rotation.  If all fields are None the file will
+  (* description of boundaries for file rotation.  If all fields are None the file will
      never be rotated.  Any field set to Some _ will cause rotation to happen when that
      boundary is crossed.  Multiple boundaries may be set.  Log rotation always causes
      incrementing rotation conditions (e.g. size) to reset, though this is the
