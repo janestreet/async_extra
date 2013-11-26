@@ -5,8 +5,10 @@ open Import
     different types.  We use ['a where_to_connect] to specify a socket to connect to,
     where the ['a] identifies the type of socket. *)
 type 'a where_to_connect constraint 'a = [< Socket.Address.t ]
-val to_host_and_port : string -> int -> Socket.Address.Inet.t where_to_connect
-val to_file          :        string -> Socket.Address.Unix.t where_to_connect
+val to_host_and_port : string -> int         -> Socket.Address.Inet.t where_to_connect
+val to_file          : string                -> Socket.Address.Unix.t where_to_connect
+val to_inet_address  : Socket.Address.Inet.t -> Socket.Address.Inet.t where_to_connect
+val to_unix_address  : Socket.Address.Unix.t -> Socket.Address.Unix.t where_to_connect
 
 type 'a with_connect_options =
   ?buffer_age_limit:[ `At_most of Time.Span.t | `Unlimited ]

@@ -25,6 +25,18 @@ let to_file file =
   }
 ;;
 
+let to_inet_address address =
+  { socket_type = Socket.Type.tcp;
+    address = fun () -> return address;
+  }
+;;
+
+let to_unix_address address =
+  { socket_type = Socket.Type.unix;
+    address = fun () -> return address;
+  }
+;;
+
 let create_socket socket_type =
   let s = Socket.create socket_type in
   Unix.set_close_on_exec (Unix.Socket.fd s);
