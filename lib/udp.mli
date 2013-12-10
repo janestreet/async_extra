@@ -5,6 +5,9 @@
     conventions, where a typical packet-handling loop iteration is
     read-[flip_lo]-process-[reset].
 
+    While these functions are oriented toward UDP, they work with any files that satisfy
+    [Fd.supports_nonblock].
+
     For zero-copy [Bigstring.t] transfers, we must ensure no buffering between the receive
     loop and caller.  So, an interface like [Tcp.connect], with something like
     [(Bigstring.t * Socket.Address.Inet.t) Pipe.Reader.t], won't work.
@@ -83,8 +86,7 @@ val bind
 
 val bind_any : unit -> ([ `Bound ], Socket.Address.Inet.t) Socket.t Deferred.t
 
-(* Loops, including [recvfrom_loop], terminate normally when the socket is closed.  See
-   {!Fd.ready_fold}. *)
+(* Loops, including [recvfrom_loop], terminate normally when the socket is closed. *)
 val recvfrom_loop
   :  ?config:Config.t
   -> Fd.t
@@ -124,14 +126,28 @@ val read_loop_with_buffer_replacement
     [Config.init config] is used as a prototype for [bufs] and as one of the elements. *)
 val recvmmsg_loop
   : (?config:Config.t                   (** default is [Config.create ()] *)
-     -> Fd.t
      -> ?create_srcs:bool               (** default is [false] *)
      -> ?max_count:int
      -> ?bufs:(write_buffer array)      (** supplies the packet buffers explicitly *)
+     -> Fd.t
      -> (?srcs:(Core.Std.Unix.sockaddr array)
          -> write_buffer array
          -> count:int
          -> unit)                       (** may modify [bufs] or [srcs] *)
+     -> unit Deferred.t)
+      Or_error.t
+
+(** [recvmmsg_no_sources_loop ~socket callback] is identical to [recvmmsg_loop], but can
+    be used when sources are ignored to avoid some overhead incurred by optional
+    arguments. *)
+val recvmmsg_no_sources_loop
+  : (?config:Config.t                   (** default is [Config.create ()] *)
+     -> Fd.t
+     -> ?max_count:int
+     -> ?bufs:(write_buffer array)      (** supplies the packet buffers explicitly *)
+     -> (write_buffer array
+         -> count:int
+         -> unit)                       (** may modify [bufs] *)
      -> unit Deferred.t)
       Or_error.t
 

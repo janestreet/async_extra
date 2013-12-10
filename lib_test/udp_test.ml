@@ -44,6 +44,8 @@ let with_socks expected sexp_of f =
              (List.sexp_of_t sexp_of)
              (List.sexp_of_t sexp_of))
 
+exception Stop
+
 let tests = tests @ [
   "stop smoke", (fun () ->
     let prefix = ["a"; "b"] in
@@ -56,14 +58,13 @@ let tests = tests @ [
           (Deferred.List.iter ~how:`Sequential (prefix @ suffix)
              ~f:(fun str ->
                sendto (Socket.fd sock1) (Iobuf.of_string str) addr2
-               >>= fun () ->
-               after (Time.Span.of_us 1.)));
-          (let sign = Ivar.create () in
-           let stop = Ivar.read sign in
-           read_loop ~config:(Config.create ~stop ()) (Socket.fd sock2) (fun buf ->
-             let str = Iobuf.to_string buf in
-             effect str;
-             if String.equal str (List.last_exn prefix) then Ivar.fill sign ()));
+               >>= fun () -> after (Time.Span.of_us 1.)));
+          (Monitor.try_with ~extract_exn:true (fun () ->
+             read_loop (Socket.fd sock2) (fun buf ->
+               let str = Iobuf.to_string buf in
+               effect str;
+               if String.equal str (List.last_exn prefix) then raise Stop))
+           >>| function Error Stop | Ok () -> () | Error e -> raise e);
         ]));
 ]
 
@@ -135,9 +136,8 @@ let tests = tests @ [
                     ]
        <:sexp_of< string * int >>
        (fun ~sock2 ~effect ->
-          recvmmsg_loop (Socket.fd sock2)
-            (fun ?srcs:_ bufs ~count ->
-               for i = 0 to count - 1
-               do effect (Iobuf.to_string bufs.(i), i)
-               done)))
+          recvmmsg_loop (Socket.fd sock2) (fun ?srcs:_ bufs ~count ->
+            for i = 0 to count - 1
+            do effect (Iobuf.to_string bufs.(i), i)
+            done)))
 ]
