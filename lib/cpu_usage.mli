@@ -17,13 +17,13 @@ open Import
 
     Pushback is not honored on the pipe and the pipe will grow unbounded in memory if it
     is not read from. *)
-val samples : unit -> float Pipe.Reader.t
+val samples : unit -> Percent.t Pipe.Reader.t
 
 module Summary : sig
   type t =
-    { min : float
-    ; max : float
-    ; avg : float
+    { min : Percent.t
+    ; max : Percent.t
+    ; avg : Percent.t
     }
   with bin_io, sexp
 end

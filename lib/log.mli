@@ -1,6 +1,6 @@
 (** A library for general logging.
 
-    Although this module is fully async-safe it exposes almost no Deferreds.  This is
+    Although this module is fully Async-safe it exposes almost no Deferreds.  This is
     partially a design choice to minimize the impact of logging in code, and partially the
     result of organic design (i.e. older versions of this interface did the same thing).
 
@@ -89,16 +89,16 @@ module Output : sig
   val writer        : format -> Writer.t -> t
   val file          : format -> filename:string -> t
   val rotating_file : format -> basename:string -> Rotation.t -> t
-  (** see {!Async_extended.Syslog} for syslog output. *)
+  (** See {!Async_extended.Syslog} for syslog output. *)
   (** See {!Textutils.Console} for colorized console output. *)
 end
 
 module Blocking : sig
-  (** Async programs often have a non-async portion that runs before the scheduler begins
+  (** Async programs often have a non-Async portion that runs before the scheduler begins
       to capture command line options, do setup, read configs, etc.  This module provides
       limited global logging functions to be used during that period.  Calling these
       functions after the scheduler has started will raise an exception.  They otherwise
-      behave similarly to the logging functions in the async world. *)
+      behave similarly to the logging functions in the Async world. *)
 
   module Output : sig
     type t
@@ -129,7 +129,7 @@ module Blocking : sig
   val debug : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
 end
 
-type t
+type t with sexp_of
 
 (** An interface for singleton logs *)
 module type Global_intf = sig

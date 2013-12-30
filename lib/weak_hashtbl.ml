@@ -19,10 +19,10 @@ let create hashable =
   set_run_when_unused_data t ~thread_safe_f:(fun () ->
     if not !reclaim_will_happen then begin
       reclaim_will_happen := true;
-      let module Scheduler = Async_core.Scheduler in
-      let module Job = Async_core.Job in
-      Scheduler.thread_safe_enqueue_finalizer_job (Scheduler.t ())
-        (Job.create Scheduler.main_execution_context reclaim ());
+      let module Scheduler = Async_kernel.Scheduler in
+      let scheduler = Scheduler.t () in
+      Scheduler.thread_safe_enqueue_external_action scheduler (fun () ->
+        Scheduler.enqueue scheduler Scheduler.main_execution_context reclaim ());
     end);
   t
 ;;

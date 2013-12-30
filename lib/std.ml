@@ -1,3 +1,4 @@
+module Bus                  = Bus
 module Command              = Command
 module Cpu_usage            = Cpu_usage
 module Dynamic_port_writer  = Dynamic_port_writer

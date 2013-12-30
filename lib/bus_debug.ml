@@ -1,5 +1,5 @@
 open Core.Std
-open Async_core.Std
+open Async_kernel.Std
 
 module Debug (Bus : module type of Bus) = struct
 

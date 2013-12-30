@@ -249,6 +249,13 @@ TEST_MODULE = (struct
       flushed t)
   ;;
 
+  TEST_UNIT = (* unsubscribing from the wrong bus raises *)
+    let t1 = create ~can_subscribe_after_start:false in
+    let t2 = create ~can_subscribe_after_start:false in
+    let subscriber = subscribe_exn t1 ~f:(fun _ -> ()) in
+    assert (does_raise (fun () -> unsubscribe t2 subscriber));
+  ;;
+
   let reader_exn = reader_exn
 
   TEST_UNIT = (* readers don't block lockstep subscribers *)

@@ -3,6 +3,8 @@ open Import
 
 let verbose = false
 
+module Bus_id = Unique_id.Int (struct end)
+
 module State = struct
   type t =
     | Created
@@ -15,7 +17,8 @@ open State
 
 module Subscriber = struct
   type 'a t =
-    { mutable am_subscribed   : bool
+    { bus_id                  : Bus_id.t
+    ; mutable am_subscribed   : bool
     ; mutable subscribers_elt : 'a t sexp_opaque Bag.Elt.t option
     ; f                       : 'a -> unit
     ; send_f_raises_to        : Monitor.t
@@ -26,6 +29,7 @@ module Subscriber = struct
     Invariant.invariant _here_ t <:sexp_of< _ t >> (fun () ->
       let check f = Invariant.check_field t f in
       Fields.iter
+        ~bus_id:ignore
         ~am_subscribed:ignore
         ~f:ignore
         ~send_f_raises_to:ignore
@@ -57,7 +61,8 @@ module Todo = struct
 end
 
 type 'a t =
-  { mutable state             : State.t
+  { id                        : Bus_id.t
+  ; mutable state             : State.t
   ; can_subscribe_after_start : bool
   ; subscribers               : 'a Subscriber.t Bag.t
   ; todo                      : 'a Todo.t Queue.t
@@ -68,6 +73,7 @@ let invariant invariant_a t =
   Invariant.invariant _here_ t <:sexp_of< _ t >> (fun () ->
     let check f = Invariant.check_field t f in
     Fields.iter
+      ~id:ignore
       ~can_subscribe_after_start:ignore
       ~state:(check (function Created | Started | Syncing -> ()))
       ~subscribers:(check (fun subscribers ->
@@ -85,10 +91,11 @@ let invariant invariant_a t =
 ;;
 
 let create ~can_subscribe_after_start =
-  { can_subscribe_after_start
-  ; state       = Created
-  ; subscribers = Bag.create ()
-  ; todo        = Queue.create ()
+  { id                        = Bus_id.create ()
+  ; state                     = Created
+  ; can_subscribe_after_start
+  ; subscribers               = Bag.create ()
+  ; todo                      = Queue.create ()
   }
 ;;
 
@@ -102,8 +109,8 @@ let do_unsubscribe t subscriber =
   let module S = Subscriber in
   match subscriber.S.subscribers_elt with
   | None ->
-    (* This can happen if the [unsubscribe t subscriber] is called before [Todo.Subscribe]
-        is processed. *)
+    (* This can happen if [unsubscribe t subscriber] is called before [Todo.Subscribe] is
+       processed. *)
     ()
   | Some elt ->
     Bag.remove t.subscribers elt;
@@ -162,7 +169,8 @@ let fail_if_not_can_subscribe_after_start t =
 let subscribe_exn t ~f =
   let subscriber =
     { Subscriber.
-      am_subscribed    = true
+      bus_id           = t.id
+    ; am_subscribed    = true
     ; f
     ; send_f_raises_to = Monitor.current ()
     ; subscribers_elt  = None
@@ -183,6 +191,9 @@ let subscribe_exn t ~f =
 ;;
 
 let unsubscribe t subscriber =
+  if not (Bus_id.equal t.id subscriber.Subscriber.bus_id)
+  then failwiths "Bus.unsubscribe of mismatched bus and subscriber" (t, subscriber)
+         <:sexp_of< _ t * _ Subscriber.t >>;
   if subscriber.Subscriber.am_subscribed then begin
     subscriber.Subscriber.am_subscribed <- false;
     match t.state with

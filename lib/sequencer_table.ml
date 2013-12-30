@@ -216,4 +216,20 @@ TEST_MODULE = struct
       (* without job but with state *)
       assert (T.mem t 0)
     )
+  ;;
+
+  TEST_UNIT = (* enqueueing within a job doesn't lead to monitor nesting *)
+    Thread_safe.block_on_async_exn (fun () ->
+      let t = T.create () in
+      let rec loop n =
+        if n = 0
+        then Deferred.unit
+        else
+          T.enqueue t ~key:13 (fun _ ->
+            assert (Monitor.depth (Monitor.current ()) < 5);
+            don't_wait_for (loop (n - 1));
+            Deferred.unit)
+      in
+      loop 100)
+  ;;
 end

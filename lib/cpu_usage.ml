@@ -11,12 +11,12 @@ module Samples : sig
 
   val create : unit -> t
 
-  val subscribe : t -> float Pipe.Reader.t
+  val subscribe : t -> Percent.t Pipe.Reader.t
 end = struct
   type t =
     { mutable last_usage : Time.Span.t
     ; mutable last_time  : Time.t
-    ; subscribers        : float Pipe.Writer.t Bag.t
+    ; subscribers        : Percent.t Pipe.Writer.t Bag.t
     }
   with sexp_of
 
@@ -31,6 +31,7 @@ end = struct
     let time_now = Time.now () in
     let sample =
       Time.Span.((usage_now - t.last_usage) // Time.diff time_now t.last_time)
+      |> Percent.of_mult
     in
     t.last_usage <- usage_now;
     t.last_time  <- time_now;
@@ -59,9 +60,9 @@ end
 
 module Summary = struct
   type t =
-    { min : float
-    ; max : float
-    ; avg : float
+    { min : Percent.t
+    ; max : Percent.t
+    ; avg : Percent.t
     }
   with bin_io, sexp
 end
@@ -72,7 +73,7 @@ module Summaries : sig
 
   include Invariant.S with type t := t
 
-  val create : float Pipe.Reader.t -> t
+  val create : Percent.t Pipe.Reader.t -> t
 
   val subscribe : t -> Time.Span.t list -> (Time.Span.t * Summary.t) Pipe.Reader.t
 
@@ -119,7 +120,7 @@ end = struct
     { mutable max_num_samples : int
     (* [samples] has the most recent samples, up to [max_num_samples], ordered by sample
        time, with the most recent sample at the front and the least recent at the back. *)
-    ; samples                 : float Dequeue.t
+    ; samples                 : Percent.t Dequeue.t
     (* [subscribers] is kept sorted by increasing [num_samples] so that [update] can be
        more efficient. *)
     ; mutable subscribers     : Subscriber.t list
@@ -150,18 +151,22 @@ end = struct
     Dequeue.enqueue_front t.samples sample;
     drop_old_samples_if_necessary t;
     (* use local refs to keep the fold code cleaner *)
-    let sum         = ref 0.              in
-    let num_samples = ref 0               in
-    let max         = ref Float.min_value in
-    let min         = ref Float.max_value in
+    let sum         = ref Percent.zero in
+    let num_samples = ref 0            in
+    let max         = ref (Percent.of_mult Float.min_value) in
+    let min         = ref (Percent.of_mult Float.max_value) in
     let process_one processed_subscribers subscriber =
       if Pipe.is_closed subscriber.Subscriber.write_summaries_to
       then processed_subscribers
       else begin
+        let avg =
+          Percent.to_mult !sum /. Int.to_float !num_samples
+          |> Percent.of_mult
+        in
         let summary =
           (subscriber.Subscriber.window_duration,
            { Summary.
-             avg = !sum /. Int.to_float !num_samples
+             avg
            ; max = !max
            ; min = !min
            })
@@ -178,9 +183,9 @@ end = struct
           | [] -> res
           | subscriber :: remaining_subscribers ->
             incr num_samples;
-            sum := Float.(+) !sum sample;
-            max := Float.max !max sample;
-            min := Float.min !min sample;
+            sum := Percent.(+) !sum sample;
+            max := Percent.max !max sample;
+            min := Percent.min !min sample;
             if !num_samples < subscriber.Subscriber.num_samples
             then subscribers, processed_subscribers
             else begin
@@ -246,13 +251,13 @@ end = struct
         let r1 = subscribe t windows1 in
         assert (t.max_num_samples = 10);
         Pipe.close_read r1;
-        Pipe.write_without_pushback pw 1.;
+        Pipe.write_without_pushback pw (Percent.of_mult 1.);
         Pipe.downstream_flushed pw
         >>= fun res ->
         assert (res = `Ok);
         assert (t.max_num_samples = 6);
         Pipe.close_read r2;
-        Pipe.write_without_pushback pw 2.;
+        Pipe.write_without_pushback pw (Percent.of_mult 2.);
         Pipe.downstream_flushed pw
         >>| fun res ->
         assert (res = `Ok);
@@ -260,12 +265,16 @@ end = struct
 
     (* Check that summary computation is correct *)
     TEST_UNIT =
+      let robustly_test_eq pct1 pct2 =
+        assert (0 = Float.robustly_compare (Percent.to_mult pct1) (Percent.to_mult pct2))
+      in
       let window = [ sec 4.] in
       let index = [0  ; 1  ; 2  ; 3  ; 4  ; 5 ] in
-      let input = [4. ; 8. ; 3. ; 1. ; 0. ; 2. ] in
-      let avg   = [4. ; 6. ; 5. ; 4. ; 3. ; 1.5 ] in
-      let max   = [4. ; 8. ; 8. ; 8. ; 8. ; 3. ] in
-      let min   = [4. ; 4. ; 3. ; 1. ; 0. ; 0. ] in
+      let pc = List.map ~f:Percent.of_percentage in
+      let input = pc [4. ; 8. ; 3. ; 1. ; 0. ; 2. ] in
+      let avg   = pc [4. ; 6. ; 5. ; 4. ; 3. ; 1.5 ] in
+      let max   = pc [4. ; 8. ; 8. ; 8. ; 8. ; 3. ] in
+      let min   = pc [4. ; 4. ; 3. ; 1. ; 0. ; 0. ] in
       Async_unix.Thread_safe.block_on_async_exn (fun () ->
         let pr, pw = Pipe.create () in
         let t = create pr in
@@ -278,9 +287,9 @@ end = struct
           Pipe.read r
           >>| function
           | `Ok (_, summary) ->
-            <:test_eq< float >> summary.Summary.avg (List.nth_exn avg i);
-            <:test_eq< float >> summary.Summary.max (List.nth_exn max i);
-            <:test_eq< float >> summary.Summary.min (List.nth_exn min i);
+            robustly_test_eq summary.Summary.avg (List.nth_exn avg i);
+            robustly_test_eq summary.Summary.max (List.nth_exn max i);
+            robustly_test_eq summary.Summary.min (List.nth_exn min i);
           | _ -> assert false))
   end
 end

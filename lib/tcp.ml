@@ -157,16 +157,11 @@ let on_port port =
   { Where_to_listen.
     socket_type          = Socket.Type.tcp;
     address              = Socket.Address.Inet.create_bind_any ~port;
-    listening_on         = fun _ -> port;
+    listening_on         = function `Inet (_, port) -> port;
   }
 ;;
 
-let on_port_chosen_by_os =
-  { Where_to_listen.
-    socket_type          = Socket.Type.tcp;
-    address              = Socket.Address.Inet.create_bind_any ~port:0;
-    listening_on         = function `Inet (_, port) -> port;
-  }
+let on_port_chosen_by_os = on_port 0
 ;;
 
 let on_file path =

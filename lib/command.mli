@@ -1,5 +1,5 @@
 
-(** [Async.Command] is [Core.Command] with additional async functions. *)
+(** [Async.Command] is [Core.Command] with additional Async functions. *)
 
 open Import
 
@@ -18,16 +18,16 @@ val async_basic
   -> 'a
   -> t
 
-(** To create an [Arg_type.t] that uses auto-completion and uses async to compute the
+(** To create an [Arg_type.t] that uses auto-completion and uses Async to compute the
     possible completions, one should use
 
     {[
       Arg_type.create ~complete of_string
     ]}
 
-    where [complete] wraps its async operations in [Thread_safe.block_on_async].  With
+    where [complete] wraps its Async operations in [Thread_safe.block_on_async].  With
     this, the [complete] function is only called when the executable is auto-completing,
-    not for ordinary execution.  This improves performance, and also means that the async
+    not for ordinary execution.  This improves performance, and also means that the Async
     scheduler isn't started for ordinary execution of the command, which makes it possible
     for the command to daemonize (which requires the scheduler to not have been started).
 *)

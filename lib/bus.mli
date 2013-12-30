@@ -34,7 +34,7 @@ include Invariant.S1 with type 'a t := 'a t
 val create : can_subscribe_after_start:bool -> 'a t
 
 (** [start t] starts the bus; it starts delivery of queued messages to readers.  [start]
-    will not run any subscribers; it just creates the async job that will start running
+    will not run any subscribers; it just creates the Async job that will start running
     them. *)
 val start : _ t -> unit
 
@@ -43,7 +43,7 @@ val start : _ t -> unit
 val flushed : _ t -> unit Deferred.t
 
 (** [write t a] enqueues [a] on the bus, but does not call any subscriber functions
-    immediately.  Multiple [write] calls in the same async cycle are efficient (i.e. they
+    immediately.  Multiple [write] calls in the same Async cycle are efficient (i.e. they
     don't create a deferred per item). *)
 val write : 'a t -> 'a -> unit
 

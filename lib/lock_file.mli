@@ -1,4 +1,4 @@
-(** [Async.Lock_file] is a wrapper that provides async equivalents for
+(** [Async.Lock_file] is a wrapper that provides Async equivalents for
     [Core.Lock_file]. *)
 
 open Core.Std
@@ -41,7 +41,7 @@ val is_locked : string -> bool Deferred.t
 
 (** [Nfs] has analogs of functions in {!Core.Lock_file.Nfs}; see there for documentation.
     In addition to adding [Deferred]'s, [blocking_create] was renamed [waiting_create] to
-    avoid the impression that it blocks async. *)
+    avoid the impression that it blocks Async. *)
 module Nfs : sig
   val create         : ?message : string -> string -> unit Deferred.Or_error.t
   val create_exn     : ?message : string -> string -> unit Deferred.t

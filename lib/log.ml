@@ -421,7 +421,7 @@ module Update = struct
   let to_string t = Sexp.to_string (sexp_of_t t)
 end
 
-type t = Update.t Pipe.Writer.t
+type t = Update.t Pipe.Writer.t with sexp_of
 
 let push_update t update =
   if not (Pipe.is_closed t)
