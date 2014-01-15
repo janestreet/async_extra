@@ -145,9 +145,12 @@ module Pipe_rpc : sig
 
   (** This has [(..., 'error) Result.t] as its return type to represent the possibility of
       the call itself being somehow erroneous (but understood - the outer [Or_error.t]
-      encompasses failures of that nature).  Note that this cannot be done simply by making
-      ['response] a result type, since [('response Pipe.Reader.t, 'error) Result.t] is
-      distinct from [('response, 'error) Result.t Pipe.Reader.t]. *)
+      encompasses failures of that nature).  Note that this cannot be done simply by
+      making ['response] a result type, since [('response Pipe.Reader.t, 'error) Result.t]
+      is distinct from [('response, 'error) Result.t Pipe.Reader.t].
+
+      Closing the pipe has the effect of calling [abort].
+  *)
   val dispatch
     :  ('query, 'response, 'error) t
     -> Connection.t

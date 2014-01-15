@@ -14,10 +14,14 @@ module Server : sig
 
       The [auth] function will be called once for every client connection.  If it returns
       false the client will be disconnected immediately.  Further details of [auth] can be
-      found in the documentation for [Rpc.serve]. *)
+      found in the documentation for [Rpc.serve].
+
+      Once [serve] has been called it is a mistake (and will raise) if it is ever called
+      again.
+  *)
   val serve
     :  auth:(Socket.Address.Inet.t -> bool)
-    -> port:int
+    -> Tcp.Where_to_listen.inet
     -> Tcp.Server.inet Deferred.t
 
   (** [open_file filename] open a file for writing.  The filename given should

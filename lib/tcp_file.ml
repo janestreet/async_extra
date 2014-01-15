@@ -178,9 +178,24 @@ module Server = struct
   end
 
   module State = struct
+    module Serving_on = struct
+      type t =
+        [ `Not_yet_serving | `Serving_started | `Server of Tcp.Server.inet ]
+
+      let sexp_of_t t =
+        match t with
+        | `Not_yet_serving -> Sexp.Atom "Not_yet_serving"
+        | `Serving_started -> Sexp.Atom "Serving_started"
+        | `Server server   ->
+          let port = Tcp.Server.listening_on server in
+          Sexp.List [ Sexp.Atom "Port"; Int.sexp_of_t port ]
+
+      let to_string t = Sexp.to_string (sexp_of_t t)
+    end
+
     type t = {
       files : File.t String.Table.t;
-      mutable serving_on : [ `Not_yet_serving | `Port of int ];
+      mutable serving_on : Serving_on.t;
     } with sexp_of
 
     let global =
@@ -273,15 +288,26 @@ module Server = struct
     Rpc.Pipe_rpc.implement Protocol.Open_file.rpc handle_open_file;
   ]
 
-  let serve ~auth ~port =
-    let implementations =
-      Rpc.Implementations.create ~implementations ~on_unknown_rpc:`Ignore
-      |! function
-      | Ok s -> State.global.State.serving_on <- `Port port; s
-      | Error (`Duplicate_implementations _) -> assert false
-    in
-    Rpc.Connection.serve ~auth ~implementations ~where_to_listen:(Tcp.on_port port) ()
-      ~initial_connection_state:(fun _ -> State.global)
+  let serve ~auth where_to_listen =
+    match State.global.State.serving_on with
+    | `Serving_started
+    | `Server _ ->
+      failwithf !"Tcp_file.Server.serve called twice.  \
+        (current state: %{State.Serving_on})"
+        State.global.State.serving_on ()
+    | `Not_yet_serving ->
+      let implementations =
+        Rpc.Implementations.create ~implementations ~on_unknown_rpc:`Ignore
+        |! function
+        | Ok s -> State.global.State.serving_on <- `Serving_started; s
+        | Error (`Duplicate_implementations _) -> assert false
+      in
+      Rpc.Connection.serve ~auth ~implementations ~where_to_listen ()
+        ~initial_connection_state:(fun _ -> State.global)
+      >>| fun server ->
+        State.global.State.serving_on <- `Server server;
+        server
+  ;;
 
   exception File_is_already_open_in_tcp_file of string with sexp
 
