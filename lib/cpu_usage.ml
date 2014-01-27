@@ -5,20 +5,17 @@ let debug = false
 
 let sample_every = sec 1.
 
-(* The practical test of this module is in tools/cpu_usage_test *)
-module Samples : sig
-  type t
+module Sampler : sig
+  type t with sexp_of
 
   val create : unit -> t
 
-  val subscribe : t -> Percent.t Pipe.Reader.t
+  val take_sample : t -> Percent.t
 end = struct
   type t =
     { mutable last_usage : Time.Span.t
     ; mutable last_time  : Time.t
-    ; subscribers        : Percent.t Pipe.Writer.t Bag.t
-    }
-  with sexp_of
+    } with sexp_of
 
   let time_used () =
     let module R = Core.Std.Unix.Resource_usage in
@@ -35,6 +32,32 @@ end = struct
     in
     t.last_usage <- usage_now;
     t.last_time  <- time_now;
+    sample
+  ;;
+
+  let create () =
+    { last_usage = time_used ()
+    ; last_time  = Time.now ()
+    }
+  ;;
+end
+
+(* The practical test of this module is in tools/cpu_usage_test *)
+module Samples : sig
+  type t
+
+  val create : unit -> t
+
+  val subscribe : t -> Percent.t Pipe.Reader.t
+end = struct
+  type t =
+    { sampler     : Sampler.t
+    ; subscribers : Percent.t Pipe.Writer.t Bag.t
+    }
+  with sexp_of
+
+  let take_sample t =
+    let sample = Sampler.take_sample t.sampler in
     Bag.iter t.subscribers ~f:(fun w ->
       if not (Pipe.is_closed w) then Pipe.write_without_pushback w sample);
   ;;
@@ -48,8 +71,7 @@ end = struct
 
   let create () =
     let t =
-      { last_usage  = time_used ()
-      ; last_time   = Time.now ()
+      { sampler     = Sampler.create ()
       ; subscribers = Bag.create ()
       }
     in

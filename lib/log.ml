@@ -47,22 +47,33 @@ module Rotation = struct
     naming_scheme : [ `Numbered | `Timestamped ]
   } with sexp,fields
 
+  let first_occurrence_after time ~ofday ~zone =
+    let first_at_or_after time = Time.occurrence `First_after_or_at time ~ofday ~zone in
+    let candidate = first_at_or_after time in
+    (* we take care not to return the same time we were given *)
+    if Time.equal time candidate
+    then first_at_or_after (Time.add time Time.Span.epsilon)
+    else candidate
+  ;;
+
   let should_rotate t ~last_messages ~last_size ~last_time ~current_time =
     Fields.fold ~init:false
       ~messages:(fun acc field ->
         match Field.get field t with
-        | None              -> acc
+        | None -> acc
         | Some rotate_messages -> acc || rotate_messages <= last_messages)
       ~size:(fun acc field ->
         match Field.get field t with
-        | None             -> acc
+        | None -> acc
         | Some rotate_size -> acc || Byte_units.(<=) rotate_size last_size)
       ~time:(fun acc field ->
         match Field.get field t with
         | None -> acc
-        | Some (rotation_ofday,zone) ->
-          let rotation_time = Time.of_date_ofday zone (Date.today ()) rotation_ofday in
-          acc || (current_time >= rotation_time && last_time <= rotation_time))
+        | Some (rotation_ofday, zone) ->
+          let rotation_time =
+            first_occurrence_after last_time ~ofday:rotation_ofday ~zone
+          in
+          acc || current_time >= rotation_time)
       ~keep:(fun acc _ -> acc)
       ~naming_scheme:(fun acc _ -> acc)
   ;;
@@ -77,7 +88,7 @@ module Message : sig
   val message : t -> string
   val tags    : t -> (string * string) list
 
-  val to_write_only_text : t -> string
+  val to_write_only_text : ?zone:Time.Zone.t -> t -> string
 
   val write_write_only_text : t -> Writer.t -> unit
   val write_sexp            : t -> Writer.t -> unit
@@ -134,18 +145,51 @@ end = struct
   let message t = Lazy.force t.message
   let tags t    = t.tags
 
-  let to_write_only_text t =
+  let to_write_only_text ?zone t =
     let prefix =
       match t.level with
       | None   -> ""
       | Some l -> Level.to_string l ^ " "
     in
-    String.concat ~sep:"" [
-      Time.to_string_abs t.time;
-      " ";
-      prefix;
-      Lazy.force t.message
-    ]
+    let formatted_tags =
+      match t.tags with
+      | [] -> []
+      | _ :: _ ->
+        " --"
+        :: List.concat_map t.tags ~f:(fun (t, v) ->
+          [" ["; t; ": "; v; "]"])
+    in
+    String.concat ~sep:"" (
+      Time.to_string_abs ?zone t.time
+      :: " "
+      :: prefix
+      :: Lazy.force t.message
+      :: formatted_tags)
+  ;;
+
+  TEST_UNIT =
+    let check expect t =
+      let zone = Time.Zone.utc in
+      <:test_result<string>> (to_write_only_text ~zone t) ~expect
+    in
+    check "2013-12-13 15:00:00.000000Z <message>"
+      { time = Time.of_string "2013-12-13 10:00:00"
+      ; level = None
+      ; tags = []
+      ; message = lazy "<message>"
+      };
+    check "2013-12-13 15:00:00.000000Z Info <message>"
+      { time = Time.of_string "2013-12-13 10:00:00"
+      ; level = Some `Info
+      ; tags = []
+      ; message = lazy "<message>"
+      };
+    check "2013-12-13 15:00:00.000000Z Info <message> -- [k1: v1] [k2: v2]"
+      { time = Time.of_string "2013-12-13 10:00:00"
+      ; level = Some `Info
+      ; tags = ["k1", "v1"; "k2", "v2"]
+      ; message = lazy "<message>"
+      };
   ;;
 
   let write_write_only_text t wr =
@@ -251,7 +295,7 @@ end = struct
 
       val to_string_opt : t -> string option
       val of_string_opt : string option -> t option
-      val ascending : t -> t -> int
+      val cmp_newest_first : t -> t -> int
     end
 
     module Make (Id:Id_intf) = struct
@@ -281,6 +325,9 @@ end = struct
           Option.(parse_filename_id ~basename filename >>| fun id -> id, filename))
       ;;
 
+      (* errors from this function should be ignored.  If this function fails to run, the
+         disk may fill up with old logs, but external monitoring should catch that, and
+         the core function of the Log module will be unaffected. *)
       let maybe_delete_old_logs ~dirname ~basename keep =
         begin match keep with
         | `All -> return []
@@ -289,69 +336,96 @@ end = struct
           >>= fun files ->
           let cutoff = Time.sub (Time.now ()) span in
           Deferred.List.filter files ~f:(fun (_,filename) ->
-            Unix.stat filename
-            >>| fun stats -> Time.(<) stats.Unix.Stats.mtime cutoff)
+            Deferred.Or_error.try_with (fun () -> Unix.stat filename)
+            >>| function
+            | Error _ -> false
+            | Ok stats -> Time.(<) stats.Unix.Stats.mtime cutoff)
         | `At_least i ->
           current_log_files ~dirname ~basename
           >>| fun files ->
-          List.drop (List.sort files ~cmp:(fun (i1,_) (i2,_) -> Id.ascending i1 i2)) i
+          let files =
+            List.sort files ~cmp:(fun (i1,_) (i2,_) -> Id.cmp_newest_first i1 i2)
+          in
+          List.drop files i
         end
-        >>= Deferred.List.iter ~f:(fun (_i,filename) -> Unix.unlink filename)
+        >>= Deferred.List.map ~f:(fun (_i,filename) ->
+          Deferred.Or_error.try_with (fun () -> Unix.unlink filename))
+        >>| fun (_ : unit Or_error.t list) -> ()
       ;;
 
-      let rotate ~dirname ~basename keep =
+      type t =
+        {         basename      : string
+        ;         dirname       : string
+        ;         rotation      : Rotation.t
+        ;         sequencer     : unit Sequencer.t sexp_opaque
+        ; mutable filename      : string
+        ; mutable last_messages : int
+        ; mutable last_size     : int
+        ; mutable last_time     : Time.t
+        } with sexp
+
+      let rotate t =
+        let basename, dirname = t.basename, t.dirname in
         current_log_files ~dirname ~basename
         >>= fun files ->
-        let files =
-          List.rev (List.sort files ~cmp:(fun (i1,_) (i2, _) -> Id.ascending i1 i2))
-        in
-        Deferred.List.iter files ~f:(fun (id, src) ->
+        List.rev (List.sort files ~cmp:(fun (i1,_) (i2, _) -> Id.cmp_newest_first i1 i2))
+        |> Deferred.List.iter ~f:(fun (id, src) ->
           let id' = Id.rotate_one id in
-          if Id.ascending id id' <> 0
+          if Id.cmp_newest_first id id' <> 0
           then Unix.rename ~src ~dst:(make_filename ~dirname ~basename id')
           else Deferred.unit)
         >>= fun () ->
-        maybe_delete_old_logs ~dirname ~basename keep
+        maybe_delete_old_logs ~dirname ~basename t.rotation.Rotation.keep
+        >>| fun () ->
+        t.filename <- make_filename ~dirname ~basename (Id.create ())
       ;;
 
       let create format ~basename rotation =
-        let last_messages  = ref 0 in
-        let last_size      = ref 0 in
-        let filename       = ref "" in
-        let last_time      = ref (Time.now ()) in
         let basename, dirname =
-        (* Fix dirname, because cwd may change *)
+          (* Fix dirname, because cwd may change *)
           match Filename.is_absolute basename with
           | true  -> Filename.basename basename, return (Filename.dirname basename)
           | false -> basename, Sys.getcwd ()
         in
-        let finished_rotation =
-          dirname >>= fun dirname ->
-          filename := (make_filename ~dirname ~basename (Id.create ()));
-          rotate ~dirname ~basename rotation.Rotation.keep
-          >>| const dirname
+        let t_deferred =
+          dirname
+          >>= fun dirname ->
+          let sequencer = Sequencer.create () in
+          let t =
+            { basename
+            ; dirname
+            ; rotation
+            ; sequencer
+            ; filename = make_filename ~dirname ~basename (Id.create ())
+            ; last_size = 0
+            ; last_messages = 0
+            ; last_time = Time.now ()
+            }
+          in
+          Throttle.enqueue t.sequencer (fun () -> rotate t)
+          >>| fun () -> t
         in
         fun msgs ->
-          finished_rotation >>= fun dirname ->
-          let current_time = Time.now () in
-          begin
-            if
-              Rotation.should_rotate rotation ~last_messages:!last_messages
-                ~last_size:(Byte_units.create `Bytes (Float.of_int !last_size))
-                ~last_time:!last_time ~current_time
-            then begin
-              rotate ~dirname ~basename rotation.Rotation.keep
-              >>| fun () ->
-              filename := make_filename ~dirname ~basename (Id.create ())
-            end
-            else Deferred.unit
-          end
-          >>= fun () ->
-          File.write' format ~filename:(!filename) msgs
-          >>| fun size ->
-          last_messages := !last_messages + 1;
-          last_size     := !last_size + Int63.to_int_exn size;
-          last_time     := current_time
+          t_deferred
+          >>= fun t ->
+          Throttle.enqueue t.sequencer (fun () ->
+            let current_time = Time.now () in
+            Deferred.Or_error.try_with (fun () ->
+              if Rotation.should_rotate
+                   rotation
+                   ~last_messages:t.last_messages
+                   ~last_size:(Byte_units.create `Bytes (Float.of_int t.last_size))
+                   ~last_time:t.last_time ~current_time
+              then rotate t
+              else Deferred.unit)
+            (* rotation errors are not worth potentially crashing the process. *)
+            >>= fun (_ : unit Or_error.t) ->
+            File.write' format ~filename:t.filename msgs
+            >>| fun size ->
+            t.last_messages <- t.last_messages + Queue.length msgs;
+            t.last_size     <- t.last_size + Int63.to_int_exn size;
+            t.last_time     <- current_time;
+          )
       ;;
     end
 
@@ -360,7 +434,7 @@ end = struct
       let create        = const 0
       let rotate_one    = (+) 1
       let to_string_opt = function 0 -> None | x -> Some (Int.to_string x)
-      let ascending     = Int.ascending
+      let cmp_newest_first  = Int.ascending
 
       let of_string_opt = function
         | None   -> Some 0
@@ -373,7 +447,7 @@ end = struct
       let create           = Time.now
       let rotate_one       = ident
       let to_string_opt ts = Some (Time.to_filename_string ts)
-      let ascending        = Time.ascending
+      let cmp_newest_first     = Time.descending
 
       let of_string_opt    = function
         | None   -> None
@@ -501,8 +575,8 @@ let create_log_processor ~level ~output =
       if Queue.length msgs = 0
       then f ()
       else begin
-        let msgs' = Queue.create () in
-        Queue.transfer ~src:msgs ~dst:msgs';
+        let msgs' = Queue.copy msgs in
+        Queue.clear msgs;
         (Output.apply !write) msgs'
         >>= f
       end

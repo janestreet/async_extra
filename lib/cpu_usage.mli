@@ -13,6 +13,16 @@
 open Core.Std
 open Import
 
+module Sampler : sig
+  type t
+
+  val create : unit -> t
+
+  (** Measure the percent of CPU used by this process since the last [take_sample t] call
+      (or since [t] was created). *)
+  val take_sample : t -> Percent.t
+end
+
 (** Returns a pipe of samples as described above, one per second.
 
     Pushback is not honored on the pipe and the pipe will grow unbounded in memory if it

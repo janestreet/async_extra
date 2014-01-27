@@ -139,7 +139,7 @@ TEST_UNIT =
       Chunker.invariant t;
       let len = min bytes_at_a_time (String.length buf - pos) in
       if len > 0 then begin
-        Queue.transfer ~src:(Chunker.feed t buf ~pos ~len) ~dst:result;
+        Queue.blit_transfer ~src:(Chunker.feed t buf ~pos ~len) ~dst:result ();
         loop (pos + bytes_at_a_time);
       end
     in

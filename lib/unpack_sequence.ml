@@ -1,6 +1,7 @@
 open Core.Std
 open Import
 
+
 module Result = struct
   type ('a, 'b) t =
   | Input_closed
