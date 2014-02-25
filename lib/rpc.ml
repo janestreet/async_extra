@@ -377,6 +377,7 @@ module Handshake_error = struct
   module T = struct
     type t =
     | Eof
+    | Timeout
     | Negotiation_failed
     | Negotiated_unexpected_version of int with sexp
   end
@@ -541,7 +542,19 @@ module Connection : Connection_internal = struct
     close_finished t;
   ;;
 
-  let create ?implementations ~connection_state ?max_message_size:max_len reader writer =
+  let create
+        ?implementations
+        ~connection_state
+        ?max_message_size:max_len
+        ?handshake_timeout
+        reader
+        writer
+    =
+    let handshake_timeout =
+      Option.value
+        handshake_timeout
+        ~default:(Time.Span.of_sec 30.)
+    in
     let implementations =
       match implementations with None -> Implementations.null () | Some s -> s
     in
@@ -558,9 +571,25 @@ module Connection : Connection_internal = struct
     in
     let result =
       Writer.write_bin_prot t.writer Header.bin_t.Bin_prot.Type_class.writer Header.v1;
-      Reader.read_bin_prot ?max_len t.reader Header.bin_t.Bin_prot.Type_class.reader
+      Deferred.choose
+        [ Deferred.choice
+            (* If we use [max_connections] in the server, then this read may just hang
+               until the server starts accepting new connections (which could be never).
+               That is why a timeout is used *)
+            (Reader.read_bin_prot ?max_len t.reader
+               Header.bin_t.Bin_prot.Type_class.reader)
+            (fun r -> (r :> [ `Eof | `Ok of Header.t | `Timeout ]))
+        ; Deferred.choice
+            (Clock.after handshake_timeout)
+            (fun () -> `Timeout)
+        ]
       >>| fun header ->
       match header with
+      | `Timeout ->
+        (* There's a pending read, the reader is basically useless now, so we clean it
+           up. *)
+        don't_wait_for (close t);
+        Error Handshake_error.Timeout
       | `Eof ->
         Error Handshake_error.Eof
       | `Ok header ->
@@ -583,7 +612,7 @@ module Connection : Connection_internal = struct
           let rec loop current_read =
             Deferred.enabled [
               Deferred.choice (Ivar.read t.close_started) (fun () -> `EOF);
-              Deferred.choice current_read      (fun v  -> `Read v);
+              Deferred.choice current_read                (fun v  -> `Read v);
             ] >>> fun filled ->
             match List.hd_exn (filled ()) with
             | `EOF -> ()
@@ -675,23 +704,25 @@ module Connection : Connection_internal = struct
       ~implementations
       ~initial_connection_state
       ~where_to_listen
+      ?max_connections
       ?(auth = (fun _ -> true))
       ?(on_handshake_error = `Ignore)
       () =
-    Tcp.Server.create where_to_listen ~on_handler_error:`Ignore (fun inet r w ->
-      if not (auth inet) then Deferred.unit
-      else begin
-        let connection_state = initial_connection_state inet in
-        create ~implementations ~connection_state r w >>= function
-        | Ok t -> Reader.close_finished r >>= fun () -> close t
-        | Error handshake_error ->
-          begin match on_handshake_error with
-          | `Call f -> f handshake_error
-          | `Raise  -> raise handshake_error
-          | `Ignore -> ()
-          end;
-          Deferred.unit
-      end)
+    Tcp.Server.create ?max_connections where_to_listen ~on_handler_error:`Ignore
+      (fun inet r w ->
+        if not (auth inet) then Deferred.unit
+        else begin
+          let connection_state = initial_connection_state inet in
+          create ~implementations ~connection_state r w >>= function
+          | Ok t -> Reader.close_finished r >>= fun () -> close t
+          | Error handshake_error ->
+            begin match on_handshake_error with
+            | `Call f -> f handshake_error
+            | `Raise  -> raise handshake_error
+            | `Ignore -> ()
+            end;
+            Deferred.unit
+        end)
 
   module Client_implementations = struct
     type 's t = {

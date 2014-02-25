@@ -208,28 +208,29 @@ let error t e =
 (* [stat t] stats [t.file] and possibly updates [t.file_inode], [t.file_len], and
    [t.most_recent_file_len_increase]. *)
 let stat t ~initial_call =
+  let module U = Core.Std.Unix in
   try_with (fun () ->
-    (* We use [with_file t.file ~f:fstat], which does [open; fstat; close], rather
-       than just [stat t.file] because [File_tail] is often used over NFS and this
-       leverages open-to-close cache consistency to get a fresh answer from [stat]
-       regardless of the metadata caching options on the underlying mount.  The downside
-       is that this adds two more system calls per for every [stat], and in the case where
-       the file has grown "wastes" the open file descriptor since we are just going to
-       re-open it. *)
     Global_throttle.enqueue (fun () ->
-      Unix.with_file t.file ~mode:[`Rdonly] ~f:Unix.fstat))
+      In_thread.run (fun () ->
+        (* We use [U.with_file t.file ~f:U.fstat], which does [open; fstat; close], rather
+           than just [stat t.file] because [File_tail] is often used over NFS and this
+           leverages open-to-close cache consistency to get a fresh answer from [stat]
+           regardless of the metadata caching options on the underlying mount.  The
+           downside is that this adds two more system calls per for every [stat], and in
+           the case where the file has grown "wastes" the open file descriptor since we
+           are just going to re-open it. *)
+        U.with_file t.file ~mode:[U.O_RDONLY] ~f:U.fstat)))
   >>| fun result ->
   let error e = error t e; Error () in
   match result with
   | Error exn -> error (Error.Stat_failed exn)
   | Ok stats ->
-    let module S = Unix.Stats in
-    let new_inode = stats.S.ino in
+    let new_inode = stats.U.st_ino in
     if not initial_call && not t.ignore_inode_change && new_inode <> t.file_inode then
       error Error.File_replaced
     else begin
       t.file_inode <- new_inode;
-      let new_len = stats.S.size in
+      let new_len = stats.U.st_size in
       if new_len < t.file_len then
         error Error.File_shrank
       else begin

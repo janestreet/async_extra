@@ -52,17 +52,45 @@ module Rotation : sig
          span.  If span is short enough this option can delete a just rotated file.
       - [`At_least i] -- keep the i most recent files
 
+      Log rotation does not support symlinks, and you're encouraged to avoid them in
+      production applications. Issues with symlinks:
+       - You can't tail symlinks without being careful (e.g. you must remember to pass
+         "-F" to
+         `tail`).
+       - Symlinks are hard to reason about when the program crashes, especially on
+         startup (i.e., is the symlink pointing me at the right log file?).
+       - Atomicity is hard.
+       - Symlinks encourage tailing, which is a bad way to communicate information.
+       - They complicate archiving processes (the symlink must be skipped).
+
     WARNING: The rotating file functionality of Log is the most poorly tested, and in many
     ways the most complex.  Before using this mode in anger you should test failure cases
     carefully.
   *)
-  type t = {
-    messages      : int option;
-    size          : Byte_units.t option;
-    time          : (Time.Ofday.t * Time.Zone.t) option;
-    keep          : [ `All | `Newer_than of Time.Span.t | `At_least of int ];
-    naming_scheme : [ `Numbered | `Timestamped ]
-  } with sexp
+  type t with sexp
+
+  val create
+    :  ?messages:int
+    -> ?size:Byte_units.t
+    -> ?time:Time.Ofday.t
+    -> ?zone:Time.Zone.t
+    -> keep:[`All | `Newer_than of Time.Span.t | `At_least of int]
+    -> naming_scheme:[`Numbered | `Timestamped | `Dated]
+    -> unit
+    -> t
+
+  (** Sane log rotation defaults.
+
+      Writes dated log files. Files are rotated every time the day changes in the given
+      zone (uses the machine's zone by default). If the dated log file already exists,
+      it's appended to.
+
+      Logs are never deleted. Best practice is to have an external mechanism archive old
+      logs for long term storage. *)
+  val default
+    :  ?zone:Time.Zone.t
+    -> unit
+    -> t
 end
 
 module Output : sig
@@ -89,8 +117,7 @@ module Output : sig
   val writer        : format -> Writer.t -> t
   val file          : format -> filename:string -> t
   val rotating_file : format -> basename:string -> Rotation.t -> t
-  (** See {!Async_extended.Syslog} for syslog output. *)
-  (** See {!Textutils.Console} for colorized console output. *)
+  (** See {!Async_extended.Std.Log} for syslog and colorized console output. *)
 end
 
 module Blocking : sig
@@ -106,8 +133,7 @@ module Blocking : sig
     val stdout : t
     val stderr : t
 
-    (** See {!Async_extended.Syslog} for syslog output. *)
-    (** See {!Textutils.Console} for colorized console output. *)
+    (** See {!Async_extended.Std.Log} for syslog and colorized console output. *)
 
     val create : (Message.t -> unit) -> t
   end

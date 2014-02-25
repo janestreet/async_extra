@@ -140,4 +140,10 @@ module Server : sig
     -> ('address -> Reader.t -> Writer.t -> unit Deferred.t)
     -> ('address, 'listening_on) t Deferred.t
 
+  (** [listening_socket t] accesses the listening socket, which should be used with care.
+      An anticipated use is with {!Udp.bind_to_interface_exn}.  Accepting connections on
+      the socket directly will circumvent [max_connections] and [on_handler_error],
+      however, and is not recommended. *)
+  val listening_socket : ('address, _) t -> ([ `Passive ], 'address) Socket.t
+
 end

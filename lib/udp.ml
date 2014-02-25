@@ -6,6 +6,8 @@ type write_buffer = (read_write, Iobuf.seek) Iobuf.t
 
 let default_capacity = 1472
 
+let default_retry = 12
+
 module Config = struct
   type t =
     { capacity : int
@@ -13,6 +15,7 @@ module Config = struct
     ; before : write_buffer -> unit
     ; after : write_buffer -> unit
     ; stop : unit Deferred.t
+    ; max_ready : int
     } with fields
 
   let create
@@ -21,9 +24,10 @@ module Config = struct
         ?(before = Iobuf.flip_lo)
         ?(after = Iobuf.reset)
         ?(stop = Deferred.never ())
+        ?(max_ready = default_retry)
         ()
     =
-    { capacity; init; before; after; stop }
+    { capacity; init; before; after; stop; max_ready }
 end
 
 let fail iobuf message a sexp_of_a =
@@ -53,13 +57,14 @@ let sendto_sync () =
 
     [ready_iter] may fill [stop] itself.
 
-    By design, this function might not return to the Async scheduler until [fd] is no
-    longer ready to transfer data.  If you expect [fd] to be ready for a long period then
-    you should use [stop] or [`Stop] to avoid starving other Async jobs. *)
-let ready_iter fd ~stop ~f read_or_write =
-  let rec inner_loop file_descr =
-    if Ivar.is_empty stop && Fd.is_open fd then match f file_descr with
-      | `Continue -> inner_loop file_descr
+    By design, this function will not return to the Async scheduler until [fd] is no
+    longer ready to transfer data or has been ready [max_ready] consecutive times. To
+    avoid starvation, use [stop] or [`Stop] and/or choose [max_ready] carefully to allow
+    other Async jobs to run. *)
+let ready_iter fd ~stop ~max_ready ~f read_or_write =
+  let rec inner_loop i file_descr =
+    if i < max_ready && Ivar.is_empty stop && Fd.is_open fd then match f file_descr with
+      | `Continue -> inner_loop (i + 1) file_descr
       | `Stop -> `Stopped
     else `Interrupted_or_closed
   in
@@ -69,7 +74,7 @@ let ready_iter fd ~stop ~f read_or_write =
   match Fd.with_file_descr ~nonblocking:true fd (fun file_descr ->
     Fd.interruptible_every_ready_to fd read_or_write ~interrupt:(Ivar.read stop)
       (fun file_descr ->
-         try match inner_loop file_descr with
+         try match inner_loop 0 file_descr with
            | `Interrupted_or_closed -> ()
            | `Stopped -> Ivar.fill_if_empty stop ()
          with
@@ -91,7 +96,7 @@ let sendto () =
     let stop = Ivar.create () in
     (* Iobuf.sendto_nonblocking_no_sigpipe returns EAGAIN and EWOULDBLOCK through an
        option rather than an exception. *)
-    ready_iter fd ~stop `Write ~f:(fun file_descr ->
+    ready_iter fd ~max_ready:default_retry ~stop `Write ~f:(fun file_descr ->
       match sendto buf file_descr addr with None -> `Continue | Some _ -> `Stop)
     >>| function
     | (`Bad_fd | `Closed | `Unsupported) as error ->
@@ -115,9 +120,10 @@ let bind ?ifname addr =
 let bind_any () =
   let socket = Socket.create Socket.Type.udp in
   (* When bind() is called with a port number of zero, a non-conflicting local port
-     address is chosen (i.e., an ephemeral port). *)
+     address is chosen (i.e., an ephemeral port).  In almost all cases where we use this,
+     we want a unique port, and hence prevent reuseaddr. *)
   let bind_addr = Socket.Address.Inet.create_bind_any ~port:0 in
-  Socket.bind socket bind_addr
+  Socket.bind socket ~reuseaddr:false bind_addr
 ;;
 
 let recvfrom_loop_with_buffer_replacement ?(config = Config.create ()) fd f =
@@ -125,7 +131,7 @@ let recvfrom_loop_with_buffer_replacement ?(config = Config.create ()) fd f =
   Config.stop config
   >>> Ivar.fill_if_empty stop;
   let buf = ref (Config.init config) in
-  ready_iter ~stop fd `Read ~f:(fun file_descr ->
+  ready_iter ~stop ~max_ready:config.Config.max_ready fd `Read ~f:(fun file_descr ->
     let buf_len_before = Iobuf.length !buf in
     let len, addr = Iobuf.recvfrom_assume_fd_is_nonblocking !buf file_descr in
     if len <> buf_len_before - Iobuf.length !buf
@@ -160,7 +166,7 @@ let read_loop_with_buffer_replacement ?(config = Config.create ()) fd f =
   Config.stop config
   >>> Ivar.fill_if_empty stop;
   let buf = ref (Config.init config) in
-  ready_iter ~stop fd `Read ~f:(fun file_descr ->
+  ready_iter ~stop ~max_ready:config.Config.max_ready fd `Read ~f:(fun file_descr ->
     let buf_len_before = Iobuf.length !buf in
     let len = Iobuf.read_assume_fd_is_nonblocking !buf file_descr in
     if len <> buf_len_before - Iobuf.length !buf
@@ -211,7 +217,7 @@ let recvmmsg_loop =
         let stop = Ivar.create () in
         Config.stop config
         >>> Ivar.fill_if_empty stop;
-        ready_iter ~stop fd `Read ~f:(fun file_descr ->
+        ready_iter ~stop ~max_ready:config.Config.max_ready fd `Read ~f:(fun file_descr ->
           let count = recvmmsg ?srcs file_descr bufs in
           if count > Array.length bufs
           then
@@ -247,7 +253,7 @@ let recvmmsg_no_sources_loop =
         let stop = Ivar.create () in
         Config.stop config
         >>> Ivar.fill_if_empty stop;
-        ready_iter ~stop fd `Read ~f:(fun file_descr ->
+        ready_iter ~stop ~max_ready:config.Config.max_ready fd `Read ~f:(fun file_descr ->
           let count = recvmmsg file_descr ~count:max_count bufs in
           if count > Array.length bufs
           then

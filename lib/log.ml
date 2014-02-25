@@ -39,13 +39,58 @@ module Rotation = struct
      incrementing rotation conditions (e.g. size) to reset, though this is the
      responsibililty of the caller to should_rotate.
   *)
-  type t = {
-    messages      : int option;
-    size          : Byte_units.t option;
-    time          : (Time.Ofday.t * Time.Zone.t) option;
-    keep          : [ `All | `Newer_than of Time.Span.t | `At_least of int ];
-    naming_scheme : [ `Numbered | `Timestamped ]
-  } with sexp,fields
+  module V1 = struct
+    type t = {
+      messages      : int option;
+      size          : Byte_units.t option;
+      time          : (Time.Ofday.t * Time.Zone.t) option;
+      keep          : [ `All | `Newer_than of Time.Span.t | `At_least of int ];
+      naming_scheme : [ `Numbered | `Timestamped ];
+    } with sexp, fields
+  end
+
+  module V2 = struct
+    type t = {
+      messages      : int sexp_option;
+      size          : Byte_units.t sexp_option;
+      time          : Time.Ofday.t sexp_option;
+      keep          : [ `All | `Newer_than of Time.Span.t | `At_least of int ];
+      naming_scheme : [ `Numbered | `Timestamped | `Dated ];
+      zone          : Time.Zone.t with default(Time.Zone.machine_zone ());
+    } with sexp, fields
+
+    let of_v1 { V1. messages; size; time; keep; naming_scheme } =
+      let time, zone =
+        match time with
+        | None -> None, Time.Zone.machine_zone ()
+        | Some (ofday, zone) -> Some ofday, zone
+      in
+      let naming_scheme = (naming_scheme :> [ `Numbered | `Timestamped | `Dated ]) in
+      { messages; size; time; keep; naming_scheme; zone }
+  end
+
+  include V2
+
+  let create ?messages ?size ?time ?zone ~keep ~naming_scheme () =
+    { messages
+    ; size
+    ; time
+    ; zone = Option.value zone ~default:(Time.Zone.machine_zone ())
+    ; keep
+    ; naming_scheme
+    }
+
+  let t_of_sexp sexp =
+    try V2.t_of_sexp sexp
+    with v2_exn ->
+      try V2.of_v1 (V1.t_of_sexp sexp)
+      with v1_exn ->
+        Error.raise
+          (Error.tag
+             (Error.of_list [Error.of_exn v2_exn; Error.of_exn v1_exn])
+             "Couldn't parse V1 and V2 log rotation sexp")
+
+  let sexp_of_t = V2.sexp_of_t
 
   let first_occurrence_after time ~ofday ~zone =
     let first_at_or_after time = Time.occurrence `First_after_or_at time ~ofday ~zone in
@@ -69,14 +114,24 @@ module Rotation = struct
       ~time:(fun acc field ->
         match Field.get field t with
         | None -> acc
-        | Some (rotation_ofday, zone) ->
+        | Some rotation_ofday ->
           let rotation_time =
-            first_occurrence_after last_time ~ofday:rotation_ofday ~zone
+            first_occurrence_after last_time ~ofday:rotation_ofday ~zone:t.zone
           in
           acc || current_time >= rotation_time)
+      ~zone:(fun acc _ -> acc)
       ~keep:(fun acc _ -> acc)
       ~naming_scheme:(fun acc _ -> acc)
   ;;
+
+  let default ?(zone=Time.Zone.machine_zone ()) () =
+    { messages = None
+    ; size = None
+    ; time = Some Time.Ofday.start_of_day
+    ; keep = `All
+    ; naming_scheme = `Dated
+    ; zone
+    }
 end
 
 module Message : sig
@@ -173,19 +228,19 @@ end = struct
       <:test_result<string>> (to_write_only_text ~zone t) ~expect
     in
     check "2013-12-13 15:00:00.000000Z <message>"
-      { time = Time.of_string "2013-12-13 10:00:00"
+      { time = Time.of_string "2013-12-13 15:00:00Z"
       ; level = None
       ; tags = []
       ; message = lazy "<message>"
       };
     check "2013-12-13 15:00:00.000000Z Info <message>"
-      { time = Time.of_string "2013-12-13 10:00:00"
+      { time = Time.of_string "2013-12-13 15:00:00Z"
       ; level = Some `Info
       ; tags = []
       ; message = lazy "<message>"
       };
     check "2013-12-13 15:00:00.000000Z Info <message> -- [k1: v1] [k2: v2]"
-      { time = Time.of_string "2013-12-13 10:00:00"
+      { time = Time.of_string "2013-12-13 15:00:00Z"
       ; level = Some `Info
       ; tags = ["k1", "v1"; "k2", "v2"]
       ; message = lazy "<message>"
@@ -290,7 +345,9 @@ end = struct
   end = struct
     module type Id_intf = sig
       type t
-      val create : unit -> t
+      val create : Time.Zone.t -> t
+      (* For any rotation scheme that renames logs on rotation, this defines how to do
+         the renaming. *)
       val rotate_one : t -> t
 
       val to_string_opt : t -> string option
@@ -377,7 +434,8 @@ end = struct
         >>= fun () ->
         maybe_delete_old_logs ~dirname ~basename t.rotation.Rotation.keep
         >>| fun () ->
-        t.filename <- make_filename ~dirname ~basename (Id.create ())
+        t.filename <-
+          make_filename ~dirname ~basename (Id.create (Rotation.zone t.rotation))
       ;;
 
       let create format ~basename rotation =
@@ -396,7 +454,8 @@ end = struct
             ; dirname
             ; rotation
             ; sequencer
-            ; filename = make_filename ~dirname ~basename (Id.create ())
+            ; filename =
+                make_filename ~dirname ~basename (Id.create (Rotation.zone rotation))
             ; last_size = 0
             ; last_messages = 0
             ; last_time = Time.now ()
@@ -421,10 +480,11 @@ end = struct
             (* rotation errors are not worth potentially crashing the process. *)
             >>= fun (_ : unit Or_error.t) ->
             File.write' format ~filename:t.filename msgs
-            >>| fun size ->
+            >>= fun size ->
             t.last_messages <- t.last_messages + Queue.length msgs;
             t.last_size     <- t.last_size + Int63.to_int_exn size;
             t.last_time     <- current_time;
+            Deferred.unit
           )
       ;;
     end
@@ -444,7 +504,7 @@ end = struct
 
     module Timestamped = Make (struct
       type t               = Time.t
-      let create           = Time.now
+      let create _zone     = Time.now ()
       let rotate_one       = ident
       let to_string_opt ts = Some (Time.to_filename_string ts)
       let cmp_newest_first     = Time.descending
@@ -455,10 +515,22 @@ end = struct
       ;;
     end)
 
+    module Dated = Make (struct
+      type t = Date.t
+      let create zone = Time.to_date (Time.now ()) zone
+      let rotate_one = ident
+      let to_string_opt date = Some (Date.to_string date)
+      let of_string_opt = function
+        | None -> None
+        | Some str -> Option.try_with (fun () -> Date.of_string str)
+      let cmp_newest_first = Date.descending
+    end)
+
     let create format ~basename rotation =
       match rotation.Rotation.naming_scheme with
       | `Numbered    -> Numbered.create format ~basename rotation
       | `Timestamped -> Timestamped.create format ~basename rotation
+      | `Dated       -> Dated.create format ~basename rotation
     ;;
   end
 

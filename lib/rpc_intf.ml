@@ -12,6 +12,7 @@ module type Connection = sig
   type t
 
 
+
   (** Initiate an Rpc connection on the given reader/writer pair.  [server] should be the
       bag of implementations that the calling side implements; it defaults to
       [Implementations.null] (i.e., "I implement no RPCs"). *)
@@ -19,6 +20,7 @@ module type Connection = sig
     :  ?implementations:'s Implementations.t
     -> connection_state:'s
     -> ?max_message_size:int
+    -> ?handshake_timeout:Time.Span.t
     -> Reader.t
     -> Writer.t
     -> (t, Exn.t) Result.t Deferred.t
@@ -88,6 +90,7 @@ module type Connection = sig
     :  implementations:'s Implementations.t
     -> initial_connection_state:('address -> 's)
     -> where_to_listen:('address, 'listening_on) Tcp.Where_to_listen.t
+    -> ?max_connections:int
     -> ?auth:('address -> bool)
     (** default is [`Ignore] *)
     -> ?on_handshake_error:[

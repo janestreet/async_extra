@@ -41,7 +41,10 @@ val default_capacity : int
     file.  It's often convenient to use the same interface for UDP, TCP, and file variants
     of the same protocol.
 
-    [stop] terminates a typical loop as soon as possible, when it becomes determined. *)
+    [stop] terminates a typical loop as soon as possible, when it becomes determined.
+
+    [max_ready] limits the number of receive loop iterations within an [Fd.every_ready_to]
+    iteration, to prevent starvation of other Async jobs. *)
 module Config : sig
   type t =
     { capacity : int
@@ -49,6 +52,7 @@ module Config : sig
     ; before : write_buffer -> unit
     ; after : write_buffer -> unit
     ; stop : unit Deferred.t
+    ; max_ready : int
     } with fields
 
   val create
@@ -57,6 +61,7 @@ module Config : sig
     -> ?before:(write_buffer -> unit)   (** default is [Iobuf.flip_lo] *)
     -> ?after:(write_buffer -> unit)    (** default is [Iobuf.reset] *)
     -> ?stop:(unit Deferred.t)          (** default is [Deferred.never] *)
+    -> ?max_ready:int                   (** default is [12] *)
     -> unit
     -> t
 end

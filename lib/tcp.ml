@@ -173,8 +173,9 @@ let on_file path =
 ;;
 
 module Server = struct
+
   type ('address, 'listening_on)  t =
-    { socket : ([`Passive], 'address) Socket.t;
+    { socket : ([ `Passive ], 'address) Socket.t;
       listening_on : 'listening_on;
       buffer_age_limit : Writer.buffer_age_limit option;
       on_handler_error : [ `Raise
@@ -183,11 +184,12 @@ module Server = struct
                          ];
       handle_client : 'address -> Reader.t -> Writer.t -> unit Deferred.t;
       max_connections : int;
-      mutable status : [ `Open of unit Ivar.t | `Closing of unit Ivar.t | `Closed ];
       mutable num_connections : int;
       mutable accept_is_pending : bool;
     }
   with fields, sexp_of
+
+  let listening_socket = socket
 
   type inet = (Socket.Address.Inet.t, int) t
   type unix = (Socket.Address.Unix.t, string) t
@@ -203,7 +205,6 @@ module Server = struct
         ~handle_client:ignore
         ~max_connections:(check (fun max_connections ->
           assert (max_connections >= 1)))
-        ~status:ignore
         ~num_connections:(check (fun num_connections ->
           assert (num_connections >= 0);
           assert (num_connections <= t.max_connections)))
@@ -214,46 +215,26 @@ module Server = struct
 
   let fd t = Socket.fd t.socket
 
-  let is_closed t =
-    match t.status with
-    | `Closed | `Closing _ -> true
-    | `Open _              -> false
-  ;;
-
+  let is_closed      t = Fd.is_closed      (fd t)
   let close_finished t = Fd.close_finished (fd t)
+  let close          t = Fd.close          (fd t)
 
-  let close t =
-    match t.status with
-    | `Closed         -> Deferred.unit
-    | `Closing closed -> Ivar.read closed
-    | `Open closing   ->
-      Ivar.fill closing ();
-      Deferred.create (fun i ->
-        t.status <- `Closing i;
-        upon (Fd.close (fd t)) (Ivar.fill i))
-  ;;
-
-  (* [maybe_accept] is a bit tricky, but the idea is to avoid calling accept until we have
-     an available slot (determined by num_connections < max_connections). *)
+  (* [maybe_accept] is a bit tricky, but the idea is to avoid calling [accept] until we
+     have an available slot (determined by [num_connections < max_connections]). *)
   let rec maybe_accept t =
     if   not (is_closed t)
       && t.num_connections < t.max_connections
       && not t.accept_is_pending
     then begin
       t.accept_is_pending <- true;
-      let interrupt =
-        match t.status with
-        | `Open closing        -> Ivar.read closing
-        | `Closing _ | `Closed -> assert false
-      in
-      Socket.accept_interruptible t.socket ~interrupt
+      Socket.accept t.socket
       >>> fun accept_result ->
       t.accept_is_pending <- false;
       match accept_result with
-      | `Interrupted | `Socket_closed -> ()
+      | `Socket_closed -> ()
       | `Ok (client_socket, client_address) ->
-        (* It is possible that someone called [close t] after the [accept] returned
-           but before we got here.  In that case, we just close the client. *)
+        (* It is possible that someone called [close t] after the [accept] returned but
+           before we got here.  In that case, we just close the client. *)
         if is_closed t then
           don't_wait_for (Fd.close (Socket.fd client_socket))
         else begin
@@ -298,7 +279,7 @@ module Server = struct
       handle_client =
     if max_connections <= 0 then
       Error.failwiths "Tcp.Server.creater got negative [max_connections]" max_connections
-        (<:sexp_of< int >>);
+        sexp_of_int;
     let module W = Where_to_listen in
     let socket = create_socket where_to_listen.W.socket_type in
     close_sock_on_error socket (fun () ->
@@ -313,13 +294,30 @@ module Server = struct
         on_handler_error;
         handle_client;
         max_connections;
-        status            = `Open (Ivar.create ());
         num_connections   = 0;
         accept_is_pending = false;
       }
     in
     maybe_accept t;
     t
+  ;;
+
+  TEST_UNIT "multiclose" =
+    Thread_safe.block_on_async_exn (fun () ->
+      let units n = List.range 0 n |> List.map ~f:ignore in
+      let multi how f = Deferred.List.iter ~how ~f (units 10) in
+      let close_connection r w () = Reader.close r >>= fun () -> Writer.close w in
+      let multi_close_connection r w () = multi `Parallel (close_connection r w) in
+      create on_port_chosen_by_os (fun _address r w -> multi_close_connection r w ())
+      >>= fun t ->
+      multi `Parallel (fun () ->
+        with_connection (to_host_and_port "localhost" t.listening_on)
+          (fun _socket r w -> multi_close_connection r w ()))
+      >>= fun () ->
+      multi `Sequential (fun () ->
+        multi `Parallel (fun () -> close t)
+        >>= fun () ->
+        multi `Parallel (fun () -> Fd.close (Socket.fd t.socket))))
   ;;
 
 end
