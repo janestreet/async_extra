@@ -134,6 +134,7 @@ val recvmmsg_loop
      -> ?create_srcs:bool               (** default is [false] *)
      -> ?max_count:int
      -> ?bufs:(write_buffer array)      (** supplies the packet buffers explicitly *)
+     -> ?on_wouldblock:(unit -> unit)   (** callback if recvmmsg would block *)
      -> Fd.t
      -> (?srcs:(Core.Std.Unix.sockaddr array)
          -> write_buffer array
@@ -150,6 +151,7 @@ val recvmmsg_no_sources_loop
      -> Fd.t
      -> ?max_count:int
      -> ?bufs:(write_buffer array)      (** supplies the packet buffers explicitly *)
+     -> ?on_wouldblock:(unit -> unit)   (** callback if recvmmsg would block *)
      -> (write_buffer array
          -> count:int
          -> unit)                       (** may modify [bufs] *)

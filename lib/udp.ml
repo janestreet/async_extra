@@ -203,6 +203,7 @@ let recvmmsg_loop =
         Array.init max_count ~f:(function
           | 0 -> Config.init config
           | _ -> Iobuf.create ~len:(Iobuf.length (Config.init config))))
+      ?(on_wouldblock = (fun () -> ()))
       fd
       f
       ->
@@ -226,11 +227,15 @@ let recvmmsg_loop =
                count (%d) > Array.length bufs (%d)"
               count
               (Array.length bufs)
-              ();
-          for i = 0 to count - 1 do Config.before config bufs.(i) done;
-          f ?srcs bufs ~count;
-          for i = 0 to count - 1 do Config.after  config bufs.(i) done;
-          `Continue)
+              ()
+          else if count >= 0 then
+            (for i = 0 to count - 1 do Config.before config bufs.(i) done;
+             f ?srcs bufs ~count;
+             for i = 0 to count - 1 do Config.after  config bufs.(i) done;
+             `Continue)
+          else (* EWOULDBLOCK/EAGAIN is reported as a negative value *)
+            (on_wouldblock ();
+            `Continue))
         >>| function
         | (`Bad_fd | `Unsupported) as error ->
           failwiths "Udp.recvmmsg_loop" (error, fd)
@@ -248,6 +253,7 @@ let recvmmsg_no_sources_loop =
         Array.init max_count ~f:(function
           | 0 -> Config.init config
           | _ -> Iobuf.create ~len:(Iobuf.length (Config.init config))))
+      ?(on_wouldblock = (fun () -> ()))
       callback
       ->
         let stop = Ivar.create () in
@@ -263,11 +269,15 @@ let recvmmsg_no_sources_loop =
                count (%d) > Array.length bufs (%d)"
               count
               (Array.length bufs)
-              ();
-          for i = 0 to count - 1 do Config.before config bufs.(i) done;
-          callback bufs ~count;
-          for i = 0 to count - 1 do Config.after  config bufs.(i) done;
-          `Continue)
+              ()
+          else if count >= 0 then
+            (for i = 0 to count - 1 do Config.before config bufs.(i) done;
+             callback bufs ~count;
+             for i = 0 to count - 1 do Config.after  config bufs.(i) done;
+             `Continue)
+          else (* EWOULDBLOCK/EAGAIN is reported as a negative value *)
+            (on_wouldblock ();
+             `Continue))
         >>| function
         | (`Bad_fd | `Unsupported) as error ->
           failwiths "Udp.recvmmsg_no_sources_loop" (error, fd)

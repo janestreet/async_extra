@@ -664,18 +664,22 @@ module Connection : Connection_internal = struct
     result >>| Handshake_error.result_to_exn_result
 
   let with_close
-      ?implementations
-      ~connection_state
-      reader
-      writer
-      ~dispatch_queries
-      ~on_handshake_error =
+        ?implementations
+        ?max_message_size
+        ?handshake_timeout
+        ~connection_state
+        reader
+        writer
+        ~dispatch_queries
+        ~on_handshake_error =
     let handle_handshake_error =
       match on_handshake_error with
       | `Call f -> f
       | `Raise -> raise
     in
-    create ?implementations ~connection_state reader writer >>= fun t ->
+    create ?implementations ?max_message_size ?handshake_timeout ~connection_state
+      reader writer
+    >>= fun t ->
     match t with
     | Error e -> handle_handshake_error e
     | Ok t ->
@@ -683,28 +687,31 @@ module Connection : Connection_internal = struct
         dispatch_queries t
         >>= fun result ->
         (match implementations with
-        | None -> Deferred.unit
-        | Some _ -> Ivar.read t.close_finished)
+         | None -> Deferred.unit
+         | Some _ -> Ivar.read t.close_finished)
         >>| fun () ->
         result
       )
 
-  let server_with_close reader writer ~implementations ~connection_state
-      ~on_handshake_error =
+  let server_with_close ?max_message_size ?handshake_timeout reader writer ~implementations
+        ~connection_state ~on_handshake_error =
     let on_handshake_error =
       match on_handshake_error with
       | `Call f -> `Call f
       | `Raise -> `Raise
       | `Ignore -> `Call (fun _ -> Deferred.unit)
     in
-    with_close reader writer ~implementations ~connection_state ~on_handshake_error
-      ~dispatch_queries:(fun _ -> Deferred.unit)
+    with_close ?max_message_size ?handshake_timeout reader writer ~implementations
+      ~connection_state
+      ~on_handshake_error ~dispatch_queries:(fun _ -> Deferred.unit)
 
   let serve
       ~implementations
       ~initial_connection_state
       ~where_to_listen
       ?max_connections
+      ?max_message_size
+      ?handshake_timeout
       ?(auth = (fun _ -> true))
       ?(on_handshake_error = `Ignore)
       () =
@@ -713,7 +720,9 @@ module Connection : Connection_internal = struct
         if not (auth inet) then Deferred.unit
         else begin
           let connection_state = initial_connection_state inet in
-          create ~implementations ~connection_state r w >>= function
+          create ?max_message_size ?handshake_timeout ~implementations ~connection_state
+            r w
+          >>= function
           | Ok t -> Reader.close_finished r >>= fun () -> close t
           | Error handshake_error ->
             begin match on_handshake_error with
@@ -736,7 +745,7 @@ module Connection : Connection_internal = struct
     }
   end
 
-  let client ~host ~port ?implementations () =
+  let client ~host ~port ?implementations ?max_message_size ?handshake_timeout () =
     Monitor.try_with (fun () ->
       Tcp.connect (Tcp.to_host_and_port host port)
       >>= fun (_, r, w) ->
@@ -746,9 +755,11 @@ module Connection : Connection_internal = struct
           let {Client_implementations.connection_state; implementations} =
             Client_implementations.null ()
           in
-          create r w ~implementations ~connection_state
+          create r w ?max_message_size ?handshake_timeout ~implementations
+            ~connection_state
         | Some {Client_implementations.connection_state; implementations} ->
-          create r w ~implementations ~connection_state
+          create r w ?max_message_size ?handshake_timeout ~implementations
+            ~connection_state
       end
       >>= function
       | Ok t -> Deferred.return t
@@ -759,9 +770,9 @@ module Connection : Connection_internal = struct
         >>= fun () ->
         raise handshake_error)
 
-  let with_client ~host ~port ?implementations f =
+  let with_client ~host ~port ?implementations ?max_message_size ?handshake_timeout f =
     Monitor.try_with (fun () ->
-      client ~host ~port ?implementations ()
+      client ~host ~port ?implementations ?max_message_size ?handshake_timeout ()
       >>= fun res ->
       begin match res with
       | Error e -> return (Error e)

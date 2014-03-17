@@ -79,6 +79,17 @@ module Make (Key : Hashable) = struct
       f acc ~key (Hashtbl.find t.states key))
   ;;
 
+  let prior_jobs_done t =
+    Hashtbl.fold t.jobs ~init:[] ~f:(fun ~key:_ ~data:queue acc ->
+      let this_key_done =
+        Deferred.create (fun ivar ->
+          Queue.enqueue queue (fun _ ->
+            Ivar.fill ivar ();
+            Deferred.unit))
+      in
+      this_key_done :: acc)
+    |> Deferred.all_unit
+  ;;
 end
 
 TEST_MODULE = struct
@@ -231,5 +242,41 @@ TEST_MODULE = struct
             Deferred.unit)
       in
       loop 100)
+  ;;
+
+  TEST_UNIT = (* [flushed] is determined after all current jobs are finished *)
+    Thread_safe.block_on_async_exn (fun () ->
+      let t = T.create () in
+      let phase1_finished = Ivar.create () in
+      let phase2_finished = Ivar.create () in
+      let num_flushed = 2 in
+      let num_not_flushed = 2 in
+      for i = 1 to num_flushed do
+        don't_wait_for (T.enqueue t ~key:i (fun _ -> Ivar.read phase1_finished));
+      done;
+      let phase1_flushed = T.prior_jobs_done t in
+      for i = 1 to num_flushed + num_not_flushed do
+        don't_wait_for (T.enqueue t ~key:i (fun _ -> Ivar.read phase2_finished));
+      done;
+      for i = 1 to num_flushed do
+        (* two jobs we enqueued, and one job [flush] added *)
+        assert (T.num_unfinished_jobs t i = 3)
+      done;
+      for i = num_flushed + 1 to num_flushed + num_not_flushed do
+        assert (T.num_unfinished_jobs t i = 1)
+      done;
+      Ivar.fill phase1_finished ();
+      phase1_flushed
+      >>= fun () ->
+      for i = 1 to num_flushed + num_not_flushed do
+        assert (T.num_unfinished_jobs t i = 1)
+      done;
+      Ivar.fill phase2_finished ();
+      T.prior_jobs_done t
+      >>| fun () ->
+      for i = 1 to num_flushed + num_not_flushed do
+        assert (T.num_unfinished_jobs t i = 0)
+      done;
+    )
   ;;
 end

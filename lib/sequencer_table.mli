@@ -71,4 +71,10 @@ module Make (Key : Hashable) : sig
   (** Fold over keys with states or pending/running jobs. It's safe to mutate ([enqueue]
       or [set_state]) when folding *)
   val fold : 'a t -> init:'b -> f:('b -> key:Key.t -> 'a option -> 'b) -> 'b
+
+  (** The result is determined when all jobs enqueued before this are finished.  The
+      implementation adds a new job to every key currently with at least one running job
+      attached, so it will affect [num_unfinished_jobs] *)
+  val prior_jobs_done : _ t -> unit Deferred.t
+
 end

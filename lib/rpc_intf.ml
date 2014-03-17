@@ -55,6 +55,8 @@ module type Connection = sig
       and [Writer.close] have finished. *)
   val with_close
     :  ?implementations:'s Implementations.t
+    -> ?max_message_size:int
+    -> ?handshake_timeout:Time.Span.t
     -> connection_state:'s
     -> Reader.t
     -> Writer.t
@@ -69,7 +71,9 @@ module type Connection = sig
      this function doesn't let you dispatch any queries (i.e., act as a client), it would
      be pointless to call it if you didn't want to act as a server.*)
   val server_with_close
-    :  Reader.t
+    :  ?max_message_size:int
+    -> ?handshake_timeout:Time.Span.t
+    -> Reader.t
     -> Writer.t
     -> implementations:'s Implementations.t
     -> connection_state:'s
@@ -91,6 +95,8 @@ module type Connection = sig
     -> initial_connection_state:('address -> 's)
     -> where_to_listen:('address, 'listening_on) Tcp.Where_to_listen.t
     -> ?max_connections:int
+    -> ?max_message_size:int
+    -> ?handshake_timeout:Time.Span.t
     -> ?auth:('address -> bool)
     (** default is [`Ignore] *)
     -> ?on_handshake_error:[
@@ -117,6 +123,8 @@ module type Connection = sig
     :  host:string
     -> port:int
     -> ?implementations:_ Client_implementations.t
+    -> ?max_message_size:int
+    -> ?handshake_timeout:Time.Span.t
     -> unit
     -> (t, Exn.t) Result.t Deferred.t
 
@@ -126,6 +134,8 @@ module type Connection = sig
     :  host:string
     -> port:int
     -> ?implementations:_ Client_implementations.t
+    -> ?max_message_size:int
+    -> ?handshake_timeout:Time.Span.t
     -> (t -> 'a Deferred.t)
     -> ('a, Exn.t) Result.t Deferred.t
 end
