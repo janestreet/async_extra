@@ -142,6 +142,7 @@ module Message : sig
   val level   : t -> Level.t option
   val message : t -> string
   val tags    : t -> (string * string) list
+  val add_tags : t -> (string * string) list -> t
 
   val to_write_only_text : ?zone:Time.Zone.t -> t -> string
 
@@ -199,6 +200,7 @@ end = struct
   let level t   = t.level
   let message t = Lazy.force t.message
   let tags t    = t.tags
+  let add_tags t new_tags = { t with tags = List.unordered_append new_tags t.tags }
 
   let to_write_only_text ?zone t =
     let prefix =

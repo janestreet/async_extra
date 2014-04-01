@@ -30,6 +30,8 @@ module Message : sig
   val message : t -> string
   val level   : t -> Level.t option
   val tags    : t -> (string * string) list
+  (* create a new message with additional tags *)
+  val add_tags : t -> (string * string) list -> t
 end
 
 module Rotation : sig
