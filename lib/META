@@ -1,0 +1,13 @@
+# OASIS_START
+# DO NOT EDIT (digest: fa1c48e8541ec1952a7b8e7dc35e3e57)
+version = "111.11.00"
+description = "Jane Street Capital's asynchronous execution library (extra)"
+requires =
+"sexplib fieldslib bin_prot custom_printf herelib pa_ounit pa_test core async_kernel async_unix threads"
+archive(byte) = "async_extra.cma"
+archive(byte, plugin) = "async_extra.cma"
+archive(native) = "async_extra.cmxa"
+archive(native, plugin) = "async_extra.cmxs"
+exists_if = "async_extra.cma"
+# OASIS_STOP
+

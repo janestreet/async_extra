@@ -1,3 +1,64 @@
 # OASIS_START
+# DO NOT EDIT (digest: 842ca4a0c60b4db0c3451abed0cdd8e3)
+# Ignore VCS directories, you can use the same kind of rule outside
+# OASIS_START/STOP if you want to exclude directories that contains
+# useless stuff for the build process
+<**/.svn>: -traverse
+<**/.svn>: not_hygienic
+".bzr": -traverse
+".bzr": not_hygienic
+".hg": -traverse
+".hg": not_hygienic
+".git": -traverse
+".git": not_hygienic
+"_darcs": -traverse
+"_darcs": not_hygienic
+# Library async_extra
+"lib/async_extra.cmxs": use_async_extra
+"lib/bus.cmx": for-pack(Async_extra)
+"lib/bus_debug.cmx": for-pack(Async_extra)
+"lib/bus_unit_tests.cmx": for-pack(Async_extra)
+"lib/command.cmx": for-pack(Async_extra)
+"lib/cpu_usage.cmx": for-pack(Async_extra)
+"lib/dynamic_port_writer.cmx": for-pack(Async_extra)
+"lib/file_tail.cmx": for-pack(Async_extra)
+"lib/file_writer.cmx": for-pack(Async_extra)
+"lib/import.cmx": for-pack(Async_extra)
+"lib/lock_file.cmx": for-pack(Async_extra)
+"lib/log.cmx": for-pack(Async_extra)
+"lib/persistent_singleton.cmx": for-pack(Async_extra)
+"lib/rpc.cmx": for-pack(Async_extra)
+"lib/rpc_intf.cmx": for-pack(Async_extra)
+"lib/sequencer_table.cmx": for-pack(Async_extra)
+"lib/std.cmx": for-pack(Async_extra)
+"lib/tcp.cmx": for-pack(Async_extra)
+"lib/tcp_file.cmx": for-pack(Async_extra)
+"lib/typed_tcp.cmx": for-pack(Async_extra)
+"lib/typed_tcp_intf.cmx": for-pack(Async_extra)
+"lib/udp.cmx": for-pack(Async_extra)
+"lib/unpack_sequence.cmx": for-pack(Async_extra)
+"lib/user_and_group.cmx": for-pack(Async_extra)
+"lib/versioned_rpc.cmx": for-pack(Async_extra)
+"lib/versioned_typed_tcp.cmx": for-pack(Async_extra)
+"lib/weak_hashtbl.cmx": for-pack(Async_extra)
+<lib/*.ml{,i}>: package(async_kernel)
+<lib/*.ml{,i}>: package(async_unix)
+<lib/*.ml{,i}>: package(bin_prot)
+<lib/*.ml{,i}>: package(bin_prot.syntax)
+<lib/*.ml{,i}>: package(core)
+<lib/*.ml{,i}>: package(custom_printf)
+<lib/*.ml{,i}>: package(custom_printf.syntax)
+<lib/*.ml{,i}>: package(fieldslib)
+<lib/*.ml{,i}>: package(fieldslib.syntax)
+<lib/*.ml{,i}>: package(herelib)
+<lib/*.ml{,i}>: package(herelib.syntax)
+<lib/*.ml{,i}>: package(pa_ounit)
+<lib/*.ml{,i}>: package(pa_ounit.syntax)
+<lib/*.ml{,i}>: package(pa_pipebang)
+<lib/*.ml{,i}>: package(pa_test)
+<lib/*.ml{,i}>: package(pa_test.syntax)
+<lib/*.ml{,i}>: package(sexplib)
+<lib/*.ml{,i}>: package(sexplib.syntax)
+<lib/*.ml{,i}>: package(threads)
 # OASIS_STOP
 <lib/*.ml{,i}>: syntax_camlp4o, pa_ounit_lib(async_extra)
