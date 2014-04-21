@@ -641,52 +641,63 @@ end
 let close = Flush_at_exit_or_gc.close
 
 let create_log_processor ~level ~output =
+  let batch_size    = 1_000 in
   let write         = ref (Output.combine output) in
   let current_level = ref level in
-  stage (fun updates ->
-    let msgs = Queue.create () in
-    let output_message_queue f =
-      if Queue.length msgs = 0
-      then f ()
-      else begin
-        let msgs' = Queue.copy msgs in
-        Queue.clear msgs;
-        (Output.apply !write) msgs'
-        >>= f
+  let msgs          = Queue.create () in
+  let output_message_queue f =
+    if Queue.length msgs = 0
+    then f ()
+    else begin
+      let msgs' = Queue.copy msgs in
+      Queue.clear msgs;
+      (Output.apply !write) msgs'
+      >>= f
+    end
+  in
+  (fun updates ->
+    let rec loop n =
+      let n = n - 1 in
+      if n = 0
+      then begin
+        (* this introduces a yield point so that other async jobs have a chance to run
+           under circumstances when large batches of logs are delivered in bursts. *)
+        Deferred.unit
+        >>= fun () ->
+        loop batch_size
+      end else begin
+        match Queue.dequeue updates with
+        | None        -> output_message_queue (fun () -> Deferred.unit)
+        | Some update ->
+          match update with
+          | Update.Flush i ->
+            output_message_queue (fun () ->
+              Ivar.fill i ();
+              loop n)
+          | Update.Msg msg ->
+            let enqueue =
+              match Message.level msg with
+              | None       -> true
+              | Some level ->
+                Level.equal_or_more_verbose_than !current_level level
+            in
+            if enqueue then Queue.enqueue msgs msg;
+            loop n
+          | Update.New_level level ->
+            current_level := level;
+            loop n
+          | Update.New_output f ->
+            output_message_queue (fun () ->
+              write := f;
+              loop n)
       end
     in
-    let rec loop () =
-      match Queue.dequeue updates with
-      | None        -> output_message_queue (fun () -> Deferred.unit)
-      | Some update ->
-        match update with
-        | Update.Flush i ->
-          output_message_queue (fun () ->
-            Ivar.fill i ();
-            loop ())
-        | Update.Msg msg ->
-          let enqueue =
-            match Message.level msg with
-            | None       -> true
-            | Some level ->
-              Level.equal_or_more_verbose_than !current_level level
-          in
-          if enqueue then Queue.enqueue msgs msg;
-          loop ()
-        | Update.New_level level ->
-          current_level := level;
-          loop ()
-        | Update.New_output f ->
-          output_message_queue (fun () ->
-            write := f;
-            loop ())
-    in
-    loop ())
+    loop batch_size)
 ;;
 
 let create ~level ~output : t =
-  let r,w = Pipe.create () in
-  let process_log = unstage (create_log_processor ~level ~output) in
+  let r,w         = Pipe.create () in
+  let process_log = create_log_processor ~level ~output in
   don't_wait_for (Pipe.iter' r ~f:process_log);
   Flush_at_exit_or_gc.add_log w;
   w

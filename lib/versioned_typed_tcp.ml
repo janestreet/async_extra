@@ -281,7 +281,7 @@ module type S = sig
       -> port:int
       -> expected_remote_name:Remote_name.t
       -> My_name.t
-      -> t Deferred.t
+      -> t
 
     (** [connect t] If the connection is not currently established, initiate one.
         @return a deferred that becomes determined when the connection is established. *)
@@ -1377,22 +1377,21 @@ module Make (Z : Arg) :
         ?(now = Scheduler.cycle_start)
         ?(check_remote_name = true)
         ~ip ~port ~expected_remote_name my_name =
-      return
-        { remote_ip = Unix.Inet_addr.of_string ip;
-          remote_port = port;
-          logfun;
-          expected_remote_name;
-          check_remote_name;
-          my_name;
-          queue = Queue.create ();
-          messages = Tail.create ();
-          con = `Disconnected;
-          connect_complete = Ivar.create ();
-          ok_to_connect = (let i = Ivar.create () in Ivar.fill i (); i);
-          trying_to_connect = `No;
-          now;
-          last_connect_error = None;
-        }
+      { remote_ip = Unix.Inet_addr.of_string ip;
+        remote_port = port;
+        logfun;
+        expected_remote_name;
+        check_remote_name;
+        my_name;
+        queue = Queue.create ();
+        messages = Tail.create ();
+        con = `Disconnected;
+        connect_complete = Ivar.create ();
+        ok_to_connect = (let i = Ivar.create () in Ivar.fill i (); i);
+        trying_to_connect = `No;
+        now;
+        last_connect_error = None;
+      }
     ;;
 
     let last_connect_error t = t.last_connect_error
