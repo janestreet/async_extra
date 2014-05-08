@@ -23,7 +23,7 @@ open Rpc_intf
     similar functionality. *)
 
 module Implementation : sig
-  (** A ['connection_state t] is something which knows how to respond to one query, given
+  (** A ['connection_state t] is something that knows how to respond to one query, given
       a ['connection_state].  That is, you can create a ['connection_state t] by providing
       a function which takes a query *and* a ['connection_state] and provides a response.
 
@@ -39,14 +39,14 @@ module Implementation : sig
   val description : _ t -> Description.t
 
   (** We may want to use an ['a t] implementation (perhaps provided by someone else) in a
-      ['b t] context. We can do this as long as we can map our state into the state
+      ['b t] context.  We can do this as long as we can map our state into the state
       expected by the original implementer. *)
   val lift : 'a t -> f:('b -> 'a) -> 'b t
 end
 
 module Implementations : sig
-  (** A ['connection_state Implementations.t] is something which knows how to respond to
-      many different queries. It is conceptually a package of ['connection_state
+  (** A ['connection_state Implementations.t] is something that knows how to respond to
+      many different queries.  It is conceptually a package of ['connection_state
       Implementation.t]'s. *)
   type 'connection_state t
 

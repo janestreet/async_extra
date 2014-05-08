@@ -37,7 +37,7 @@ module Make (Arg : Arg) = struct
     result_writer : Server_read_result.t Pipe.Writer.t;
     mutable listening : bool;
     socket : ([ `Passive ], Socket.Address.Inet.t) Socket.t;
-    auth : Unix.Inet_addr.t -> int -> [`Allow | `Deny of string option] Deferred.t;
+    auth : Unix.Inet_addr.t -> int -> Client_id.t -> [`Allow | `Deny of string option] Deferred.t;
     buffer_age_limit : [ `At_most of Time.Span.t | `Unlimited ] option;
     server_port : int;
   }
@@ -103,7 +103,8 @@ module Make (Arg : Arg) = struct
               eprintf "accepted connection from %s:%d\n"
                 (Unix.Inet_addr.to_string addr) port;
             let fd = Socket.fd sock in
-            t.auth addr port >>> function
+            let id = Client_id.create () in
+            t.auth addr port id >>> function
               | `Deny reason ->
                   let msg =
                     sprintf "denied access to %s%s"
@@ -121,7 +122,6 @@ module Make (Arg : Arg) = struct
                   ignore_errors (fun () -> Unix.close fd)
               | `Allow ->
                   if t.verbose then eprintf "access allowed\n";
-                  let id = Client_id.create () in
                   let writer =
                     Writer.create ?buffer_age_limit:t.buffer_age_limit fd
                   in
@@ -194,7 +194,7 @@ module Make (Arg : Arg) = struct
             result_writer;
             listening = false;
             socket = s;
-            auth = auth;
+            auth;
             buffer_age_limit;
             server_port;
           }
