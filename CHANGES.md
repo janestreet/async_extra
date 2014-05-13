@@ -1,3 +1,8 @@
+## 111.13.00
+
+- For `Typed_tcp.create`, added a `Client_id.t` argument to the `auth`
+  callback.
+
 ## 111.11.00
 
 - Made `Log` more fair with respect to other Async jobs, by working on
