@@ -8,8 +8,8 @@
 - Made `Log` more fair with respect to other Async jobs, by working on
   fixed-length groups of incoming log messages.
 
-  Previously, `Log` had processed everything available.  The change
-  gives other Async jobs more of a chance to run.
+    Previously, `Log` had processed everything available.  The change
+    gives other Async jobs more of a chance to run.
 
 ## 111.08.00
 
@@ -26,9 +26,9 @@
   arguments: `?max_message_size:int` and
   `?handshake_timeout:Time.Span.t`.
 
-  These arguments were already available to `Connection.create`, but
-  are now uniformly available to all functions that create
-  connections.
+    These arguments were already available to `Connection.create`, but
+    are now uniformly available to all functions that create
+    connections.
 
 ## 111.03.00
 
@@ -75,10 +75,10 @@
 - Added `Cpu_usage.Sampler` for directly sampling CPU usage.
 - Fixed `Log.rotate` to never raise.
 - Fixed two bugs in `Log` rotation.
-  * Log rotation had used the wrong date when checking whether it
-    should rotate.
-  * Made `Rotation.keep = \`At_least` delete the oldest, rather than
-    the newest, logs.
+    * Log rotation had used the wrong date when checking whether it
+      should rotate.
+    * Made `Rotation.keep = \`At_least` delete the oldest, rather than
+      the newest, logs.
 
 ## 109.60.00
 
@@ -95,16 +95,16 @@
 - Fixed `Tcp.on_port 0` to return the port actually being listened on,
   like `Tcp.on_port_chosen_by_os`.
 
-  Previously, a serverlistening on `Tcp.on_port 0` would have its
-  `Tcp.Server.listening_on` as `0`, which of course is not the port
-  the server is listening on.
+    Previously, a serverlistening on `Tcp.on_port 0` would have its
+    `Tcp.Server.listening_on` as `0`, which of course is not the port
+    the server is listening on.
 
 ## 109.55.00
 
 - Added `Udp.recvmmsg_no_sources_loop`, a specialization of
   `recvmmsg_loop` for improved performance.
 
-  This improvement was driven by profiling at high message rates.
+    This improvement was driven by profiling at high message rates.
 
 ## 109.53.00
 
@@ -116,7 +116,7 @@
 - Module `Weak_hashtbl` is now implemented as a wrapper around
   `Core.Weak_hashtbl`.
 
-  No intended change in behavior.
+    No intended change in behavior.
 
 ## 109.52.00
 
@@ -151,9 +151,9 @@
 
 - In `Rpc`, exposed accessors for binary protocol values.
 
-  For example, this allows one to write a wrapper for `Pipe_rpc` that
-  allows for the easy re cording and replaying of values the come over
-  the pipe.
+    For example, this allows one to write a wrapper for `Pipe_rpc` that
+    allows for the easy re cording and replaying of values the come over
+    the pipe.
 
 ## 109.35.00
 
@@ -164,18 +164,18 @@
 
 ## 109.33.00
 
-- Change `Log.Global` to by default send all output, including ``Info`,
+- Change `Log.Global` to by default send all output, including `` `Info ``,
   to `stderr`.
 
-  Replaced `Log.Output.screen` with `Log.Output.stderr`.  There is now
-  also and `Log.Output.stdout`.
+    Replaced `Log.Output.screen` with `Log.Output.stderr`.  There is now
+    also and `Log.Output.stdout`.
 
 ## 109.32.00
 
 - Added `Dynamic_port_writer`.
 
-  `Dynamic_port_writer` solves the problem of communicating a
-  dynamically selected tcp port from a child process to its parent.
+    `Dynamic_port_writer` solves the problem of communicating a
+    dynamically selected tcp port from a child process to its parent.
 
 ## 109.28.00
 
@@ -198,32 +198,32 @@
 - Added function `Versioned_typed_tcp.Client.flushed : t ->
   [ `Flushed | `Pending of Time.t Deferred.t ]`.
 
-  This exposes whether the underlying `Writer.t` has been flushed.
+    This exposes whether the underlying `Writer.t` has been flushed.
 
 ## 109.17.00
 
 - Added an option to `Async.Log.Rotation` to include the date in
   logfile names.
 
-  This is mostly for archiving purposes.
+    This is mostly for archiving purposes.
 - Made `Versioned_rpc.Callee_converts.Pipe_rpc.implement_multi` agree
   with `Rpc.Pipe_rpc.implement` on the type of pipe rpc
   implementations.
 - Improved the performance of `Versioned_typed_tcp`.
 
-  Avoided creating deferreds while reading the incoming messages.
+    Avoided creating deferreds while reading the incoming messages.
 
 ## 109.15.00
 
 - In `Rpc.client` and `Rpc.with_client`, allowed the client to
   implement the rpcs.
 
-  Added a new optional argument: `?implementations:_ Client_implementations.t`.
+    Added a new optional argument: `?implementations:_ Client_implementations.t`.
 - Added new module `Versioned_rpc.Both_convert` to allow the caller
   and callee to independently upgrade to a new rpc.
 
-  This is a new flavor of `Versioned_rpc` in which both sides do some
-  type coercions.
+    This is a new flavor of `Versioned_rpc` in which both sides do some
+    type coercions.
 
 ## 109.12.00
 
