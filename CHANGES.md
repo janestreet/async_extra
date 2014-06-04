@@ -1,3 +1,40 @@
+## 111.17.00
+
+- Added module `Persistent_rpc_client`, an RPC client that attempts to
+  reconnect when the connection is lost, until a new connection is
+  established.
+- Significantly sped up the `Rpc` module by removing `Bigstring`
+  serialization.
+
+  Performance of the two implementations was tested by building a
+  simple client/server executable that would count major cycles.
+  Sending 100 byte messages at a rate of 50k/second shows (on both
+  sides of the RPC):
+
+  original:
+  * ~160 major cycles in 30s
+  * CPU usage around 60%
+
+  new:
+  * ~10 major cycles in 30s
+  * CPU usage <= 2%
+- Enabled a version of `Pipe_rpc` and `State_rpc` where the consumer
+  can pushback on the producer if it can't consume the contents of the
+  pipe fast enough.
+- Added `Log.Level.arg : Log.Level.t Command.Spec.Arg_type.t` for
+  defining command lines that accept (and autocomplete) log levels.
+- Added `Command.async_or_error` and renamed `Command.async_basic` to
+  `Command.async`.
+
+  `Command.async_or_error` is similar to `Command.basic` and
+  `Command.async`, but accepts a `unit Or_error.t Deferred.t` type.
+- Added `Persistent_rpc_connection.current_connection`, so that one
+  can detect whether one is currently connected.
+
+  ```ocaml
+  val current_connection : t -> Rpc.Connection.t option
+  ```
+
 ## 111.13.00
 
 - For `Typed_tcp.create`, added a `Client_id.t` argument to the `auth`

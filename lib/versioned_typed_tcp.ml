@@ -509,7 +509,7 @@ module Make (Z : Arg) :
        only serious errors ("man 2 write" lists EBADF, EFAULT, EFBIG, EINVAL, EIO, ENOSPC,
        all of which point to either a bug in async or to a pretty bad state of the
        system).  We close the connection and propagate the error up. *)
-    Stream.iter (Monitor.errors (Writer.monitor con.C.writer)) ~f:(fun e ->
+    Stream.iter (Monitor.detach_and_get_error_stream (Writer.monitor con.C.writer)) ~f:(fun e ->
       con.C.kill ();
       (* As opposed to [raise], this will continue propagating subsequent exceptions. *)
       (* This can't lead to an infinite loop because con.C.writer is not exposed *)
@@ -909,7 +909,7 @@ module Make (Z : Arg) :
           Tail.extend t.tail (S.Control e);
           !kill ()
         in
-        Stream.iter (Monitor.errors (Writer.monitor w))
+        Stream.iter (Monitor.detach_and_get_error_stream (Writer.monitor w))
           (* We don't report the error to the tail here because this is before
              protocol negotiation.  Once protocol negotiation happens,
              [handle_incoming] will report any errors to the tail.
@@ -1180,7 +1180,7 @@ module Make (Z : Arg) :
             let reader = Reader.create fd in
             let writer = Writer.create ~syscall:`Per_cycle fd in
             close_this := `Writer writer;
-            Stream.iter (Monitor.errors (Writer.monitor writer))
+            Stream.iter (Monitor.detach_and_get_error_stream (Writer.monitor writer))
               ~f:(fun e -> close (Write_error e));
             let my_name = My_name.to_string t.my_name in
             raise_after_timeout negotiate_timeout (fun () ->

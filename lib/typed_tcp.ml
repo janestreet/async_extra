@@ -149,7 +149,7 @@ module Make (Arg : Arg) = struct
                       in
                       (fun e -> disconnect_reason := Some e; Lazy.force close)
                     in
-                    Stream.iter (Monitor.errors (Writer.monitor writer)) ~f:(fun e ->
+                    Stream.iter (Monitor.detach_and_get_error_stream (Writer.monitor writer)) ~f:(fun e ->
                       close (Exception_in_writer e));
                     assert (not (Hashtbl.mem t.clients id));
                     Hashtbl.replace t.clients ~key:id ~data:

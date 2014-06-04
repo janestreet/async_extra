@@ -21,6 +21,8 @@ module Level : sig
     with sexp
 
   include Stringable with type t := t
+
+  val arg : t Command.Spec.Arg_type.t
 end
 
 module Message : sig

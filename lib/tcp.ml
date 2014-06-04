@@ -101,9 +101,9 @@ let connect ?buffer_age_limit ?interrupt ?reader_buffer_size ?timeout where_to_c
 
 let collect_errors writer f =
   let monitor = Writer.monitor writer in
-  ignore (Monitor.errors monitor); (* don't propagate errors up, we handle them here *)
+  ignore (Monitor.detach_and_get_error_stream monitor); (* don't propagate errors up, we handle them here *)
   choose [
-    choice (Monitor.error monitor) (fun e -> Error e);
+    choice (Monitor.get_next_error monitor) (fun e -> Error e);
     choice (try_with ~name:"Tcp.collect_errors" f) Fn.id;
   ]
 ;;

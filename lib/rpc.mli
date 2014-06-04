@@ -124,11 +124,30 @@ module Pipe_rpc : sig
   module Id : sig type t end
 
   val create
-    :  name:string
+    (** If [client_pushes_back] is set, the client side of the connection will stop
+        reading elements from the underlying file descriptor when the client's pipe has
+        a sufficient number of elements enqueued, rather than reading elements eagerly.
+        This will eventually cause writes on the server's side to stop working, which
+        gives the server an indication when a client is backed up.
+
+        Setting this allows a careful server to notice when its clients are unable to keep
+        up and slow down its work accordingly.  However, it has some drawbacks:
+
+        - RPC multiplexing doesn't work as well.  The client will stop reading *all*
+          messages on the connection if any pipe gets saturated, not just ones relating
+          to that pipe.
+
+        - A server that doesn't pay attention to pushback on its end will accumulate
+          elements on its side of the connection, rather than on the client's side,
+          meaning a slow client can make the server run out of memory.
+    *)
+    :  ?client_pushes_back:unit
+    -> name:string
     -> version:int
     -> bin_query    : 'query    Bin_prot.Type_class.t
     -> bin_response : 'response Bin_prot.Type_class.t
     -> bin_error    : 'error    Bin_prot.Type_class.t
+    -> unit
     -> ('query, 'response, 'error) t
 
   val bin_query    : ('query, _, _) t    -> 'query    Bin_prot.Type_class.t
@@ -182,12 +201,14 @@ module State_rpc : sig
   module Id : sig type t end
 
   val create
-    :  name:string
+    :  ?client_pushes_back:unit
+    -> name:string
     -> version:int
     -> bin_query  : 'query  Bin_prot.Type_class.t
     -> bin_state  : 'state  Bin_prot.Type_class.t
     -> bin_update : 'update Bin_prot.Type_class.t
     -> bin_error  : 'error  Bin_prot.Type_class.t
+    -> unit
     -> ('query, 'state, 'update, 'error) t
 
   val bin_query  : ('query, _, _, _)  t -> 'query  Bin_prot.Type_class.t

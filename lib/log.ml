@@ -21,6 +21,12 @@ module Level = struct
     | "Error" -> `Error
     | s       -> failwithf "not a valid level %s" s ()
 
+  let all = [`Debug; `Info; `Error]
+
+  let arg =
+    Command.Spec.Arg_type.of_alist_exn
+      (List.map all ~f:(fun t -> (String.lowercase (to_string t), t)))
+
   (* Ordering of log levels in terms of verbosity. *)
   let equal_or_more_verbose_than l1 l2 =
     match l1,l2 with

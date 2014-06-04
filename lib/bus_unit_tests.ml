@@ -237,7 +237,7 @@ TEST_MODULE = (struct
       let t = create ~can_subscribe_after_start:false in
       let r = ref None in
       let monitor = Monitor.create () in
-      ignore (Monitor.errors monitor);
+      ignore (Monitor.detach_and_get_error_stream monitor);
       r :=
         Scheduler.within_v ~monitor (fun () ->
           subscribe_exn t ~f:(fun () ->

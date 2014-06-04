@@ -158,7 +158,7 @@ module Callee_converts = struct
 
         open Version_i
 
-        let rpc = Pipe_rpc.create ~name ~version ~bin_query ~bin_response ~bin_error
+        let rpc = Pipe_rpc.create ~name ~version ~bin_query ~bin_response ~bin_error ()
 
         let () =
           let implement ~log_version f =
@@ -436,7 +436,7 @@ module Caller_converts = struct
 
         open Version_i
 
-        let rpc = Pipe_rpc.create ~name ~version ~bin_query ~bin_response ~bin_error
+        let rpc = Pipe_rpc.create ~name ~version ~bin_query ~bin_response ~bin_error ()
 
         let () =
           let dispatch conn q =

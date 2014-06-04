@@ -65,7 +65,7 @@ let create ?(append = true) file =
             monitor;
           }
         in
-        Stream.iter (Monitor.errors (Writer.monitor writer))
+        Stream.iter (Monitor.detach_and_get_error_stream (Writer.monitor writer))
           ~f:(fun e ->
             if not t.failed then begin
               t.failed <- true;

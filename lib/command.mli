@@ -7,16 +7,15 @@ include module type of Core.Std.Command
   with type t      = Core.Std.Command.t
   with module Spec = Core.Std.Command.Spec
 
-(** [async_basic] is exactly the same as [Core.Command.basic], except that the function it
-    wraps returns [unit Deferred.t], instead of [unit].  [async_basic] will also start the
-    Async scheduler before the wrapped function is run, and will stop the scheduler when
-    the wrapped function returns. *)
-val async_basic
-  :  summary:string
-  -> ?readme:(unit -> string)
-  -> ('a, unit -> unit Deferred.t) Spec.t
-  -> 'a
-  -> t
+(** [async] is like [Core.Command.basic], except that the main function it expects returns
+    [unit Deferred.t], instead of [unit].  [async] will also start the Async scheduler
+    before main is run, and will stop the scheduler when main returns. *)
+val async : ('a, unit Deferred.t) basic_command
+
+(** [async_or_error] is like [async], except that the main function it expects may
+    return an error, in which case it prints out the error message and shuts down with
+    exit code 1. *)
+val async_or_error : ('a, unit Deferred.Or_error.t) basic_command
 
 (** To create an [Arg_type.t] that uses auto-completion and uses Async to compute the
     possible completions, one should use

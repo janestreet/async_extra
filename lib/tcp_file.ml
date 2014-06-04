@@ -81,6 +81,7 @@ module Protocol = struct
         ~bin_query:Query.bin_t
         ~bin_response:Response.bin_t
         ~bin_error:Unit.bin_t
+        ()
   end
 end
 
