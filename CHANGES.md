@@ -24,7 +24,8 @@
 - Added `Log.Level.arg : Log.Level.t Command.Spec.Arg_type.t` for
   defining command lines that accept (and autocomplete) log levels.
 - Added `Command.async_or_error` and renamed `Command.async_basic` to
-  `Command.async`.
+  `Command.async`, leaving `async_basic` a deprecated alias for the
+  new name.
 
   `Command.async_or_error` is similar to `Command.basic` and
   `Command.async`, but accepts a `unit Or_error.t Deferred.t` type.
@@ -34,9 +35,6 @@
   ```ocaml
   val current_connection : t -> Rpc.Connection.t option
   ```
-
-- Re-added `Async.Std.Command.async_basic` as a deprecated alias for
-  the new `Async.Std.Command.async`
 
 ## 111.13.00
 
