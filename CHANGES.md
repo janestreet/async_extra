@@ -35,6 +35,9 @@
   val current_connection : t -> Rpc.Connection.t option
   ```
 
+- Re-added `Async.Std.Command.async_basic` as a deprecated alias for
+  the new `Async.Std.Command.async`
+
 ## 111.13.00
 
 - For `Typed_tcp.create`, added a `Client_id.t` argument to the `auth`
