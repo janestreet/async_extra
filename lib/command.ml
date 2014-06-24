@@ -20,8 +20,6 @@ let async ~summary ?readme spec main =
   basic ~summary ?readme (in_async spec on_result) main
 ;;
 
-let async_basic = async
-
 let async_or_error ~summary ?readme spec main =
   let on_result = function
     | Ok () -> Shutdown.shutdown 0
