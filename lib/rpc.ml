@@ -296,7 +296,7 @@ module Implementation = struct
   module Description = struct
     type t = { name : string;
                version : int;
-             } with sexp
+             } with compare, sexp
   end
 
   let description t = {Description.name = Rpc_tag.to_string t.tag; version = t.version }

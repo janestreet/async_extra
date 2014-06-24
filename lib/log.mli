@@ -98,7 +98,7 @@ module Rotation : sig
 end
 
 module Output : sig
-  type machine_readable_format = [`Sexp | `Bin_prot ] with sexp
+  type machine_readable_format = [`Sexp | `Sexp_hum | `Bin_prot ] with sexp
   type format = [ machine_readable_format | `Text ] with sexp
 
   type t

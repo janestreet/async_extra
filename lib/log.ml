@@ -140,10 +140,19 @@ module Rotation = struct
     }
 end
 
+module Sexp_or_string = struct
+  type t =
+    | Sexp of Sexp.t
+    | String of string
+  with bin_io, sexp
+end
+
+open Sexp_or_string
+
 module Message : sig
   type t with sexp, bin_io
 
-  val create  : Level.t option -> tags:(string * string) list -> string Lazy.t -> t
+  val create  : Level.t option -> tags:(string * string) list -> Sexp_or_string.t Lazy.t -> t
   val time    : t -> Time.t
   val level   : t -> Level.t option
   val message : t -> string
@@ -153,7 +162,7 @@ module Message : sig
   val to_write_only_text : ?zone:Time.Zone.t -> t -> string
 
   val write_write_only_text : t -> Writer.t -> unit
-  val write_sexp            : t -> Writer.t -> unit
+  val write_sexp            : t -> hum:bool -> Writer.t -> unit
   val write_bin_prot        : t -> Writer.t -> unit
 end = struct
   module T = struct
@@ -166,7 +175,7 @@ end = struct
   end
   open T
 
-  type t = string Lazy.t T.t
+  type t = Sexp_or_string.t Lazy.t T.t
 
   let to_lazy concrete_t =
     {
@@ -187,24 +196,31 @@ end = struct
   ;;
 
   include Bin_prot.Utils.Make_binable (struct
+
     module Binable = struct
-      type t = string T.t with bin_io
+      type t = Sexp_or_string.t T.t with bin_io
     end
 
     let to_binable = of_lazy
     let of_binable = to_lazy
 
-    type t = string Lazy.t T.t
+    type t = Sexp_or_string.t Lazy.t T.t
   end)
 
-  let sexp_of_t t    = <:sexp_of<string t>> (of_lazy t)
-  let t_of_sexp sexp = to_lazy (<:of_sexp<string t>> sexp)
+  let sexp_of_t t    = <:sexp_of<Sexp_or_string.t t>> (of_lazy t)
+  let t_of_sexp sexp = to_lazy (<:of_sexp<Sexp_or_string.t t>> sexp)
 
   let create level ~tags message = { time = Time.now (); level; message; tags }
 
   let time t    = t.time
   let level t   = t.level
-  let message t = Lazy.force t.message
+  let message t =
+    let module S = Sexp_or_string in
+    match Lazy.force t.message with
+    | S.String s -> s
+    | S.Sexp sexp -> Sexp.to_string_mach sexp
+  ;;
+
   let tags t    = t.tags
   let add_tags t new_tags = { t with tags = List.unordered_append new_tags t.tags }
 
@@ -226,7 +242,7 @@ end = struct
       Time.to_string_abs ?zone t.time
       :: " "
       :: prefix
-      :: Lazy.force t.message
+      :: message t
       :: formatted_tags)
   ;;
 
@@ -239,19 +255,19 @@ end = struct
       { time = Time.of_string "2013-12-13 15:00:00Z"
       ; level = None
       ; tags = []
-      ; message = lazy "<message>"
+      ; message = lazy (String "<message>")
       };
     check "2013-12-13 15:00:00.000000Z Info <message>"
       { time = Time.of_string "2013-12-13 15:00:00Z"
       ; level = Some `Info
       ; tags = []
-      ; message = lazy "<message>"
+      ; message = lazy (String "<message>")
       };
     check "2013-12-13 15:00:00.000000Z Info <message> -- [k1: v1] [k2: v2]"
       { time = Time.of_string "2013-12-13 15:00:00Z"
       ; level = Some `Info
       ; tags = ["k1", "v1"; "k2", "v2"]
-      ; message = lazy "<message>"
+      ; message = lazy (String "<message>")
       };
   ;;
 
@@ -260,8 +276,8 @@ end = struct
     Writer.newline wr
   ;;
 
-  let write_sexp t wr =
-    Writer.write_sexp wr (sexp_of_t t);
+  let write_sexp t ~hum wr =
+    Writer.write_sexp ~hum wr (sexp_of_t t);
     Writer.newline wr
   ;;
 
@@ -276,7 +292,7 @@ module Output : sig
      of type: Level.t -> string -> unit Deferred.t.  It is the responsibility of the write
      function to contain all state, and to clean up after itself.
   *)
-  type machine_readable_format = [`Sexp | `Bin_prot ] with sexp
+  type machine_readable_format = [`Sexp | `Sexp_hum | `Bin_prot ] with sexp
   type format = [ machine_readable_format | `Text ] with sexp
 
   type t with sexp_of
@@ -292,7 +308,7 @@ module Output : sig
 
   val combine : t list -> t
 end = struct
-  type machine_readable_format = [`Sexp | `Bin_prot ] with sexp
+  type machine_readable_format = [`Sexp | `Sexp_hum | `Bin_prot ] with sexp
   type format = [ machine_readable_format | `Text ] with sexp
 
   type t = Message.t Queue.t -> unit Deferred.t
@@ -309,7 +325,9 @@ end = struct
   let basic_write format w msg =
     begin match format with
     | `Sexp ->
-      Message.write_sexp msg w
+      Message.write_sexp msg ~hum:false w
+    | `Sexp_hum ->
+      Message.write_sexp msg ~hum:true w
     | `Bin_prot ->
       Message.write_bin_prot msg w
     | `Text ->
@@ -717,8 +735,13 @@ let set_level t level =
   push_update t (Update.New_level level)
 ;;
 
+let of_lazy_sexp ?(tags=[]) ?level t msg =
+  let msg = Message.create level ~tags (lazy (Sexp (force msg))) in
+  push_update t (Update.Msg msg)
+;;
+
 let of_lazy ?(tags=[]) ?level t msg =
-  let msg = Message.create level ~tags msg in
+  let msg = Message.create level ~tags (lazy (String (force msg))) in
   push_update t (Update.Msg msg)
 ;;
 
@@ -729,7 +752,7 @@ let printf ?tags ?level t k =
 ;;
 
 let sexp ?tags ?level t v to_sexp =
-  of_lazy ?tags ?level t (lazy (Sexp.to_string_mach (to_sexp v)))
+  of_lazy_sexp ?tags ?level t (lazy (to_sexp v))
 ;;
 
 let raw ?tags t k   = printf ?tags t k
@@ -831,7 +854,7 @@ end = struct
 
   let gen ?(tags=[]) level k =
     ksprintf (fun msg ->
-      let msg = lazy msg in
+      let msg = lazy (String msg) in
       write (Message.create level ~tags msg)) k
   ;;
 
@@ -850,7 +873,7 @@ module Reader = struct
     let pipe_r, pipe_w = Pipe.create () in
     don't_wait_for (Reader.with_file filename ~f:(fun r ->
       match format with
-      | `Sexp     ->
+      | `Sexp | `Sexp_hum ->
         let sexp_pipe = Reader.read_sexps r in
         Pipe.transfer sexp_pipe pipe_w ~f:Message.t_of_sexp
         >>| fun () ->

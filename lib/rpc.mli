@@ -33,7 +33,7 @@ module Implementation : sig
   type 'connection_state t
 
   module Description : sig
-    type t = { name : string; version : int; } with sexp
+    type t = { name : string; version : int; } with compare, sexp
   end
 
   val description : _ t -> Description.t

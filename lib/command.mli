@@ -12,6 +12,10 @@ include module type of Core.Std.Command
     before main is run, and will stop the scheduler when main returns. *)
 val async : ('a, unit Deferred.t) basic_command
 
+(** [async_basic] is a deprecated synonym for [async] that will eventually go away.  It is
+    here to give code outside jane street a chance to switch over before we delete it. *)
+val async_basic : ('a, unit Deferred.t) basic_command
+
 (** [async_or_error] is like [async], except that the main function it expects may
     return an error, in which case it prints out the error message and shuts down with
     exit code 1. *)
