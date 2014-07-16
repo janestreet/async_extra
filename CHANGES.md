@@ -1,3 +1,9 @@
+## 111.21.00
+
+- Added `Sexp_hum` `Log.Output.format`, which is useful for making logs
+  more human readable.
+- Added `with compare` to `Rpc.Implementation.Description`.
+
 ## 111.17.00
 
 - Added module `Persistent_rpc_client`, an RPC client that attempts to
