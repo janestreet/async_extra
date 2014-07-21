@@ -610,9 +610,6 @@ module Connection : Connection_internal = struct
     { reader                   : Reader.t;
       writer                   : Writer.t;
       open_queries             : (Query_id.t, Response_handler.t) Hashtbl.t;
-      (* [open_streaming_responses] is only used to fill the
-         [aborted] ivar on the server side *)
-      open_streaming_responses : (Query_id.t, unit Ivar.t) Hashtbl.t;
       handle_query             :
            (query:Nat0.t Query.t
             -> writer:Writer.t
@@ -720,7 +717,6 @@ module Connection : Connection_internal = struct
         reader;
         writer;
         open_queries             = Hashtbl.Poly.create ~size:10 ();
-        open_streaming_responses = Hashtbl.Poly.create ~size:10 ();
         handle_query = Implementations.query_handler implementations ~connection_state ();
         close_started  = Ivar.create ();
         close_finished = Ivar.create ();
@@ -804,44 +800,49 @@ module Connection : Connection_internal = struct
             loop ()
           in
           begin
+            let cleanup ~raise_ exn =
+              don't_wait_for (close t);
+              let error = match exn with
+                | Rpc_error.Rpc error -> error
+                | exn -> Rpc_error.Uncaught_exn (Exn.sexp_of_t exn)
+              in
+              (* clean up open streaming responses *)
+              (* an unfortunate hack; ok because the response handler will have nothing
+                 to read following a response where [data] is an error *)
+              let dummy_buffer = Bigstring.create 1 in
+              let dummy_ref = ref 0 in
+              Hashtbl.iter t.open_queries
+                ~f:(fun ~key:query_id ~data:response_handler ->
+                  ignore (
+                    Response_handler.update
+                      response_handler
+                      ~read_buffer:dummy_buffer
+                      ~read_buffer_pos_ref:dummy_ref
+                      { Response.
+                        id = query_id;
+                        data = Result.Error error
+                      }));
+              Bigstring.unsafe_destroy dummy_buffer;
+              if raise_ then Rpc_error.raise error
+            in
             let monitor = Monitor.create ~name:"RPC connection loop" () in
             Stream.iter
               (Stream.interleave (Stream.of_list (
                 [ (Monitor.detach_and_get_error_stream monitor)
                 ; (Monitor.detach_and_get_error_stream (Writer.monitor t.writer))
                 ])))
-              ~f:(fun exn ->
-                don't_wait_for (close t);
-                let error = match exn with
-                  | Rpc_error.Rpc error -> error
-                  | exn -> Rpc_error.Uncaught_exn (Exn.sexp_of_t exn)
-                in
-                (* clean up open streaming responses *)
-                (* an unfortunate hack; ok because the response handler will have nothing
-                   to read following a response where [data] is an error *)
-                let dummy_buffer = Bigstring.create 1 in
-                let dummy_ref = ref 0 in
-                Hashtbl.iter t.open_queries
-                  ~f:(fun ~key:query_id ~data:response_handler ->
-                    ignore (
-                      Response_handler.update
-                        response_handler
-                        ~read_buffer:dummy_buffer
-                        ~read_buffer_pos_ref:dummy_ref
-                        { Response.
-                          id = query_id;
-                          data = Result.Error error
-                        }));
-                Bigstring.unsafe_destroy dummy_buffer;
-                Rpc_error.raise error);
+              ~f:(fun exn -> cleanup ~raise_:true exn);
             Scheduler.within ~monitor (fun () ->
               every ~stop:(Ivar.read t.close_started) (sec 10.) heartbeat;
               Reader.read_one_chunk_at_a_time t.reader ~handle_chunk
               >>> function
               (* The protocol is such that right now, the only outcome of the other
                  side closing the connection normally is that we get an eof. *)
-              | `Eof | `Eof_with_unconsumed_data (_ : string) -> don't_wait_for (close t)
-              | `Stopped () -> ())
+              | `Eof
+              | `Eof_with_unconsumed_data (_ : string) ->
+                cleanup ~raise_:false (Rpc_error.Rpc Rpc_error.Connection_closed)
+              | `Stopped () -> ()
+            )
           end;
           Ok t
         | Some i -> Error (Handshake_error.Negotiated_unexpected_version i)
@@ -1041,6 +1042,48 @@ module Rpc = struct
       ~f:response_handler
 
   let dispatch_exn t conn query = dispatch t conn query >>| Or_error.ok_exn
+
+  TEST_UNIT "Open dispatches see connection closed error" =
+    Thread_safe.block_on_async_exn (fun () ->
+      let bin_t = Bin_prot.Type_class.bin_unit in
+      let rpc =
+        create ~version:1
+          ~name:"__TEST_Async_rpc.Rpc" ~bin_query:bin_t ~bin_response:bin_t
+      in
+      let serve () =
+        let implementation =
+          implement rpc (fun () () ->
+            Deferred.never ())
+        in
+        let implementations =
+          Implementations.create_exn
+            ~implementations:[ implementation ] ~on_unknown_rpc:`Raise
+        in
+        Connection.serve
+          ~initial_connection_state:(fun _ -> ()) ~implementations
+          ~where_to_listen:Tcp.on_port_chosen_by_os
+          ()
+      in
+      let client ~port =
+        Connection.client ~host:"localhost" ~port ()
+        >>| Result.ok_exn
+        >>= fun connection ->
+        let res = dispatch rpc connection () in
+        don't_wait_for (
+          Clock.after (sec 0.1)
+          >>= fun () -> Connection.close connection);
+        Clock.with_timeout (sec 0.2) res
+        >>| function
+        | `Timeout -> failwith "Dispatch should have gotten an error within 0.2s"
+        | `Result (Ok ()) -> failwith "Dispatch should have failed"
+        | `Result (Error err) ->
+          assert ("(rpc Connection_closed)" = Error.to_string_hum err);
+      in
+      serve ()
+      >>= fun server ->
+      let port = Tcp.Server.listening_on server in
+      client ~port
+      >>= fun () -> Tcp.Server.close server)
 
 end
 

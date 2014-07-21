@@ -145,18 +145,27 @@ module Sexp_or_string = struct
     | Sexp of Sexp.t
     | String of string
   with bin_io, sexp
-end
 
+  let to_string = function
+    | Sexp sexp  -> Sexp.to_string sexp
+    | String str -> str
+end
 open Sexp_or_string
 
 module Message : sig
   type t with sexp, bin_io
 
-  val create  : Level.t option -> tags:(string * string) list -> Sexp_or_string.t Lazy.t -> t
-  val time    : t -> Time.t
-  val level   : t -> Level.t option
-  val message : t -> string
-  val tags    : t -> (string * string) list
+  val create
+    :  ?level:Level.t
+    -> ?time:Time.t
+    -> ?tags:(string * string) list
+    -> Sexp_or_string.t
+    -> t
+
+  val time     : t -> Time.t
+  val level    : t -> Level.t option
+  val message  : t -> string
+  val tags     : t -> (string * string) list
   val add_tags : t -> (string * string) list -> t
 
   val to_write_only_text : ?zone:Time.Zone.t -> t -> string
@@ -164,6 +173,16 @@ module Message : sig
   val write_write_only_text : t -> Writer.t -> unit
   val write_sexp            : t -> hum:bool -> Writer.t -> unit
   val write_bin_prot        : t -> Writer.t -> unit
+
+  module Stable : sig
+    module V0 : sig
+      type nonrec t = t with sexp, bin_io
+    end
+
+    module V2 : sig
+      type nonrec t = t with sexp, bin_io
+    end
+  end
 end = struct
   module T = struct
     type 'a t = {
@@ -171,52 +190,195 @@ end = struct
       level   : Level.t option;
       message : 'a;
       tags    : (string * string) list;
-    } with sexp,bin_io
+    } with sexp, bin_io
+
+    let (=) t1 t2 =
+      let compare_tags =
+        Tuple.T2.compare ~cmp1:String.compare ~cmp2:String.compare
+      in
+      Time.(=.) t1.time t2.time
+      && t1.level = t2.level
+      && t1.message = t2.message
+      (* The same key can appear more than once in tags, and order shouldn't matter
+          when comparing *)
+      && List.Assoc.compare String.compare String.compare
+          (List.sort ~cmp:compare_tags t1.tags) (List.sort ~cmp:compare_tags t2.tags)
+        = 0
+    ;;
+
+    TEST_UNIT =
+      let time    = Time.now () in
+      let level   = Some `Info in
+      let message = "test unordered tags" in
+      let t1 = { time; level; message; tags = [ "a", "a1"; "a", "a2"; "b", "b1" ] } in
+      let t2 = { time; level; message; tags = [ "a", "a2"; "a", "a1"; "b", "b1" ] } in
+      let t3 = { time; level; message; tags = [ "a", "a2"; "b", "b1"; "a", "a1" ] } in
+      assert (t1 = t2);
+      assert (t2 = t3);
+    ;;
   end
   open T
 
-  type t = Sexp_or_string.t Lazy.t T.t
+  (* Log messages are stored, starting with V2, as an explicit version followed by the
+     message itself.  This makes it easier to move the message format forward while
+     still allowing older logs to be read by the new code.
 
-  let to_lazy concrete_t =
-    {
-      time    = concrete_t.time;
-      level   = concrete_t.level;
-      message = lazy concrete_t.message;
-      tags    = concrete_t.tags
-    }
-  ;;
+     If you make a new version you must add a version to the Version module below and
+     should follow the Make_versioned_serializable pattern.
+  *)
+  module Stable = struct
+    module Version = struct
+      type t =
+        | V2
+      with sexp, bin_io, compare
 
-  let of_lazy lazy_t =
-    {
-      time    = lazy_t.time;
-      level   = lazy_t.level;
-      message = Lazy.force lazy_t.message;
-      tags    = lazy_t.tags
-    }
-  ;;
-
-  include Bin_prot.Utils.Make_binable (struct
-
-    module Binable = struct
-      type t = Sexp_or_string.t T.t with bin_io
+      let (<>) t1 t2 = compare t1 t2 <> 0
+      let to_string t = Sexp.to_string (sexp_of_t t)
     end
 
-    let to_binable = of_lazy
-    let of_binable = to_lazy
+    module type Versioned_serializable = sig
+      type t with sexp, bin_io
 
-    type t = Sexp_or_string.t Lazy.t T.t
-  end)
+      val version : Version.t
+    end
 
-  let sexp_of_t t    = <:sexp_of<Sexp_or_string.t t>> (of_lazy t)
-  let t_of_sexp sexp = to_lazy (<:of_sexp<Sexp_or_string.t t>> sexp)
+    module Make_versioned_serializable(T : Versioned_serializable) : sig
+      type t with sexp, bin_io
+    end with type t = T.t = struct
+      type t = T.t
+      type versioned_serializable = Version.t * T.t with sexp, bin_io
 
-  let create level ~tags message = { time = Time.now (); level; message; tags }
+      let t_of_versioned_serializable (version, t) =
+        if Version.(<>) version T.version
+        then failwithf !"version mismatch %{Version} <> to expected version %{Version}"
+               version T.version ()
+        else t
+      ;;
+
+      let sexp_of_t t =
+        sexp_of_versioned_serializable (T.version, t)
+      ;;
+
+      let t_of_sexp sexp =
+        let versioned_t = versioned_serializable_of_sexp sexp in
+        t_of_versioned_serializable versioned_t
+      ;;
+
+      include Bin_prot.Utils.Make_binable (struct
+        type t = T.t
+
+        module Binable = struct
+          type t = versioned_serializable with bin_io
+        end
+
+        let to_binable t           = (T.version, t)
+        let of_binable versioned_t = t_of_versioned_serializable versioned_t
+      end)
+    end
+
+    module V2 = Make_versioned_serializable (struct
+      type nonrec t = Sexp_or_string.t t with sexp, bin_io
+
+      let version = Version.V2
+    end)
+
+    (* this is the serialization scheme in 111.18 and before *)
+    module V0 = struct
+      type v0_t = string T.t with sexp, bin_io
+
+      let v0_to_v2 (v0_t : v0_t) : V2.t =
+        {
+          time    = v0_t.time;
+          level   = v0_t.level;
+          message = String v0_t.message;
+          tags    = v0_t.tags;
+        }
+
+      let v2_to_v0 (v2_t : V2.t) : v0_t =
+        {
+          time    = v2_t.time;
+          level   = v2_t.level;
+          message = Sexp_or_string.to_string v2_t.message;
+          tags    = v2_t.tags;
+        }
+
+      include Bin_prot.Utils.Make_binable (struct
+
+        module Binable = struct
+          type t = v0_t with bin_io
+        end
+
+        let to_binable = v2_to_v0
+        let of_binable = v0_to_v2
+
+        type t = Sexp_or_string.t T.t
+      end)
+
+      let sexp_of_t t    = sexp_of_v0_t (v2_to_v0 t)
+      let t_of_sexp sexp = v0_to_v2 (v0_t_of_sexp sexp)
+
+      type t = V2.t
+    end
+  end
+
+  include Stable.V2
+
+  (* this allows for automagical reading of any versioned sexp, so long as we can always
+     lift to a Message.t *)
+  let t_of_sexp sexp =
+    match sexp with
+    | Sexp.List (Sexp.List (Sexp.Atom "time" :: _) :: _) ->
+      Stable.V0.t_of_sexp sexp
+    | Sexp.List [ (Sexp.Atom _) as version; _ ] ->
+      begin match Stable.Version.t_of_sexp version with
+      | V2 -> Stable.V2.t_of_sexp sexp
+      end
+    | _ -> failwithf !"malformed sexp: %{Sexp}" sexp ()
+  ;;
+
+  let create
+        ?level
+        ?(time  = (Time.now ()))
+        ?(tags  = [])
+        message =
+    { time; level; message; tags }
+  ;;
+
+  TEST_UNIT =
+    let msg =
+      create ~level:`Info ~tags:["a", "tag"]
+        (String "the quick brown message jumped over the lazy log")
+    in
+    let v0_sexp = Stable.V0.sexp_of_t msg in
+    let v2_sexp = Stable.V2.sexp_of_t msg in
+    assert (t_of_sexp v0_sexp = msg);
+    assert (t_of_sexp v2_sexp = msg);
+  ;;
+
+  TEST_UNIT =
+    let msg =
+      create ~level:`Info ~tags:["a", "tag"]
+        (Sexp (Sexp.List [ Sexp.Atom "foo"; Sexp.Atom "bar" ]))
+    in
+    let v0_sexp = Stable.V0.sexp_of_t msg in
+    let v2_sexp = Stable.V2.sexp_of_t msg in
+    assert (t_of_sexp v0_sexp = { msg with message = String "(foo bar)" });
+    assert (t_of_sexp v2_sexp = msg);
+  ;;
+
+  TEST_UNIT =
+    let msg = create ~level:`Info ~tags:[] (String "") in
+    match sexp_of_t msg with
+    | Sexp.List [ (Sexp.Atom _) as version; _ ] ->
+      ignore (Stable.Version.t_of_sexp version)
+    | _ -> assert false
+  ;;
 
   let time t    = t.time
   let level t   = t.level
   let message t =
     let module S = Sexp_or_string in
-    match Lazy.force t.message with
+    match t.message with
     | S.String s -> s
     | S.Sexp sexp -> Sexp.to_string_mach sexp
   ;;
@@ -255,19 +417,19 @@ end = struct
       { time = Time.of_string "2013-12-13 15:00:00Z"
       ; level = None
       ; tags = []
-      ; message = lazy (String "<message>")
+      ; message = String "<message>"
       };
     check "2013-12-13 15:00:00.000000Z Info <message>"
       { time = Time.of_string "2013-12-13 15:00:00Z"
       ; level = Some `Info
       ; tags = []
-      ; message = lazy (String "<message>")
+      ; message = String "<message>"
       };
     check "2013-12-13 15:00:00.000000Z Info <message> -- [k1: v1] [k2: v2]"
       { time = Time.of_string "2013-12-13 15:00:00Z"
       ; level = Some `Info
       ; tags = ["k1", "v1"; "k2", "v2"]
-      ; message = lazy (String "<message>")
+      ; message = String "<message>"
       };
   ;;
 
@@ -584,16 +746,17 @@ end
 *)
 module Update = struct
   type t =
-    | Msg of Message.t
-    | New_level of Level.t
+    | Msg        of Message.Stable.V2.t
+    | New_level  of Level.t
     | New_output of Output.t
-    | Flush of unit Ivar.t
-    with sexp_of
+    | Flush      of unit Ivar.t
+  with sexp_of
 
   let to_string t = Sexp.to_string (sexp_of_t t)
 end
 
-type t = Update.t Pipe.Writer.t with sexp_of
+type t = Update.t Pipe.Writer.t
+let sexp_of_t _t = Sexp.Atom "<opaque>"
 
 let push_update t update =
   if not (Pipe.is_closed t)
@@ -673,50 +836,51 @@ let create_log_processor ~level ~output =
     if Queue.length msgs = 0
     then f ()
     else begin
-      let msgs' = Queue.copy msgs in
+      (Output.apply !write) msgs
+      >>= fun () ->
       Queue.clear msgs;
-      (Output.apply !write) msgs'
-      >>= f
+      f ()
     end
   in
   (fun updates ->
-    let rec loop n =
-      let n = n - 1 in
-      if n = 0
-      then begin
-        (* this introduces a yield point so that other async jobs have a chance to run
-           under circumstances when large batches of logs are delivered in bursts. *)
-        Deferred.unit
-        >>= fun () ->
-        loop batch_size
-      end else begin
-        match Queue.dequeue updates with
-        | None        -> output_message_queue (fun () -> Deferred.unit)
-        | Some update ->
-          match update with
-          | Update.Flush i ->
-            output_message_queue (fun () ->
-              Ivar.fill i ();
-              loop n)
-          | Update.Msg msg ->
-            let enqueue =
-              match Message.level msg with
-              | None       -> true
-              | Some level ->
-                Level.equal_or_more_verbose_than !current_level level
-            in
-            if enqueue then Queue.enqueue msgs msg;
-            loop n
-          | Update.New_level level ->
-            current_level := level;
-            loop n
-          | Update.New_output f ->
-            output_message_queue (fun () ->
-              write := f;
-              loop n)
-      end
-    in
-    loop batch_size)
+     let rec loop yield_every =
+       let yield_every = yield_every - 1 in
+       if yield_every = 0
+       then begin
+         (* this introduces a yield point so that other async jobs have a chance to run
+            under circumstances when large batches of logs are delivered in bursts. *)
+         Scheduler.yield ()
+         >>= fun () ->
+         loop batch_size
+       end else begin
+         match Queue.dequeue updates with
+         | None        ->
+           output_message_queue (fun _ -> Deferred.unit)
+         | Some update ->
+           match update with
+           | Update.Flush i ->
+             output_message_queue (fun () ->
+               Ivar.fill i ();
+               loop yield_every)
+           | Update.Msg msg ->
+             let enqueue =
+               match Message.level msg with
+               | None       -> true
+               | Some level ->
+                 Level.equal_or_more_verbose_than !current_level level
+             in
+             if enqueue then Queue.enqueue msgs msg;
+             loop yield_every
+           | Update.New_level level ->
+             current_level := level;
+             loop yield_every
+           | Update.New_output f ->
+             output_message_queue (fun () ->
+               write := f;
+               loop yield_every)
+       end
+     in
+     loop batch_size)
 ;;
 
 let create ~level ~output : t =
@@ -735,59 +899,63 @@ let set_level t level =
   push_update t (Update.New_level level)
 ;;
 
-let of_lazy_sexp ?(tags=[]) ?level t msg =
-  let msg = Message.create level ~tags (lazy (Sexp (force msg))) in
-  push_update t (Update.Msg msg)
-;;
-
-let of_lazy ?(tags=[]) ?level t msg =
-  let msg = Message.create level ~tags (lazy (String (force msg))) in
-  push_update t (Update.Msg msg)
-;;
-
 let message t msg = push_update t (Update.Msg msg)
 
-let printf ?tags ?level t k =
-  ksprintf (fun msg -> of_lazy ?tags ?level t (lazy msg)) k
+let printf ?level ?time ?tags t k =
+  ksprintf (fun msg ->
+    Message.create ?level ?time ?tags (String msg)
+    |> message t
+  )
+    k
 ;;
 
-let sexp ?tags ?level t v to_sexp =
-  of_lazy_sexp ?tags ?level t (lazy (to_sexp v))
+let sexp ?level ?time ?tags t v to_sexp =
+  Message.create ?level ?time ?tags (Sexp (to_sexp v))
+  |> message t
 ;;
 
-let raw ?tags t k   = printf ?tags t k
-let debug ?tags t k = printf ?tags t ~level:`Debug k
-let info ?tags t k  = printf ?tags t ~level:`Info k
-let error ?tags t k = printf ?tags t ~level:`Error k
+
+let string ?level ?time ?tags t s =
+  Message.create ?level ?time ?tags (String s)
+  |> message t
+;;
+
+let raw   ?time ?tags t k = printf ?time ?tags t k
+let debug ?time ?tags t k = printf ~level:`Debug ?time ?tags t k
+let info  ?time ?tags t k = printf ~level:`Info  ?time ?tags t k
+let error ?time ?tags t k = printf ~level:`Error ?time ?tags t k
 
 module type Global_intf = sig
   val log : t Lazy.t
 
   val set_level  : Level.t -> unit
   val set_output : Output.t list -> unit
-  val raw        : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
-  val info       : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
-  val error      : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
-  val debug      : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val raw        : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val info       : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val error      : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val debug      : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
   val flushed    : unit -> unit Deferred.t
 
   val printf
-    :  ?tags:(string * string) list
-    -> ?level:Level.t
+    :  ?level:Level.t
+    -> ?time:Time.t
+    -> ?tags:(string * string) list
     -> ('a, unit, string, unit) format4
     -> 'a
 
   val sexp
-    :  ?tags:(string * string) list
-    -> ?level:Level.t
+    :  ?level:Level.t
+    -> ?time:Time.t
+    -> ?tags:(string * string) list
     -> 'a
     -> ('a -> Sexp.t)
     -> unit
 
-  val of_lazy
-    :  ?tags:(string * string) list
-    -> ?level:Level.t
-    -> string Lazy.t
+  val string
+    :  ?level:Level.t
+    -> ?time:Time.t
+    -> ?tags:(string * string) list
+    -> string
     -> unit
 
   val message : Message.t -> unit
@@ -798,14 +966,15 @@ module Make_global(Empty : sig end) : Global_intf = struct
   let set_level level   = set_level (Lazy.force log) level
   let set_output output = set_output (Lazy.force log) output
 
-  let raw   ?tags k = raw ?tags (Lazy.force log) k
-  let info  ?tags k = info ?tags (Lazy.force log) k
-  let error ?tags k = error ?tags (Lazy.force log) k
-  let debug ?tags k = debug ?tags (Lazy.force log) k
+  let raw   ?time ?tags k = raw   ?time ?tags (Lazy.force log) k
+  let info  ?time ?tags k = info  ?time ?tags (Lazy.force log) k
+  let error ?time ?tags k = error ?time ?tags (Lazy.force log) k
+  let debug ?time ?tags k = debug ?time ?tags (Lazy.force log) k
+
   let flushed () = flushed (Lazy.force log)
-  let printf  ?tags ?level k = printf ?tags ?level (Lazy.force log) k
-  let sexp    ?tags ?level v to_sexp = sexp ?tags ?level (Lazy.force log) v to_sexp
-  let of_lazy ?tags ?level l_msg = of_lazy ?tags ?level (Lazy.force log) l_msg
+  let printf  ?level ?time ?tags k         = printf ?level ?time ?tags (Lazy.force log) k
+  let sexp    ?level ?time ?tags v to_sexp = sexp ?level ?time ?tags (Lazy.force log) v to_sexp
+  let string  ?level ?time ?tags s         = string ?level ?time ?tags (Lazy.force log) s
   let message msg = message (Lazy.force log) msg
 end
 
@@ -820,10 +989,10 @@ module Blocking : sig
 
   val set_level  : Level.t -> unit
   val set_output : Output.t -> unit
-  val raw        : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
-  val info       : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
-  val error      : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
-  val debug      : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val raw        : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val info       : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val error      : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val debug      : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
 end = struct
   module Output = struct
     type t = Message.t -> unit
@@ -852,16 +1021,16 @@ end = struct
       failwith "Log.Global.Blocking function called after scheduler started";
   ;;
 
-  let gen ?(tags=[]) level k =
+  let gen ?level ?time ?tags k =
     ksprintf (fun msg ->
-      let msg = lazy (String msg) in
-      write (Message.create level ~tags msg)) k
+      let msg = String msg in
+      write (Message.create ?level ?time ?tags msg)) k
   ;;
 
-  let raw   ?tags k = gen ?tags None k
-  let debug ?tags k = gen ?tags (Some `Debug) k
-  let info  ?tags k = gen ?tags (Some `Info) k
-  let error ?tags k = gen ?tags (Some `Error) k
+  let raw   ?time ?tags k = gen ?time ?tags k
+  let debug ?time ?tags k = gen ~level:`Debug ?time ?tags k
+  let info  ?time ?tags k = gen ~level:`Info  ?time ?tags k
+  let error ?time ?tags k = gen ~level:`Error ?time ?tags k
 end
 
 (* Programs that want simplistic single-channel logging can open this module.  It provides

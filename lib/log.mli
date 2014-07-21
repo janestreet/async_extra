@@ -26,7 +26,7 @@ module Level : sig
 end
 
 module Message : sig
-  type t with sexp, bin_io
+  type t with sexp_of
 
   val time    : t -> Time.t
   val message : t -> string
@@ -34,6 +34,17 @@ module Message : sig
   val tags    : t -> (string * string) list
   (* create a new message with additional tags *)
   val add_tags : t -> (string * string) list -> t
+
+  module Stable : sig
+    module V0 : sig
+      (* [V0.bin_t] is the [Message.bin_t] in jane-111.18 and before *)
+      type nonrec t = t with sexp, bin_io
+    end
+
+    module V2 : sig
+      type nonrec t = t with sexp, bin_io
+    end
+  end
 end
 
 module Rotation : sig
@@ -147,16 +158,16 @@ module Blocking : sig
 
   (** [raw] printf like logging for raw (no level) messages.  Raw messages are still
       output with a timestamp. *)
-  val raw   : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val raw   : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
 
   (** [info] printf like logging at the `Info log level *)
-  val info  : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val info  : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
 
   (** [error] printf like logging at the `Info log level *)
-  val error : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val error : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
 
   (** [error] printf like logging at the `Info log level *)
-  val debug : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val debug : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
 end
 
 type t with sexp_of
@@ -170,29 +181,32 @@ module type Global_intf = sig
 
   (** logging functions as the functions that operate on a given log.  In this case they
       operate on a single log global to the module *)
-  val raw   : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
-  val info  : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
-  val error : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
-  val debug : ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val raw   : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val info  : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val error : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val debug : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
   val flushed : unit -> unit Deferred.t
 
   val printf
-    :  ?tags:(string * string) list
-    -> ?level:Level.t
+    :  ?level:Level.t
+    -> ?time:Time.t
+    -> ?tags:(string * string) list
     -> ('a, unit, string, unit) format4
     -> 'a
 
   val sexp
-    :  ?tags:(string * string) list
-    -> ?level:Level.t
+    :  ?level:Level.t
+    -> ?time:Time.t
+    -> ?tags:(string * string) list
     -> 'a
     -> ('a -> Sexp.t)
     -> unit
 
-  val of_lazy
-    :  ?tags:(string * string) list
-    -> ?level:Level.t
-    -> string Lazy.t
+  val string
+    :  ?level:Level.t
+    -> ?time:Time.t
+    -> ?tags:(string * string) list
+    -> string
     -> unit
 
   val message : Message.t -> unit
@@ -227,42 +241,45 @@ val create : level:Level.t -> output:Output.t list -> t
 
 (** [raw] printf like logging for raw (no level) messages.  Raw messages are still
     output with a timestamp. *)
-val raw   : ?tags:(string * string) list -> t -> ('a, unit, string, unit) format4 -> 'a
+val raw   : ?time:Time.t -> ?tags:(string * string) list -> t -> ('a, unit, string, unit) format4 -> 'a
 
 (** [debug] printf like logging at the `Debug log level *)
-val debug : ?tags:(string * string) list -> t -> ('a, unit, string, unit) format4 -> 'a
+val debug : ?time:Time.t -> ?tags:(string * string) list -> t -> ('a, unit, string, unit) format4 -> 'a
 
 (** [info] printf like logging at the `Info log level *)
-val info  : ?tags:(string * string) list -> t -> ('a, unit, string, unit) format4 -> 'a
+val info  : ?time:Time.t -> ?tags:(string * string) list -> t -> ('a, unit, string, unit) format4 -> 'a
 
 (** [error] printf like logging at the `Error log level *)
-val error : ?tags:(string * string) list -> t -> ('a, unit, string, unit) format4 -> 'a
+val error : ?time:Time.t -> ?tags:(string * string) list -> t -> ('a, unit, string, unit) format4 -> 'a
 
 (** [printf] generalized printf style logging *)
 val printf
-  :  ?tags:(string * string) list
-  -> ?level:Level.t
+  :  ?level:Level.t
+  -> ?time:Time.t
+  -> ?tags:(string * string) list
   -> t
   -> ('a, unit, string, unit) format4
   -> 'a
 
 (** [sexp] logging of values without first converting them to a string.  In the case
-    where the log level would discard this message no conversion will ever be done. *)
+    where the log level would discard this message no string conversion will ever be
+    done. *)
 val sexp
-  :  ?tags:(string * string) list
-  -> ?level:Level.t
+  :  ?level:Level.t
+  -> ?time:Time.t
+  -> ?tags:(string * string) list
   -> t
   -> 'a
   -> ('a -> Sexp.t)
   -> unit
 
-(** [of_lazy] logging of lazy values.  In the case where the log level would discard this
-    message no evaluation will ever be forced. *)
-val of_lazy
-  :  ?tags:(string * string) list
-  -> ?level:Level.t
+(** [string] logging of string values *)
+val string
+  :  ?level:Level.t
+  -> ?time:Time.t
+  -> ?tags:(string * string) list
   -> t
-  -> string Lazy.t
+  -> string
   -> unit
 
 val message : t -> Message.t -> unit

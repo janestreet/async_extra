@@ -25,18 +25,19 @@ module type Connection = sig
     -> Writer.t
     -> (t, Exn.t) Result.t Deferred.t
 
-  (* [close] starts closing the connection's reader and writer, and returns a deferred
-     that becomes determined when their close completes.  It is ok to call [close]
-     multiple times on the same [t]; calls subsequent to the initial call will have no
-     effect, but will return the same deferred as the original call.
-
-     [close_finished] becomes determined after the close of the connection's reader and
-     writer completes, i.e. the same deferred that [close] returns.  [close_finished]
-     differs from [close] in that it does not have the side effect of initiating a close.
-
-     [is_closed t] returns [true] iff [close t] has been called. *)
+  (** [close] starts closing the connection's reader and writer, and returns a deferred
+      that becomes determined when their close completes.  It is ok to call [close]
+      multiple times on the same [t]; calls subsequent to the initial call will have no
+      effect, but will return the same deferred as the original call. *)
   val close          : t -> unit Deferred.t
+
+  (** [close_finished] becomes determined after the close of the connection's reader and
+      writer completes, i.e. the same deferred that [close] returns.  [close_finished]
+      differs from [close] in that it does not have the side effect of initiating a close.
+  *)
   val close_finished : t -> unit Deferred.t
+
+  (** [is_closed t] returns [true] iff [close t] has been called. *)
   val is_closed      : t -> bool
 
   val bytes_to_write : t -> int
@@ -67,9 +68,9 @@ module type Connection = sig
     ]
     -> 'a Deferred.t
 
-  (* Runs [with_close] but dispatches no queries. The implementations are required because
-     this function doesn't let you dispatch any queries (i.e., act as a client), it would
-     be pointless to call it if you didn't want to act as a server.*)
+  (** Runs [with_close] but dispatches no queries. The implementations are required
+      because this function doesn't let you dispatch any queries (i.e., act as a client),
+      it would be pointless to call it if you didn't want to act as a server.*)
   val server_with_close
     :  ?max_message_size:int
     -> ?handshake_timeout:Time.Span.t

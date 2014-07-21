@@ -29,7 +29,7 @@ module Callee_converts = struct
       type response
       val implement_multi
         :  ?log_not_previously_seen_version:(name:string -> int -> unit)
-        -> ('state -> query -> response Deferred.t)
+        -> ('state -> version:int -> query -> response Deferred.t)
         -> 'state Implementation.t list
       val versions : unit -> Int.Set.t
     end
@@ -42,7 +42,7 @@ module Callee_converts = struct
 
       let name = Model.name
 
-      type 's impl = 's -> Model.query -> Model.response Deferred.t
+      type 's impl = 's -> version:int -> Model.query -> Model.response Deferred.t
 
       type implementer =
         { implement : 's. log_version:(int -> unit) -> 's impl -> 's Implementation.t }
@@ -61,8 +61,8 @@ module Callee_converts = struct
       let versions () = Int.Set.of_list (Hashtbl.keys registry)
 
       module Register (Version_i : sig
-        type query with bin_type_class
-        type response with bin_type_class
+        type query with bin_io
+        type response with bin_io
         val version : int
         val model_of_query : query -> Model.query
         val response_of_model : Model.response -> response
@@ -81,7 +81,7 @@ module Callee_converts = struct
                 Error.raise
                   (failed_conversion (`Query, `Rpc name, `Version version, exn))
               | Ok q ->
-                f s q
+                f s ~version q
                 >>| fun r ->
                 match Result.try_with (fun () -> Version_i.response_of_model r) with
                 | Ok r -> r
@@ -108,6 +108,7 @@ module Callee_converts = struct
       val implement_multi
         :  ?log_not_previously_seen_version:(name:string -> int -> unit)
         -> ('state
+            -> version:int
             -> query
             -> aborted:unit Deferred.t
             -> (response Pipe.Reader.t, error) Result.t Deferred.t)
@@ -126,6 +127,7 @@ module Callee_converts = struct
 
       type 's impl =
         's
+        -> version:int
         -> Model.query
         -> aborted:unit Deferred.t
         -> (Model.response Pipe.Reader.t, Model.error) Result.t Deferred.t
@@ -146,14 +148,18 @@ module Callee_converts = struct
 
       let versions () = Int.Set.of_list (Int.Table.keys registry)
 
-      module Register (Version_i : sig
-        type query with bin_type_class
-        type response with bin_type_class
-        type error with bin_type_class
+      module type Version_shared = sig
+        type query with bin_io
+        type response with bin_io
+        type error with bin_io
         val version : int
         val model_of_query : query -> Model.query
-        val response_of_model : Model.response -> response
         val error_of_model : Model.error -> error
+      end
+
+      module Register' (Version_i : sig
+        include Version_shared
+        val response_of_model : Model.response Queue.t -> response Queue.t Deferred.t
       end) = struct
 
         open Version_i
@@ -169,11 +175,12 @@ module Callee_converts = struct
                 Error.raise
                   (failed_conversion (`Response, `Rpc name, `Version version, exn))
               | Ok q ->
-                f s q ~aborted
+                f s ~version q ~aborted
                 >>| function
                 | Ok pipe ->
-                  Ok (Pipe.map pipe ~f:(fun r ->
-                    match Result.try_with (fun () -> Version_i.response_of_model r) with
+                  Ok (Pipe.map' pipe ~f:(fun r ->
+                    try_with (fun () -> Version_i.response_of_model r)
+                    >>| function
                     | Ok r -> r
                     | Error exn ->
                       Error.raise
@@ -190,6 +197,16 @@ module Callee_converts = struct
           | None -> Hashtbl.replace registry ~key:version ~data:{implement}
           | Some _ -> Error.raise (multiple_registrations (`Rpc name, `Version version))
 
+      end
+
+      module Register (Version_i : sig
+        include Version_shared
+        val response_of_model : Model.response -> response
+      end) = struct
+        include Register' (struct
+          include Version_i
+          let response_of_model q = return (Queue.map q ~f:response_of_model)
+        end)
       end
 
     end
@@ -247,7 +264,7 @@ module Menu = struct
         match Implementation.description i with
           {Implementation.Description.name; version} -> (name, version))
     in
-    let menu_impls = implement_multi (fun _ () -> return menu) in
+    let menu_impls = implement_multi (fun _ ~version:_ () -> return menu) in
     impls @ menu_impls
 
   type t = Int.Set.t String.Table.t
@@ -328,10 +345,10 @@ module Caller_converts = struct
     end
 
     module Make (Model : sig
-                   val name : string
-                   type query
-                   type response
-                 end) = struct
+      val name : string
+      type query
+      type response
+    end) = struct
 
       let name = Model.name
 
@@ -346,12 +363,12 @@ module Caller_converts = struct
         dispatch_with_specific_version ~version ~connection ~query ~name ~registry
 
       module Register (Version_i : sig
-                         type query with bin_type_class
-                         type response with bin_type_class
-                         val version : int
-                         val query_of_model : Model.query -> query
-                         val model_of_response : response -> Model.response
-                       end) = struct
+        type query with bin_io
+        type response with bin_io
+        val version : int
+        val query_of_model : Model.query -> query
+        val model_of_response : response -> Model.response
+      end) = struct
 
         open Version_i
 
@@ -406,11 +423,11 @@ module Caller_converts = struct
     end
 
     module Make (Model : sig
-                   val name : string
-                   type query
-                   type response
-                   type error
-                 end) = struct
+      val name : string
+      type query
+      type response
+      type error
+    end) = struct
 
       let name = Model.name
 
@@ -424,14 +441,18 @@ module Caller_converts = struct
       let deprecated_dispatch_multi ~version connection query =
         dispatch_with_specific_version ~version ~connection ~query ~name ~registry
 
-      module Register (Version_i : sig
-        type query with bin_type_class
-        type response with bin_type_class
-        type error with bin_type_class
+      module type Version_shared = sig
+        type query with bin_io
+        type response with bin_io
+        type error with bin_io
         val version : int
         val query_of_model : Model.query -> query
-        val model_of_response : response -> Model.response
         val model_of_error : error -> Model.error
+      end
+
+      module Register' (Version_i : sig
+        include Version_shared
+        val model_of_response : response Queue.t -> Model.response Queue.t Deferred.t
       end) = struct
 
         open Version_i
@@ -456,13 +477,15 @@ module Caller_converts = struct
                     Error (failed_conversion (`Error, `Rpc name, `Version version, exn)))
                 | Ok (Ok (pipe, id)) ->
                   let pipe =
-                    Pipe.map pipe ~f:(fun r ->
-                      match Result.try_with (fun () -> Version_i.model_of_response r) with
-                      | Ok r -> Ok r
+                    Pipe.map' pipe ~f:(fun r ->
+                      try_with (fun () -> Version_i.model_of_response r)
+                      >>| function
+                      | Ok r -> Queue.map r ~f:Result.return
                       | Error exn ->
-                        Error
-                          (failed_conversion
-                             (`Response, `Rpc name, `Version version, exn)))
+                        let error =
+                          failed_conversion (`Response, `Rpc name, `Version version, exn)
+                        in
+                        Queue.of_list [Error error])
                   in
                   Ok (Ok (pipe, id))
           in
@@ -470,6 +493,16 @@ module Caller_converts = struct
           | None -> Hashtbl.replace registry ~key:version ~data:dispatch
           | Some _ -> Error.raise (multiple_registrations (`Rpc name, `Version version))
 
+      end
+
+      module Register (Version_i : sig
+        include Version_shared
+        val model_of_response : response -> Model.response
+      end) = struct
+        include Register' (struct
+          include Version_i
+          let model_of_response q = return (Queue.map q ~f:model_of_response)
+        end)
       end
 
     end
@@ -492,7 +525,7 @@ module Both_convert = struct
 
       val implement_multi
         :  ?log_not_previously_seen_version:(name:string -> int -> unit)
-        -> ('state -> callee_query -> callee_response Deferred.t)
+        -> ('state -> version:int -> callee_query -> callee_response Deferred.t)
         -> 'state Implementation.t list
 
       val versions : unit -> Int.Set.t
