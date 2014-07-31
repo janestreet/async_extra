@@ -1,3 +1,42 @@
+## 111.25.00
+
+- Removed `lazy` from the core of `Log`.
+- Made `Log.Message.t` have a stable `bin_io`.
+
+  The `Stable.V1` is the current serialization scheme, and `Stable.V0`
+  is the serialization scheme in 111.18.00 and before, which is needed
+  to talk to older systems.
+- Changed `Rpc` to return `Connection_closed` if a connection ends
+  before a response makes it to the caller.
+
+  Previously, the dispatch output was never determined.
+
+  Also, removed an unused field in one of the internal data structures
+  of Async RPC.
+- In `Versioned_rpc`, added `version:int` argument to `implement_multi` functions.
+- In `Versioned_rpc`, the `Pipe_rpc.Make` functors now return an
+  additional output functor.
+
+  `Register'` is like `Register` but has in its input module:
+
+  ```ocaml
+  val response_of_model :
+    Model.response Queue.t -> response Queue.t Deferred.t
+  ```
+
+  rather than
+
+  ```ocaml
+  val response_of_model : Model.response -> response
+  ```
+
+  This is analogous to `Pipe.map'` and `Pipe.map`.
+- Added to `Log` a `V2` stable format and better readers for
+  time-varying formats.
+- In `Log`, added an optional `?time:Time.t` argument to allow callers
+  to pass in the logged time of an event rather than relying on
+  `Time.now ()`.
+
 ## 111.21.00
 
 - Added `Sexp_hum` `Log.Output.format`, which is useful for making logs
