@@ -1,6 +1,8 @@
 open Core.Std
 open Import
 
+let does_raise = Exn.does_raise
+
 TEST_MODULE = (struct
 
   module Bus = Bus_debug.Debug (Bus)

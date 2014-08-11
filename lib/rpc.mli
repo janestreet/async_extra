@@ -238,3 +238,10 @@ module State_rpc : sig
   val name : (_, _, _, _) t -> string
   val version : (_, _, _, _) t -> int
 end
+
+module Any : sig
+  type t =
+    | Rpc : ('q, 'r) Rpc.t -> t
+    | Pipe : ('q, 'r, 'e) Pipe_rpc.t -> t
+    | State : ('q, 's, 'u, 'e) State_rpc.t -> t
+end

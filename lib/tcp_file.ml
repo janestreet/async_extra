@@ -74,8 +74,9 @@ module Protocol = struct
       type t = (Message.t, Error.t) Result.t with bin_io
     end
 
-    let rpc =
+    let rpc ?client_pushes_back () =
       Rpc.Pipe_rpc.create
+        ?client_pushes_back
         ~name:"open_file"
         ~version
         ~bin_query:Query.bin_t
@@ -286,7 +287,11 @@ module Server = struct
     Deferred.return (Ok pipe_r)
 
   let implementations = [
-    Rpc.Pipe_rpc.implement Protocol.Open_file.rpc handle_open_file;
+    Rpc.Pipe_rpc.implement
+      (* The client pushes back parameter has no effect on the server side of Async.Rpc at
+         the time of this implementation. Exposing it would be misleading. *)
+      (Protocol.Open_file.rpc ())
+      handle_open_file;
   ]
 
   let serve ~auth where_to_listen =
@@ -352,7 +357,7 @@ module Server = struct
           status = `Open;
         }
       in
-      String.Table.replace State.global.State.files ~key:filename ~data:file;
+      String.Table.set State.global.State.files ~key:filename ~data:file;
       file
   ;;
 
@@ -461,7 +466,7 @@ module Server = struct
           status = `Closed;
         }
       in
-      String.Table.replace State.global.State.files ~key:filename ~data:file
+      String.Table.set State.global.State.files ~key:filename ~data:file
     | Some _ -> raise (File_is_already_open_in_tcp_file filename)
   ;;
 
@@ -482,25 +487,27 @@ module Client = struct
   let connect ~host ~port = Rpc.Connection.client ~host ~port ()
   let disconnect t = Rpc.Connection.close t
 
-  let read t filename =
+  let read ?client_pushes_back t filename =
+    let rpc = Protocol.Open_file.rpc ?client_pushes_back () in
     let filename = canonicalize filename in
     Rpc.Pipe_rpc.dispatch_exn
-      Protocol.Open_file.rpc
+      rpc
       t
       (Protocol.Open_file.Query.Open (filename, Protocol.Open_file.Mode.Read))
     >>| fun (pipe_r, id) ->
     Pipe.closed pipe_r >>> (fun () ->
-      Rpc.Pipe_rpc.abort Protocol.Open_file.rpc t id);
+      Rpc.Pipe_rpc.abort rpc t id);
     pipe_r
 
-  let tail t filename =
+  let tail ?client_pushes_back t filename =
     let filename = canonicalize filename in
+    let rpc = Protocol.Open_file.rpc ?client_pushes_back () in
     Rpc.Pipe_rpc.dispatch_exn
-      Protocol.Open_file.rpc
+      rpc
       t
       (Protocol.Open_file.Query.Open (filename, Protocol.Open_file.Mode.Tail))
     >>| fun (pipe_r, id) ->
     Pipe.closed pipe_r >>> (fun () ->
-      Rpc.Pipe_rpc.abort Protocol.Open_file.rpc t id);
+      Rpc.Pipe_rpc.abort rpc t id);
     pipe_r
 end

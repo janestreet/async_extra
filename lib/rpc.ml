@@ -406,7 +406,7 @@ end = struct
             ~location:"streaming_rpc server-side query un-bin-io'ing"
         in
         let user_aborted = Ivar.create () in
-        Hashtbl.replace open_streaming_responses ~key:query.Query.id ~data:user_aborted;
+        Hashtbl.set open_streaming_responses ~key:query.Query.id ~data:user_aborted;
         let aborted = Deferred.any [
           Ivar.read user_aborted;
           aborted;
@@ -636,7 +636,7 @@ module Connection : Connection_internal = struct
         (Message.bin_writer_needs_length (Writer_with_length.of_writer bin_writer_query))
         (Message.Query query);
       Option.iter response_handler ~f:(fun response_handler ->
-        Hashtbl.replace t.open_queries ~key:query.Query.id ~data:response_handler);
+        Hashtbl.set t.open_queries ~key:query.Query.id ~data:response_handler);
       Ok ()
 
   let handle_query t ~query ~read_buffer ~read_buffer_pos_ref =
@@ -1374,4 +1374,11 @@ module State_rpc = struct
 
   let name t = Rpc_tag.to_string t.Streaming_rpc.tag
   let version t = t.Streaming_rpc.version
+end
+
+module Any = struct
+  type t =
+    | Rpc : ('q, 'r) Rpc.t -> t
+    | Pipe : ('q, 'r, 'e) Pipe_rpc.t -> t
+    | State : ('q, 's, 'u, 'e) State_rpc.t -> t
 end

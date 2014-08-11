@@ -103,7 +103,7 @@ module Rotation = struct
     let candidate = first_at_or_after time in
     (* we take care not to return the same time we were given *)
     if Time.equal time candidate
-    then first_at_or_after (Time.add time Time.Span.epsilon)
+    then first_at_or_after (Time.add time Time.Span.robust_comparison_tolerance)
     else candidate
   ;;
 
@@ -755,12 +755,18 @@ module Update = struct
   let to_string t = Sexp.to_string (sexp_of_t t)
 end
 
-type t = Update.t Pipe.Writer.t
+type t =
+  { updates : Update.t Pipe.Writer.t
+  ; mutable current_level : Level.t }
+
+let equal t1 t2 = Pipe.equal t1.updates t2.updates
+let hash t = Pipe.hash t.updates
+
 let sexp_of_t _t = Sexp.Atom "<opaque>"
 
 let push_update t update =
-  if not (Pipe.is_closed t)
-  then Pipe.write_without_pushback t update
+  if not (Pipe.is_closed t.updates)
+  then Pipe.write_without_pushback t.updates update
   else
     failwithf "Log: can't process %s because this log has been closed"
       (Update.to_string update) ()
@@ -768,7 +774,7 @@ let push_update t update =
 
 let flushed t = Deferred.create (fun i -> push_update t (Update.Flush i))
 
-let closed = Pipe.is_closed
+let closed t = Pipe.is_closed t.updates
 
 module Flush_at_exit_or_gc : sig
   val add_log : t -> unit
@@ -777,8 +783,8 @@ end = struct
   module Weak_table = Caml.Weak.Make (struct
     type z = t
     type t = z
-    let equal = Pipe.equal
-    let hash  = Pipe.hash
+    let equal = equal
+    let hash  = hash
   end)
 
   (* contains all logs we want to flush at shutdown *)
@@ -800,7 +806,7 @@ end = struct
   let close t =
     if not (closed t) then begin
       flush t;
-      Pipe.close t
+      Pipe.close t.updates
     end
   ;;
 
@@ -887,17 +893,50 @@ let create ~level ~output : t =
   let r,w         = Pipe.create () in
   let process_log = create_log_processor ~level ~output in
   don't_wait_for (Pipe.iter' r ~f:process_log);
-  Flush_at_exit_or_gc.add_log w;
-  w
+  let t =
+    { updates = w
+    ; current_level = level }
+  in
+  Flush_at_exit_or_gc.add_log t;
+  t
 ;;
 
 let set_output t outputs =
   push_update t (Update.New_output (Output.combine outputs))
 ;;
 
+let level t = t.current_level
+
 let set_level t level =
+  t.current_level <- level;
   push_update t (Update.New_level level)
 ;;
+
+TEST_UNIT "Level setting" =
+  let assert_log_level log expected_level =
+    match (level log, expected_level) with
+    | `Info, `Info
+    | `Debug, `Debug
+    | `Error, `Error -> Ok ()
+    | actual_level, expected_level ->
+      Or_error.errorf "Expected %S but got %S"
+        (Level.to_string expected_level) (Level.to_string actual_level)
+  in
+  let answer =
+    let open Or_error.Monad_infix in
+    let initial_level = `Debug in
+    let output = [Output.create (fun _ -> Deferred.unit)] in
+    let log = create ~level:initial_level ~output in
+    assert_log_level log initial_level
+    >>= fun () ->
+    set_level log `Info;
+    assert_log_level log `Info
+    >>= fun () ->
+    set_level log `Debug;
+    set_level log `Error;
+    assert_log_level log `Error
+  in
+  Or_error.ok_exn answer
 
 let message t msg = push_update t (Update.Msg msg)
 
@@ -928,6 +967,7 @@ let error ?time ?tags t k = printf ~level:`Error ?time ?tags t k
 module type Global_intf = sig
   val log : t Lazy.t
 
+  val level      : unit -> Level.t
   val set_level  : Level.t -> unit
   val set_output : Output.t list -> unit
   val raw        : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
@@ -963,6 +1003,7 @@ end
 
 module Make_global(Empty : sig end) : Global_intf = struct
   let log               = lazy (create ~level:`Info ~output:[Output.stderr ()])
+  let level ()          = level (Lazy.force log)
   let set_level level   = set_level (Lazy.force log) level
   let set_output output = set_output (Lazy.force log) output
 
@@ -987,6 +1028,7 @@ module Blocking : sig
     val stderr : t
   end
 
+  val level      : unit -> Level.t
   val set_level  : Level.t -> unit
   val set_output : Output.t -> unit
   val raw        : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
@@ -1008,6 +1050,7 @@ end = struct
   let write = ref Output.stderr
 
   let set_level l = level := l
+  let level () = !level
 
   let set_output output = write := output
 
@@ -1015,7 +1058,7 @@ end = struct
     begin match Message.level msg with
     | None   -> !write msg
     | Some l ->
-      if Level.equal_or_more_verbose_than !level l then !write msg
+      if Level.equal_or_more_verbose_than (level ()) l then !write msg
     end;
     if Scheduler.is_running () then
       failwith "Log.Global.Blocking function called after scheduler started";

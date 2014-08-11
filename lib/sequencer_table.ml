@@ -33,7 +33,7 @@ module Make (Key : Hashable) = struct
 
   let set_state t ~key = function
     | None       -> Hashtbl.remove  t.states  key
-    | Some state -> Hashtbl.replace t.states ~key ~data:state
+    | Some state -> Hashtbl.set t.states ~key ~data:state
   ;;
 
   let enqueue t ~key f =
@@ -49,7 +49,7 @@ module Make (Key : Hashable) = struct
       | None ->
         let queue = Queue.create () in
         Queue.enqueue queue job;
-        Hashtbl.replace t.jobs ~key ~data:queue;
+        Hashtbl.set t.jobs ~key ~data:queue;
         (* never start a job in the same async job *)
         upon Deferred.unit (fun () ->
           run_jobs_until_none_remain t ~key queue);

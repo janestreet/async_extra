@@ -122,15 +122,29 @@ module Client : sig
   (** [disconnect t] disconnect from t.  Pipes delivered by read/tail will be closed. *)
   val disconnect : t -> unit Deferred.t
 
-  (** [read t filename] provides a pipe that will be filled with messages from [filename]
-      starting from the beginning, and continuing until the server calls [unlink] or
-      [close].  The client can indicate that it is no longer interested by calling
-      [Pipe.close_reader]. *)
-  val read : t -> string -> Response.t Pipe.Reader.t Deferred.t
+  (** [read ?client_pushes_back t filename] provides a pipe that will be filled with
+      messages from [filename] starting from the beginning, and continuing until the
+      server calls [unlink] or [close].  The client can indicate that it is no longer
+      interested by calling [Pipe.close_reader].  See [Rpc.Pipe_rpc.create] for the
+      definition on ?client_pushes_back and its implications. Passing the
+      client_pushes_back argument will have no detrimental effect on a server that
+      is delivering from a file. If the client caught up, effectively tailing the file,
+      then the server will enqueue the data in memory until the client catches up, or gets
+      disconnected.
+  *)
+  val read
+    : ?client_pushes_back:unit
+    -> t
+    -> string
+    -> Response.t Pipe.Reader.t Deferred.t
 
-  (** [tail t filename] same as [read], but delivers messages starting at some
-      unspecified point near the current end of the file and continuing until the server
-      calls [unlink] or [close]. The client can indicate that it is no longer interested
-      by calling [Pipe.close_reader]. *)
-  val tail : t -> string -> Response.t Pipe.Reader.t Deferred.t
+  (** [tail ?client_pushes_back t filename] same as [read], but delivers messages starting
+      at some unspecified point near the current end of the file and continuing until the
+      server calls [unlink] or [close]. The client can indicate that it is no longer
+      interested by calling [Pipe.close_reader]. *)
+  val tail
+    : ?client_pushes_back:unit
+    -> t
+    -> string
+    -> Response.t Pipe.Reader.t Deferred.t
 end

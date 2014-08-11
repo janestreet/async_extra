@@ -152,7 +152,7 @@ module Make (Arg : Arg) = struct
                     Stream.iter (Monitor.detach_and_get_error_stream (Writer.monitor writer)) ~f:(fun e ->
                       close (Exception_in_writer e));
                     assert (not (Hashtbl.mem t.clients id));
-                    Hashtbl.replace t.clients ~key:id ~data:
+                    Hashtbl.set t.clients ~key:id ~data:
                       { close; transport; addr; port };
                     if Pipe.is_closed t.result_writer then close Pipe_closed
                     else begin

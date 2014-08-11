@@ -670,7 +670,7 @@ module Make (Z : Arg) :
             ~default:(fun () -> Bag.create (), conn.C.marshal_fun)
         in
         let bag_elt = Bag.add bag conn in
-        Hashtbl.replace t.by_name ~key:name ~data:(bag, bag_elt);
+        Hashtbl.set t.by_name ~key:name ~data:(bag, bag_elt);
       ;;
 
       let remove t name =
@@ -781,7 +781,7 @@ module Make (Z : Arg) :
                 | Some (conns, _marshal_fun) -> conns
                 | None -> []
               in
-              Hashtbl.replace tbl ~key:version ~data:(conn::conns,
+              Hashtbl.set tbl ~key:version ~data:(conn::conns,
                                                       conn.Connection.marshal_fun);
               acc)
         in

@@ -153,6 +153,7 @@ module Blocking : sig
     val create : (Message.t -> unit) -> t
   end
 
+  val level : unit -> Level.t
   val set_level : Level.t -> unit
   val set_output : Output.t -> unit
 
@@ -176,6 +177,7 @@ type t with sexp_of
 module type Global_intf = sig
   val log : t Lazy.t
 
+  val level : unit -> Level.t
   val set_level : Level.t -> unit
   val set_output : Output.t list -> unit
 
@@ -224,6 +226,10 @@ module Global : Global_intf
 (** [set_level] sets the level of the given log.  Messages sent at a level less than the
     current level will not be output. *)
 val set_level : t -> Level.t -> unit
+
+(** [level] returns the last level passed to [set_level], which will be the log level
+    checked as a threshold against the level of the next message sent. *)
+val level : t -> Level.t
 
 (** [set_output] changes the output type of the log, which can be useful when daemonizing.
     The new output type will be applied to all subsequent messages. *)

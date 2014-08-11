@@ -251,6 +251,53 @@ module Callee_converts : sig
 
   module Rpc : sig
 
+    module Simple : sig
+      type ('query, 'response) t
+
+      val create : name:string -> ('query, 'response) t
+
+      val name : (_, _) t -> string
+
+      val add_version
+        :  ('query, 'response) t
+        -> version:int
+        -> bin_query:'old_query Bin_prot.Type_class.t
+        -> bin_response:'old_response Bin_prot.Type_class.t
+        -> ('old_query -> 'query)
+        -> ('response -> 'old_response)
+        -> ('query, 'response) t Or_error.t
+
+      val add_version_with_failure
+        :  ('query, 'response Or_error.t) t
+        -> version:int
+        -> bin_query:'old_query Bin_prot.Type_class.t
+        -> bin_response:('old_response, string) Result.t Bin_prot.Type_class.t
+        -> ('old_query -> 'query Or_error.t)
+        -> ('response -> 'old_response Or_error.t)
+        -> ('query, 'response Or_error.t) t Or_error.t
+
+      val add_rpc_version
+        :  ('query, 'response) t
+        -> ('old_query, 'old_response) Rpc.t
+        -> ('old_query -> 'query)
+        -> ('response -> 'old_response)
+        (** [Error _] if the version has already been implemented, or the name disagrees.
+        *)
+        -> ('query, 'response) t Or_error.t
+
+      val add_rpc_version_with_failure
+        :  ('query, 'response Or_error.t) t
+        -> ('old_query, ('old_response, string) Result.t) Rpc.t
+        -> ('old_query -> 'query Or_error.t)
+        -> ('response -> 'old_response Or_error.t)
+        -> ('query, 'response Or_error.t) t Or_error.t
+
+      val implement
+        :  ('query, 'response) t
+        -> ('state -> 'query -> 'response Deferred.t)
+        -> 'state Implementation.t list
+    end
+
     module type S = sig
       type query
       type response
@@ -260,6 +307,8 @@ module Callee_converts : sig
         :  ?log_not_previously_seen_version:(name:string -> int -> unit)
         -> ('state -> version:int -> query -> response Deferred.t)
         -> 'state Implementation.t list
+
+      val rpcs : unit -> Any.t list
 
       (** All versions implemented by [implement_multi].
           (useful for computing which old versions may be pruned) *)
@@ -320,6 +369,8 @@ module Callee_converts : sig
             -> aborted:unit Deferred.t
             -> (response Pipe.Reader.t, error) Result.t Deferred.t)
         -> 'state Implementation.t list
+
+      val rpcs : unit -> Any.t list
 
       (** All versions supported by [dispatch_multi].
           (useful for computing which old versions may be pruned) *)

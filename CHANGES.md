@@ -1,3 +1,9 @@
+## 111.28.00
+
+- Added to `Versioned_rpc` a non-functor interface.
+- Added `Log.level`, which returns the last level passed to `set_level`.
+- Enabled Async-RPC pushback in the `Tcp_file` protocol.
+
 ## 111.25.00
 
 - Removed `lazy` from the core of `Log`.

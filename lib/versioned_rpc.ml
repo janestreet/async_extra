@@ -24,6 +24,78 @@ module Callee_converts = struct
 
   module Rpc = struct
 
+    module Simple = struct
+      type ('query, 'response) adapter =
+        { adapt :
+          'state . ('state -> 'query -> 'response Deferred.t) -> 'state Implementation.t
+        }
+      type ('query, 'response) t =
+        { name : string
+        ; adapters : ('query, 'response) adapter Int.Map.t
+        } with fields
+
+      let create ~name = { name; adapters = Int.Map.empty }
+
+      let wrap_error fn =
+        (fun state query ->
+           fn state query
+           >>| function
+           | Ok value -> Ok value
+           | Error error -> Error (Error.to_string_hum error))
+
+      let add { name; adapters } rpc adapter =
+        if String.(<>) name (Rpc.name rpc)
+        then
+          Or_error.error
+            "Rpc names don't agree" (name, Rpc.name rpc) <:sexp_of<string * string>>
+        else
+          let version = Rpc.version rpc in
+          match Map.find adapters version with
+          | Some _ ->
+            Or_error.error
+              "Version already exists" (name, version) <:sexp_of<string * int>>
+          | None ->
+            let adapters = Map.add adapters ~key:version ~data:adapter in
+            Ok { name; adapters }
+
+      let add_rpc_version t old_rpc upgrade downgrade =
+        let adapt fn =
+          let adapted state old_query =
+            fn state (upgrade old_query)
+            >>| fun result ->
+            downgrade result
+          in
+          Rpc.implement old_rpc adapted
+        in
+        add t old_rpc {adapt}
+
+      let add_rpc_version_with_failure t old_rpc upgrade_or_error downgrade_or_error =
+        let adapt fn =
+          let adapted state old_query =
+            let open Deferred.Result.Monad_infix in
+            return (upgrade_or_error old_query)
+            >>= fun query ->
+            fn state query
+            >>= fun response ->
+            return (downgrade_or_error response)
+          in
+          Rpc.implement old_rpc (wrap_error adapted)
+        in
+        add t old_rpc {adapt}
+
+      let add_version t ~version ~bin_query ~bin_response upgrade downgrade =
+        let rpc = Rpc.create ~name:t.name ~version ~bin_query ~bin_response in
+        add_rpc_version t rpc upgrade downgrade
+
+      let add_version_with_failure t ~version ~bin_query ~bin_response upgrade downgrade =
+        let rpc = Rpc.create ~name:t.name ~version ~bin_query ~bin_response in
+        add_rpc_version_with_failure t rpc upgrade downgrade
+
+      let implement t fn =
+        Map.data t.adapters
+        |> List.map ~f:(fun {adapt} -> adapt fn)
+    end
+
     module type S = sig
       type query
       type response
@@ -31,6 +103,7 @@ module Callee_converts = struct
         :  ?log_not_previously_seen_version:(name:string -> int -> unit)
         -> ('state -> version:int -> query -> response Deferred.t)
         -> 'state Implementation.t list
+      val rpcs : unit -> Any.t list
       val versions : unit -> Int.Set.t
     end
 
@@ -47,7 +120,8 @@ module Callee_converts = struct
       type implementer =
         { implement : 's. log_version:(int -> unit) -> 's impl -> 's Implementation.t }
 
-      let registry : (int, implementer) Hashtbl.t = Int.Table.create ~size:1 ()
+      let registry : (int, implementer * Any.t) Hashtbl.t =
+        Int.Table.create ~size:1 ()
 
       let implement_multi ?log_not_previously_seen_version f =
         let log_version =
@@ -56,7 +130,9 @@ module Callee_converts = struct
           (* prevent calling [f] more than once per version *)
           | Some f -> Memo.general (f ~name)
         in
-        List.map (Hashtbl.data registry) ~f:(fun i -> i.implement ~log_version f)
+        List.map (Hashtbl.data registry) ~f:(fun (i, _rpc) -> i.implement ~log_version f)
+
+      let rpcs () = List.map (Hashtbl.data registry) ~f:(fun (_, rpc) -> rpc)
 
       let versions () = Int.Set.of_list (Hashtbl.keys registry)
 
@@ -91,7 +167,8 @@ module Callee_converts = struct
             )
           in
           match Hashtbl.find registry version with
-          | None -> Hashtbl.replace registry ~key:version ~data:{implement}
+          | None ->
+            Hashtbl.set registry ~key:version ~data:({implement}, Any.Rpc rpc)
           | Some _ -> Error.raise (multiple_registrations (`Rpc name, `Version version))
       end
 
@@ -113,6 +190,7 @@ module Callee_converts = struct
             -> aborted:unit Deferred.t
             -> (response Pipe.Reader.t, error) Result.t Deferred.t)
         -> 'state Implementation.t list
+      val rpcs : unit -> Any.t list
       val versions : unit -> Int.Set.t
     end
 
@@ -144,8 +222,9 @@ module Callee_converts = struct
           (* prevent calling [f] more than once per version *)
           | Some f -> Memo.general (f ~name)
         in
-        List.map (Hashtbl.data registry) ~f:(fun i -> i.implement ~log_version f)
+        List.map (Hashtbl.data registry) ~f:(fun (i, _) -> i.implement ~log_version f)
 
+      let rpcs () = List.map ~f:(fun (_, rpcs) -> rpcs) (Int.Table.data registry)
       let versions () = Int.Set.of_list (Int.Table.keys registry)
 
       module type Version_shared = sig
@@ -194,7 +273,8 @@ module Callee_converts = struct
             )
           in
           match Hashtbl.find registry version with
-          | None -> Hashtbl.replace registry ~key:version ~data:{implement}
+          | None ->
+            Hashtbl.set registry ~key:version ~data:({implement}, Any.Pipe rpc)
           | Some _ -> Error.raise (multiple_registrations (`Rpc name, `Version version))
 
       end
@@ -390,7 +470,7 @@ module Caller_converts = struct
                   Error (failed_conversion (`Response, `Rpc name, `Version version, exn)))
           in
           match Hashtbl.find registry version with
-          | None -> Hashtbl.replace registry ~key:version ~data:dispatch
+          | None -> Hashtbl.set registry ~key:version ~data:dispatch
           | Some _ -> Error.raise (multiple_registrations (`Rpc name, `Version version))
 
       end
@@ -490,7 +570,7 @@ module Caller_converts = struct
                   Ok (Ok (pipe, id))
           in
           match Hashtbl.find registry version with
-          | None -> Hashtbl.replace registry ~key:version ~data:dispatch
+          | None -> Hashtbl.set registry ~key:version ~data:dispatch
           | Some _ -> Error.raise (multiple_registrations (`Rpc name, `Version version))
 
       end
