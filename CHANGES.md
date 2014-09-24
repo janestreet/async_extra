@@ -1,3 +1,39 @@
+## 112.01.00
+
+- Changed `Persistent_rpc_client.connected` to avoid returning a
+  connection that is closed at the time it was called.
+- Optimized `Rpc.implement` so that if a server's implementation
+  returns a determined deferred, then the output is immediately
+  serialized and written out for the client.
+
+  This reduces memory consumption, improves throughput and latency.
+  Measurements with the `pipe_rpc_test program` showed that a server
+  went from processing 600\_000 msg/sec, to 2\_200\_000 msg/sec before
+  pegging the CPU.
+- Changed `Log`'s output processor's batch size from `1_000` to `100`.
+- Added `Persistent_rpc_client.close` and `close_finished`.
+- In `Rpc.Connection.client` and `with_client`, used the
+  `handshake_timeout` as the `timeout` passed to `Tcp.connect`.
+
+  `handshake_timeout` was previously used only for the `Rpc` module's
+  handshake timeout.
+- Changed `Rpc.create`'s `on_unknown_rpc` argument, renaming
+  `\`Ignore` as `\`Close_connection`, and requiring `\`Call` to return
+  `\`Close_connection` or `\`Continue`.
+
+  `\`Ignore` was renamed because it was a poor name, since in fact it
+  closed the connection.
+
+  Added a `\`Continue` option, whic allows one to keep the connection
+  open.
+
+  Changed `\`Call` to return `\`Continue` or `\`Close_connection`,
+  where the old `unit` return value meant `\`Close_connection`.
+- In `Versioned_typed_tcp`, enabled the use of "credentials" in the
+  "Hello" message.
+
+  Propagate credentials to the user code when it arrives on the wire.
+
 ## 111.28.00
 
 - Added to `Versioned_rpc` a non-functor interface.

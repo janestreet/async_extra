@@ -36,19 +36,14 @@ let fail iobuf message a sexp_of_a =
     (Tuple.T2.sexp_of_t sexp_of_a ident)
 ;;
 
-let failf iobuf =
-  ksprintf (fun message ->
-    failwiths message (<:sexp_of< (_, _) Iobuf.t >> iobuf) ident)
-;;
-
 let sendto_sync () =
   Iobuf.sendto_nonblocking_no_sigpipe ()
   |> Or_error.map ~f:(fun sendto ->
     (fun fd buf addr ->
        Fd.with_file_descr_exn fd ~nonblocking:true (fun desc ->
-         match sendto buf desc (Unix.Socket.Address.to_sockaddr addr) with
-         | None -> `Not_ready
-         | Some _ -> `Ok)))
+         let len_before = Iobuf.length buf in
+         sendto buf desc (Unix.Socket.Address.to_sockaddr addr);
+         if len_before = Iobuf.length buf then `Not_ready else `Ok)))
 ;;
 
 (** [ready_iter fd f] iterates [f] over [fd], handling [EWOULDBLOCK]/[EAGAIN] and [EINTR]
@@ -94,10 +89,12 @@ let sendto () =
   |> Or_error.map ~f:(fun sendto -> unstage (stage (fun fd buf addr ->
     let addr = Unix.Socket.Address.to_sockaddr addr in
     let stop = Ivar.create () in
-    (* Iobuf.sendto_nonblocking_no_sigpipe returns EAGAIN and EWOULDBLOCK through an
-       option rather than an exception. *)
+    (* Iobuf.sendto_nonblocking_no_sigpipe handles EAGAIN and EWOULDBLOCK by doing nothing
+       rather than throwing an exception. *)
     ready_iter fd ~max_ready:default_retry ~stop `Write ~f:(fun file_descr ->
-      match sendto buf file_descr addr with None -> `Continue | Some _ -> `Stop)
+      let len_before = Iobuf.length buf in
+      sendto buf file_descr addr;
+      if len_before = Iobuf.length buf then `Continue else `Stop)
     >>| function
     | (`Bad_fd | `Closed | `Unsupported) as error ->
       fail buf "Udp.sendto" (error, addr)
@@ -132,15 +129,7 @@ let recvfrom_loop_with_buffer_replacement ?(config = Config.create ()) fd f =
   >>> Ivar.fill_if_empty stop;
   let buf = ref (Config.init config) in
   ready_iter ~stop ~max_ready:config.Config.max_ready fd `Read ~f:(fun file_descr ->
-    let buf_len_before = Iobuf.length !buf in
-    let len, addr = Iobuf.recvfrom_assume_fd_is_nonblocking !buf file_descr in
-    if len <> buf_len_before - Iobuf.length !buf
-    then
-      failf !buf
-        "Unexpected result from Iobuf.recvfrom_assume_fd_is_nonblocking: \
-         len (%d) <> buf_len_before (%d) - Iobuf.length buf"
-        len
-        buf_len_before;
+    let addr = Iobuf.recvfrom_assume_fd_is_nonblocking !buf file_descr in
     match addr with
     | Core.Std.Unix.ADDR_UNIX dom ->
       fail !buf "Unix domain socket addresses not supported" dom <:sexp_of< string >>
@@ -167,15 +156,7 @@ let read_loop_with_buffer_replacement ?(config = Config.create ()) fd f =
   >>> Ivar.fill_if_empty stop;
   let buf = ref (Config.init config) in
   ready_iter ~stop ~max_ready:config.Config.max_ready fd `Read ~f:(fun file_descr ->
-    let buf_len_before = Iobuf.length !buf in
-    let len = Iobuf.read_assume_fd_is_nonblocking !buf file_descr in
-    if len <> buf_len_before - Iobuf.length !buf
-    then
-      failf !buf
-        "Unexpected result from Iobuf.read_assume_fd_is_nonblocking: \
-         len (%d) <> buf_len_before (%d) - Iobuf.length buf"
-        len
-        buf_len_before;
+    Iobuf.read_assume_fd_is_nonblocking !buf file_descr;
     Config.before config !buf;
     buf := f !buf;
     Config.after  config !buf;

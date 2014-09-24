@@ -53,15 +53,20 @@ module Implementations : sig
   (** a server that can handle no queries *)
   val null : unit -> 'connection_state t
 
-  (** [create ~implementations ~on_unknown_rpc] creates a server
-      capable of responding to the rpc's implemented in the implementation list. *)
+  (** [create ~implementations ~on_unknown_rpc] creates a server capable of responding to
+      the rpc's implemented in the implementation list.  Be careful about setting
+      [on_unknown_rpc] to [`Raise] because other programs may mistakenly connect to this
+      one causing it to crash. *)
   val create
     :  implementations:'connection_state Implementation.t list
     -> on_unknown_rpc:[
     | `Raise
-    | `Ignore
+    | `Continue
+    | `Close_connection (* This used to be the behavior of `Ignore *)
     (** [rpc_tag] and [version] are the name and version of the unknown rpc *)
-    | `Call of (rpc_tag:string -> version:int -> unit)
+    | `Call of (rpc_tag:string -> version:int
+                -> [ `Close_connection
+                   | `Continue ])
     ]
     -> ( 'connection_state t
        , [`Duplicate_implementations of Implementation.Description.t list]
@@ -71,8 +76,11 @@ module Implementations : sig
     :  implementations:'connection_state Implementation.t list
     -> on_unknown_rpc:[
     | `Raise
-    | `Ignore
-    | `Call of (rpc_tag:string -> version:int -> unit)
+    | `Continue
+    | `Close_connection (* This used to be the behavior of `Ignore *)
+    | `Call of (rpc_tag:string -> version:int ->
+                [ `Close_connection
+                | `Continue ])
     ]
     -> 'connection_state t
 end

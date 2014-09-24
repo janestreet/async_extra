@@ -26,15 +26,20 @@ module Level = struct
   let arg =
     Command.Spec.Arg_type.of_alist_exn
       (List.map all ~f:(fun t -> (String.lowercase (to_string t), t)))
+  ;;
 
   (* Ordering of log levels in terms of verbosity. *)
-  let equal_or_more_verbose_than l1 l2 =
-    match l1,l2 with
-    | `Error,`Error            -> true
-    | `Error, (`Debug | `Info) -> false
-    | `Info,  (`Info | `Error) -> true
-    | `Info,`Debug             -> false
-    | `Debug, _                -> true
+  let as_or_more_verbose_than ~log_level ~msg_level =
+    match msg_level with
+    | None           -> true
+    | Some msg_level ->
+      begin match log_level, msg_level with
+      | `Error, `Error           -> true
+      | `Error, (`Debug | `Info) -> false
+      | `Info,  (`Info | `Error) -> true
+      | `Info, `Debug            -> false
+      | `Debug, _                -> true
+      end
   ;;
 end
 
@@ -834,7 +839,7 @@ end
 let close = Flush_at_exit_or_gc.close
 
 let create_log_processor ~level ~output =
-  let batch_size    = 1_000 in
+  let batch_size    = 100 in
   let write         = ref (Output.combine output) in
   let current_level = ref level in
   let msgs          = Queue.create () in
@@ -869,13 +874,7 @@ let create_log_processor ~level ~output =
                Ivar.fill i ();
                loop yield_every)
            | Update.Msg msg ->
-             let enqueue =
-               match Message.level msg with
-               | None       -> true
-               | Some level ->
-                 Level.equal_or_more_verbose_than !current_level level
-             in
-             if enqueue then Queue.enqueue msgs msg;
+             Queue.enqueue msgs msg;
              loop yield_every
            | Update.New_level level ->
              current_level := level;
@@ -937,26 +936,35 @@ TEST_UNIT "Level setting" =
     assert_log_level log `Error
   in
   Or_error.ok_exn answer
+;;
 
 let message t msg = push_update t (Update.Msg msg)
 
-let printf ?level ?time ?tags t k =
+let printf ?level:msg_level ?time ?tags t k =
   ksprintf (fun msg ->
-    Message.create ?level ?time ?tags (String msg)
-    |> message t
+    if Level.as_or_more_verbose_than ~log_level:(level t) ~msg_level
+    then begin
+      Message.create ?level:msg_level ?time ?tags (String msg)
+      |> message t;
+    end
   )
     k
 ;;
 
-let sexp ?level ?time ?tags t v to_sexp =
-  Message.create ?level ?time ?tags (Sexp (to_sexp v))
-  |> message t
+let sexp ?level:msg_level ?time ?tags t v to_sexp =
+  if Level.as_or_more_verbose_than ~log_level:(level t) ~msg_level
+  then begin
+    Message.create ?level:msg_level ?time ?tags (Sexp (to_sexp v))
+    |> message t;
+  end
 ;;
 
-
-let string ?level ?time ?tags t s =
-  Message.create ?level ?time ?tags (String s)
-  |> message t
+let string ?level:msg_level ?time ?tags t s =
+  if Level.as_or_more_verbose_than ~log_level:(level t) ~msg_level
+  then begin
+    Message.create ?level:msg_level ?time ?tags (String s)
+    |> message t;
+  end
 ;;
 
 let raw   ?time ?tags t k = printf ?time ?tags t k
@@ -1055,19 +1063,18 @@ end = struct
   let set_output output = write := output
 
   let write msg =
-    begin match Message.level msg with
-    | None   -> !write msg
-    | Some l ->
-      if Level.equal_or_more_verbose_than (level ()) l then !write msg
-    end;
     if Scheduler.is_running () then
       failwith "Log.Global.Blocking function called after scheduler started";
+    !write msg
   ;;
 
-  let gen ?level ?time ?tags k =
+  let gen ?level:msg_level ?time ?tags k =
     ksprintf (fun msg ->
-      let msg = String msg in
-      write (Message.create ?level ?time ?tags msg)) k
+      if Level.as_or_more_verbose_than ~log_level:(level ()) ~msg_level
+      then begin
+        let msg = String msg in
+        write (Message.create ?level:msg_level ?time ?tags msg)
+      end) k;
   ;;
 
   let raw   ?time ?tags k = gen ?time ?tags k

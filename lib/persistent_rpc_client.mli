@@ -46,8 +46,19 @@ val create
   -> t
 
 (** [connected] returns the first available rpc connection from the time it is called.
-    When currently connected, the returned deferred is already determined. *)
+    When currently connected, the returned deferred is already determined.
+    If [closed] has been called, then the returned deferred is never determined. *)
 val connected : t -> Rpc.Connection.t Deferred.t
 
 (** The current rpc connection, if any. *)
 val current_connection : t -> Rpc.Connection.t option
+
+(** [close t] closes the current connection and stops it from trying to reconnect.  After
+    the deferred it returns becomes determined, the last connection has been closed and no
+    others will be attempted.
+
+    [close_finished t] becomes determined at the same time as the result of the first call
+    to [close].  [close_finished] differs from [close] in that it does not have the side
+    effect of initiating a close. *)
+val close : t -> unit Deferred.t
+val close_finished : t -> unit Deferred.t

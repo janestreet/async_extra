@@ -77,10 +77,6 @@ module Rotation : sig
        - Atomicity is hard.
        - Symlinks encourage tailing, which is a bad way to communicate information.
        - They complicate archiving processes (the symlink must be skipped).
-
-    WARNING: The rotating file functionality of Log is the most poorly tested, and in many
-    ways the most complex.  Before using this mode in anger you should test failure cases
-    carefully.
   *)
   type t with sexp
 
@@ -287,8 +283,6 @@ val string
   -> t
   -> string
   -> unit
-
-val message : t -> Message.t -> unit
 
 module Reader : sig
   (** [pipe format filename] returns a pipe of all the messages in the log.  Errors

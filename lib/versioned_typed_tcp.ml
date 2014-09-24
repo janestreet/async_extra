@@ -127,7 +127,7 @@ module Server_msg = struct
     | Wrong_mode of 'name
     | Too_many_clients of string
     | Almost_full of int (* number of free connections *)
-    | Connect of 'name
+    | Connect of ('name * [`credentials of string])
     | Disconnect of 'name * Sexp.t
     | Parse_error of 'name * string
     | Protocol_error of string
@@ -143,7 +143,7 @@ module Client_msg = struct
   module Control = struct
     type 'name t =
     | Connecting
-    | Connect of 'name
+    | Connect of ('name * [`credentials of string])
     | Disconnect of 'name * Sexp.t
     | Parse_error of 'name * string
     | Protocol_error of string
@@ -273,6 +273,18 @@ module type S = sig
     type t
 
     (** create a new (initially disconnected) client *)
+    val create'
+      :  ?logfun:logfun
+      -> ?now:(unit -> Time.t) (** defualt: Scheduler.cycle_start *)
+      -> ?check_remote_name:bool (** default is [true] *) (** remote name must match expected remote name. *)
+      -> ?credentials:string
+      -> ip:string
+      -> port:int
+      -> expected_remote_name:Remote_name.t
+      -> My_name.t
+      -> t
+
+    (** Just like [create'], but assume empty credentials (for backwards compatibility) *)
     val create
       :  ?logfun:logfun
       -> ?now:(unit -> Time.t) (** defualt: Scheduler.cycle_start *)
@@ -354,7 +366,7 @@ module Make (Z : Arg) :
       mode : Mode.t;
       send_version : Version.t;
       recv_version : Version.t;
-      credentials : string; (* For future use *)
+      credentials : string;
     }
     with sexp, bin_io
 
@@ -464,7 +476,7 @@ module Make (Z : Arg) :
     | `Not_sent -> return `Dropped
   ;;
 
-  let negotiate ~reader ~writer ~my_name ~auth_error =
+  let negotiate ~reader ~writer ~my_name ~credentials ~auth_error =
     let (recv_version, send_version) =
       match !protocol_version with
       | `Prod -> (Recv.prod_version, Send.prod_version)
@@ -475,7 +487,7 @@ module Make (Z : Arg) :
         ~name:my_name
         ~send_version
         ~recv_version
-        ~credentials:""
+        ~credentials
     in
     wrap_write_bin_prot ~sexp:Hello.sexp_of_t ~tc:Hello.bin_writer_t
       ~writer ~name:"negotiate" h;
@@ -823,6 +835,7 @@ module Make (Z : Arg) :
       enforce_unique_remote_name : bool;
       now : unit -> Time.t;
       mutable num_accepts : Int63.t;
+      credentials : string;
     }
 
     let invariant t =
@@ -919,6 +932,7 @@ module Make (Z : Arg) :
           try_with_timeout negotiate_timeout (fun () ->
             negotiate
               ~my_name:(My_name.to_string t.my_name)
+              ~credentials:t.credentials
               ~reader:r ~writer:w
               ~auth_error:(fun h ->
                 if not (Mode.(=) h.Hello.mode (Mode.current ())) then
@@ -970,7 +984,8 @@ module Make (Z : Arg) :
                   name = remote_name;
                   kill = !kill }
               in
-              Tail.extend t.tail (S.Control (C.Connect remote_name));
+              Tail.extend t.tail (S.Control (
+                C.Connect (remote_name, `credentials h.Hello.credentials)));
               Connections.add t.connections ~name:remote_name ~conn;
               handle_incoming
                 ~logfun:t.logfun ~remote_name
@@ -1040,13 +1055,16 @@ module Make (Z : Arg) :
       | Server_msg.Data x -> Some x.Read_result.data)
     ;;
 
-    let create
+    let create'
         ?logfun
         ?(now = Scheduler.cycle_start)
         ?(enforce_unique_remote_name = true)
         ?(is_client_ip_authorized = fun _ -> true)
         ?(warn_when_free_connections_lte_pct = 0.05)
-        ?(max_clients = 500) ~listen_port my_name =
+        ?(max_clients = 500)
+        ?(credentials = "")
+        ~listen_port
+        my_name =
       if max_clients > 10_000 || max_clients < 1 then
         raise (Invalid_argument "max_clients must be between 1 and 10,000");
       Deferred.create (fun result ->
@@ -1067,10 +1085,13 @@ module Make (Z : Arg) :
                 free_connections = max_clients;
                 when_free = None;
                 now;
+                credentials;
                 num_accepts = Int63.zero }
             in
             Ivar.fill result t));
     ;;
+
+    let create = create' ?credentials:None
 
     let port t =
       match Socket.getsockname t.socket with
@@ -1106,6 +1127,7 @@ module Make (Z : Arg) :
       now : unit -> Time.t;
       (* last connection error. None if it has succeeded *)
       mutable last_connect_error : exn option;
+      credentials : string;
     }
 
     (* sweeks: [try_with_timeout] is used in two places.  We could inline it
@@ -1185,6 +1207,7 @@ module Make (Z : Arg) :
             let my_name = My_name.to_string t.my_name in
             raise_after_timeout negotiate_timeout (fun () ->
               negotiate ~reader ~writer
+                ~credentials:t.credentials
                 ~my_name ~auth_error:(fun _ -> None))
             >>| (function
             | `Eof -> failwith "eof"
@@ -1212,7 +1235,8 @@ module Make (Z : Arg) :
                     name;
                     kill = (fun () -> close (Failure "connection was killed")) }
                 in
-                Tail.extend t.messages (C.Control (E.Connect name));
+                Tail.extend t.messages (C.Control (
+                  E.Connect (name, `credentials h.Hello.credentials)));
                 t.con <- `Connected con;
                 handle_incoming
                   ~logfun:t.logfun ~remote_name:name
@@ -1372,10 +1396,11 @@ module Make (Z : Arg) :
       | `Connected _ -> `Connected
     ;;
 
-    let create
+    let create'
         ?logfun
         ?(now = Scheduler.cycle_start)
         ?(check_remote_name = true)
+        ?(credentials = "")
         ~ip ~port ~expected_remote_name my_name =
       { remote_ip = Unix.Inet_addr.of_string ip;
         remote_port = port;
@@ -1391,8 +1416,11 @@ module Make (Z : Arg) :
         trying_to_connect = `No;
         now;
         last_connect_error = None;
+        credentials;
       }
     ;;
+
+    let create = create' ?credentials:None
 
     let last_connect_error t = t.last_connect_error
   end

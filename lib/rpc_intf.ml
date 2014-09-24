@@ -53,7 +53,15 @@ module type Connection = sig
       and determine the deferred returned by [dispatch_queries].
 
       When the deferred returned by [with_close] becomes determined, both [Reader.close]
-      and [Writer.close] have finished. *)
+      and [Writer.close] have finished.
+
+      NOTE:  Because this connection is closed when the [Deferred.t] returned by
+      [dispatch_queries] is determined, you should be careful when using this with
+      [Pipe_rpc].  For example, simply returning the pipe when you get it will close the
+      pipe immediately.  You should instead either use the pipe inside [dispatch_queries]
+      and not determine its result until you are done with the pipe, or use a different
+      function like [create].
+  *)
   val with_close
     :  ?implementations:'s Implementations.t
     -> ?max_message_size:int
@@ -119,7 +127,11 @@ module type Connection = sig
 
   (** [client ~host ~port ()] connects to the server at ([host],[port]) and returns the
       connection or an Error if a connection could not be made.  It is the responsibility
-      of the caller to eventually call close. *)
+      of the caller to eventually call close.
+
+      In [client] and [with_client], the [handshake_timeout] encompasses both the TCP
+      connection timeout and the timeout for this module's own handshake.
+  *)
   val client
     :  host:string
     -> port:int
@@ -130,7 +142,11 @@ module type Connection = sig
     -> (t, Exn.t) Result.t Deferred.t
 
   (** [with_client ~host ~port f] connects to the server at ([host],[port]) and runs f
-      until an exception is thrown or until the returned Deferred is fulfilled. *)
+      until an exception is thrown or until the returned Deferred is fulfilled.
+
+      NOTE:  As with [with_close], you should be careful when using this with [Pipe_rpc].
+      See [with_close] for more information.
+  *)
   val with_client
     :  host:string
     -> port:int

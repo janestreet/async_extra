@@ -184,7 +184,10 @@ let (>>|~) = Result.(>>|)
 let defer_result : 'a 'b. ('a Deferred.t,'b) Result.t -> ('a,'b) Result.t Deferred.t =
   function
   | Error _ as err -> return err
-  | Ok d -> d >>| fun x -> Ok x
+  | Ok d ->
+    match Deferred.peek d with
+    | None -> d >>| fun x -> Ok x
+    | Some d -> return (Ok d)
 
 open Protocol
 
@@ -201,8 +204,10 @@ module Rpc_result : sig
 
   type 'a try_with = location:string -> (unit -> 'a) -> 'a
 
-  val try_with : 'a t Deferred.t try_with
+  val try_with : ?run:[ `Now | `Schedule ] -> 'a t Deferred.t try_with
+
   val try_with_bin_io : 'a t try_with
+
   val or_error : 'a t -> 'a Or_error.t
 end = struct
   type 'a t = ('a, Rpc_error.t) Result.t with bin_io
@@ -218,9 +223,13 @@ end = struct
     | Ok x -> x
     | Error exn -> Error (constructor (sexp_of_located_error {location; exn}))
 
-  let try_with ~location f = make_try_with
-    (Monitor.try_with ?name:None)
-    (>>|)
+  let try_with ?run ~location f =
+    make_try_with
+    (Monitor.try_with ?run ?name:None)
+    (fun x f ->
+      match Deferred.peek x with
+      | None -> x >>| f
+      | Some x -> return (f x))
     (fun e -> Rpc_error.Uncaught_exn e)
     ~location
     f
@@ -318,8 +327,11 @@ module Implementations : sig
   val create
     :  implementations:'connection_state Implementation.t list
     -> on_unknown_rpc:[ `Raise
-                      | `Ignore
-                      | `Call of (rpc_tag:string -> version:int -> unit)
+                      | `Continue
+                      | `Close_connection
+                      | `Call of (rpc_tag:string -> version:int ->
+                                  [ `Close_connection
+                                  | `Continue ])
                       ]
     -> ( 'connection_state t
        , [`Duplicate_implementations of Implementation.Description.t list]
@@ -341,8 +353,11 @@ module Implementations : sig
   val create_exn
     :  implementations:'connection_state Implementation.t list
     -> on_unknown_rpc:[ `Raise
-                      | `Ignore
-                      | `Call of (rpc_tag:string -> version:int -> unit)
+                      | `Continue
+                      | `Close_connection
+                      | `Call of (rpc_tag:string -> version:int ->
+                                  [ `Close_connection
+                                  | `Continue ])
                       ]
     -> 'connection_state t
 end = struct
@@ -382,10 +397,17 @@ end = struct
           ~location:"server-side rpc query un-bin-io'ing"
       in
       let data =
-        Rpc_result.try_with ~location:"server-side rpc computation" (fun () ->
+        Rpc_result.try_with ~run:`Now
+          ~location:"server-side rpc computation" (fun () ->
           defer_result (query >>|~ f connection_state))
       in
-      data >>> write_response bin_response_writer
+      (* In the common case that the implementation returns a value immediately, we will
+         write the response immediately as well (this is also why the above [try_with] has
+         [~run:`Now]).  This can be a big performance win for servers that get many
+         queries in a single Async cycle. *)
+      ( match Deferred.peek data with
+        | None -> data >>> write_response bin_response_writer
+        | Some data -> write_response bin_response_writer data )
     | Implementation.F.Pipe_rpc
         (bin_query_reader, bin_init_writer, bin_update_writer, f) ->
       let stream_query =
@@ -468,6 +490,10 @@ end = struct
       let shared_handler ~connection_state ~query ~writer ~aborted
           ~read_buffer ~read_buffer_pos_ref ~open_streaming_responses () =
         match Hashtbl.find implementations (query.Query.tag, query.Query.version) with
+        | Some implementation ->
+          apply_implementation implementation ~connection_state ~query
+            ~read_buffer ~read_buffer_pos_ref ~writer ~open_streaming_responses ~aborted;
+          `Continue
         | None ->
           let error = Rpc_error.Unimplemented_rpc
             (query.Query.tag, `Version query.Query.version)
@@ -480,17 +506,17 @@ end = struct
             });
           begin
             match on_unknown_rpc with
-            | `Ignore -> ()
-            | `Raise -> Rpc_error.raise error
-            | `Call f -> f
-              ~rpc_tag:(Rpc_tag.to_string query.Query.tag)
-              ~version:query.Query.version;
+            | `Continue         -> `Continue
+            | `Raise            -> Rpc_error.raise error
+            | `Close_connection -> `Stop
+            | `Call f ->
+              match
+                f ~rpc_tag:(Rpc_tag.to_string query.Query.tag)
+                  ~version:query.Query.version
+              with
+              | `Close_connection -> `Stop
+              | `Continue         -> `Continue
           end;
-          `Stop
-        | Some implementation ->
-          apply_implementation implementation ~connection_state ~query
-            ~read_buffer ~read_buffer_pos_ref ~writer ~open_streaming_responses ~aborted;
-          `Continue
       in
       let query_handler () =
         shared_handler ~open_streaming_responses:(Hashtbl.Poly.create ~size:10 ()) ()
@@ -665,7 +691,14 @@ module Connection : Connection_internal = struct
         Hashtbl.remove t.open_queries response.Response.id;
         begin match removal_circumstances with
         | Ok () -> `Continue
-        | Error e -> `Stop (Error e)
+        | Error e ->
+          match e with
+          | Rpc_error.Unimplemented_rpc _ -> `Continue
+          | Rpc_error.Bin_io_exn _
+          | Rpc_error.Connection_closed
+          | Rpc_error.Write_error _
+          | Rpc_error.Uncaught_exn _
+          | Rpc_error.Unknown_query_id _  -> `Stop (Error e)
         end
 
   let handle_msg t msg ~read_buffer ~read_buffer_pos_ref =
@@ -696,19 +729,16 @@ module Connection : Connection_internal = struct
   (* unfortunately, copied from reader0.ml *)
   let default_max_len = 100 * 1024 * 1024
 
+  let default_handshake_timeout = Time.Span.of_sec 30.
+
   let create
         ?implementations
         ~connection_state
         ?max_message_size:max_len
-        ?handshake_timeout
+        ?(handshake_timeout = default_handshake_timeout)
         reader
         writer
     =
-    let handshake_timeout =
-      Option.value
-        handshake_timeout
-        ~default:(Time.Span.of_sec 30.)
-    in
     let implementations =
       match implementations with None -> Implementations.null () | Some s -> s
     in
@@ -931,20 +961,26 @@ module Connection : Connection_internal = struct
     }
   end
 
-  let client ~host ~port ?implementations ?max_message_size ?handshake_timeout () =
+  let client ~host ~port
+        ?implementations
+        ?max_message_size
+        ?(handshake_timeout = default_handshake_timeout)
+        () =
     Monitor.try_with (fun () ->
-      Tcp.connect (Tcp.to_host_and_port host port)
+      let finish_handshake_by = Time.add (Time.now ()) handshake_timeout in
+      Tcp.connect ~timeout:handshake_timeout (Tcp.to_host_and_port host port)
       >>= fun (_, r, w) ->
+      let handshake_timeout = Time.diff finish_handshake_by (Time.now ()) in
       begin
         match implementations with
         | None ->
           let {Client_implementations.connection_state; implementations} =
             Client_implementations.null ()
           in
-          create r w ?max_message_size ?handshake_timeout ~implementations
+          create r w ?max_message_size ~handshake_timeout ~implementations
             ~connection_state
         | Some {Client_implementations.connection_state; implementations} ->
-          create r w ?max_message_size ?handshake_timeout ~implementations
+          create r w ?max_message_size ~handshake_timeout ~implementations
             ~connection_state
       end
       >>= function
@@ -956,9 +992,17 @@ module Connection : Connection_internal = struct
         >>= fun () ->
         raise handshake_error)
 
-  let with_client ~host ~port ?implementations ?max_message_size ?handshake_timeout f =
+  let with_client ~host ~port
+        ?implementations
+        ?max_message_size
+        ?handshake_timeout
+        f =
     Monitor.try_with (fun () ->
-      client ~host ~port ?implementations ?max_message_size ?handshake_timeout ()
+      client ~host ~port
+        ?implementations
+        ?max_message_size
+        ?handshake_timeout
+        ()
       >>= fun res ->
       begin match res with
       | Error e -> return (Error e)

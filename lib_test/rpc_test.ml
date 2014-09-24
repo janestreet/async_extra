@@ -299,11 +299,113 @@ module Pipe_rpc_performance_measurements = struct
 
 end
 
+module Rpc_performance_measurements = struct
+  module Protocol = struct
+    type query    = unit with bin_io
+    type response = unit with bin_io
+
+    let rpc =
+      Rpc.create
+        ~name:"test-rpc-performance"
+        ~version:1
+        ~bin_query:bin_query
+        ~bin_response:bin_response
+  end
+
+  module Client = struct
+
+    let main msgs_per_sec port () =
+      Connection.client ~host:"localhost" ~port ()
+      >>| Result.ok_exn
+      >>= fun connection ->
+        Clock.every' (sec 1.) (fun () ->
+          Deferred.all
+            ( List.init msgs_per_sec ~f:(fun (_ : int) ->
+                Rpc.dispatch Protocol.rpc connection ()) )
+          >>| fun list ->
+          if List.exists list ~f:Result.is_error then assert false);
+        Deferred.never ()
+
+  end
+
+  module Server = struct
+
+    let cnt = ref 0
+
+    let implementation =
+      Rpc.implement Protocol.rpc (fun () () ->
+        incr cnt;
+        Deferred.unit)
+
+    let main () =
+      let implementations =
+        Implementations.create_exn
+          ~implementations:[ implementation ]
+          ~on_unknown_rpc:`Raise
+      in
+      Connection.serve ~initial_connection_state:(fun _ -> ()) ~implementations
+        ~where_to_listen:Tcp.on_port_chosen_by_os ()
+      >>= fun listening_on ->
+      let port = Tcp.Server.listening_on listening_on in
+      Print.printf "Port:%d\n" port;
+      let ratio_acc = ref 0. in
+      let percentage_acc = ref 0. in
+      let sample = ref 0 in
+      don't_wait_for
+        ( Pipe.iter_without_pushback (Cpu_usage.samples ()) ~f:(fun percent ->
+           if 0 = !cnt then  ()
+           else begin
+            let percentage = Percent.to_percentage percent in
+            Print.printf "%d %f (cpu: %f)\n"
+              !sample
+              (!ratio_acc /. (Float.of_int !sample))
+              (!percentage_acc /. (Float.of_int !sample));
+            if percentage > 100. then begin
+              Print.printf "CPU pegged (%f). This test may not good.\n" percentage;
+            end else begin
+            if !sample >= 0 then begin
+              if !cnt > 0 then begin
+              let ratio = (percentage *. 1_000_000.) /. (Int.to_float !cnt) in
+              ratio_acc := !ratio_acc +. ratio;
+              percentage_acc := !percentage_acc +. percentage;
+              end;
+            end;
+            cnt := 0
+          end;
+            incr sample;
+           end;
+          ));
+      Deferred.never ()
+
+
+  end
+
+    let server_command =
+      Command.async ~summary:"test server"
+        Command.Spec.empty
+        Server.main
+
+    let client_command =
+      Command.async ~summary:"test server"
+        Command.Spec.(
+          empty
+          +> flag "msg-per-sec" (required int) ~doc:""
+          +> flag "port" (required int) ~doc:""
+        )
+        Client.main
+
+end
+
 
 let () =
   Command.run
-    (Command.group ~summary:"Varioust test for rpcs"
-       [ "pipe",
+    (Command.group ~summary:"Various tests for rpcs"
+       [ "rpc",
+         Command.group ~summary:"Plain rpc performance test"
+           [ "server", Rpc_performance_measurements.server_command
+           ; "client", Rpc_performance_measurements.client_command
+           ];
+         "pipe",
          (Command.group ~summary:"Pipe rpc"
             [ "simple", Pipe_simple_test.command;
               "performance", Pipe_rpc_performance_measurements.command
