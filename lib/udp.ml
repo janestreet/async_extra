@@ -265,11 +265,3 @@ let recvmmsg_no_sources_loop =
             <:sexp_of< [ `Bad_fd | `Unsupported ] * Fd.t >>
         | `Closed | `Interrupted -> ()))
 ;;
-
-let bind_to_interface_exn =
-  Linux_ext.bind_to_interface
-  |> Or_error.map ~f:(fun bind_to_interface ->
-    (fun ~ifname fd ->
-       Fd.with_file_descr_exn fd (fun file_descr ->
-         bind_to_interface file_descr (`Interface_name ifname))))
-;;

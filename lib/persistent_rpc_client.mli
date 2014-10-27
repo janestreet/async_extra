@@ -8,13 +8,13 @@ open Import
 type t
 
 module Event : sig
-  type t = [
-    | `Attempting_to_connect
-    | `Obtained_address of Host_and_port.t
-    | `Failed_to_connect of Error.t
-    | `Connected
-    | `Disconnected
-  ] with sexp
+  type t =
+    | Attempting_to_connect
+    | Obtained_address of Host_and_port.t
+    | Failed_to_connect of Error.t
+    | Connected
+    | Disconnected
+  with sexp
 end
 
 (** [create ~server_name ~log get_address] returns a persistent rpc connection to a server

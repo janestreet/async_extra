@@ -138,7 +138,7 @@ module Writer_with_length = struct
     in
     let size a =
       let len = Nat0.of_int_exn (size a) in
-      Nat0.bin_size_t len + (len :> int)
+      Nat0.bin_size_t len + ((len : Bin_prot.Nat0.t) :> int)
     in
     { Bin_prot.Type_class. write; size }
   ;;
@@ -491,8 +491,9 @@ end = struct
           ~read_buffer ~read_buffer_pos_ref ~open_streaming_responses () =
         match Hashtbl.find implementations (query.Query.tag, query.Query.version) with
         | Some implementation ->
-          apply_implementation implementation ~connection_state ~query
-            ~read_buffer ~read_buffer_pos_ref ~writer ~open_streaming_responses ~aborted;
+          apply_implementation implementation ~connection_state
+            ~query ~read_buffer ~read_buffer_pos_ref ~writer ~open_streaming_responses
+            ~aborted;
           `Continue
         | None ->
           let error = Rpc_error.Unimplemented_rpc
@@ -633,16 +634,9 @@ module Connection : Connection_internal = struct
   end
 
   type t =
-    { reader                   : Reader.t;
-      writer                   : Writer.t;
-      open_queries             : (Query_id.t, Response_handler.t) Hashtbl.t;
-      handle_query             :
-           (query:Nat0.t Query.t
-            -> writer:Writer.t
-            -> aborted:unit Deferred.t
-            -> read_buffer:Bigstring.t
-            -> read_buffer_pos_ref:int ref
-            -> [ `Continue | `Stop ]);
+    { reader         : Reader.t;
+      writer         : Writer.t;
+      open_queries   : (Query_id.t, Response_handler.t) Hashtbl.t;
       close_started  : unit Ivar.t;
       close_finished : unit Ivar.t;
     }
@@ -665,8 +659,8 @@ module Connection : Connection_internal = struct
         Hashtbl.set t.open_queries ~key:query.Query.id ~data:response_handler);
       Ok ()
 
-  let handle_query t ~query ~read_buffer ~read_buffer_pos_ref =
-    t.handle_query
+  let handle_query_aux t ~handle_query ~query ~read_buffer ~read_buffer_pos_ref =
+    handle_query
       ~query
       ~writer:t.writer
       ~aborted:(Ivar.read t.close_started)
@@ -701,13 +695,13 @@ module Connection : Connection_internal = struct
           | Rpc_error.Unknown_query_id _  -> `Stop (Error e)
         end
 
-  let handle_msg t msg ~read_buffer ~read_buffer_pos_ref =
+  let handle_msg t msg ~handle_query ~read_buffer ~read_buffer_pos_ref =
     match msg with
     | Message.Heartbeat -> `Continue
     | Message.Response response ->
       handle_response t response ~read_buffer ~read_buffer_pos_ref
     | Message.Query query ->
-      match handle_query t ~query ~read_buffer ~read_buffer_pos_ref with
+      match handle_query_aux t ~handle_query ~query ~read_buffer ~read_buffer_pos_ref with
       | `Continue -> `Continue
       (* This [`Stop] does indicate an error, but [handle_query] handled it already. *)
       | `Stop -> `Stop (Ok ())
@@ -742,15 +736,16 @@ module Connection : Connection_internal = struct
     let implementations =
       match implementations with None -> Implementations.null () | Some s -> s
     in
-    let t =
-      {
-        reader;
-        writer;
-        open_queries             = Hashtbl.Poly.create ~size:10 ();
-        handle_query = Implementations.query_handler implementations ~connection_state ();
-        close_started  = Ivar.create ();
-        close_finished = Ivar.create ();
-      }
+    let t = {
+      reader;
+      writer;
+      open_queries = Hashtbl.Poly.create ~size:10 ();
+      close_started  = Ivar.create ();
+      close_finished = Ivar.create ();
+    }
+    in
+    let handle_query =
+      Implementations.query_handler implementations ~connection_state:(connection_state t) ()
     in
     let result =
       Writer.write_bin_prot t.writer Header.bin_t.Bin_prot.Type_class.writer Header.v1;
@@ -810,7 +805,7 @@ module Connection : Connection_internal = struct
                   let nat0_msg = Message.bin_read_nat0_t buf ~pos_ref in
                   last_heartbeat := Time.now ();
                   match
-                    handle_msg t nat0_msg ~read_buffer:buf ~read_buffer_pos_ref:pos_ref
+                    handle_msg t nat0_msg ~handle_query ~read_buffer:buf ~read_buffer_pos_ref:pos_ref
                   with
                   | `Continue ->
                     (* assume everything we needed to be read has been read or will be
@@ -950,13 +945,13 @@ module Connection : Connection_internal = struct
         end)
 
   module Client_implementations = struct
-    type 's t = {
-      connection_state : 's;
+    type nonrec 's t = {
+      connection_state : t -> 's;
       implementations : 's Implementations.t;
     }
 
     let null () = {
-      connection_state = ();
+      connection_state = (fun _ -> ());
       implementations = Implementations.null ();
     }
   end
@@ -1104,7 +1099,7 @@ module Rpc = struct
             ~implementations:[ implementation ] ~on_unknown_rpc:`Raise
         in
         Connection.serve
-          ~initial_connection_state:(fun _ -> ()) ~implementations
+          ~initial_connection_state:(fun _ _ -> ()) ~implementations
           ~where_to_listen:Tcp.on_port_chosen_by_os
           ()
       in

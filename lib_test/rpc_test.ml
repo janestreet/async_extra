@@ -149,7 +149,7 @@ module Pipe_simple_test = struct
         Implementations.create_exn
           ~implementations:[ implementation ] ~on_unknown_rpc:`Raise
       in
-      Connection.serve ~initial_connection_state:(fun _ -> ()) ~implementations
+      Connection.serve ~initial_connection_state:(fun _ _ -> ()) ~implementations
         ~where_to_listen:(Tcp.on_port port) ()
       >>= fun (_ : (_, _) Tcp.Server.t) ->  Deferred.never ()
 
@@ -281,7 +281,7 @@ module Pipe_rpc_performance_measurements = struct
           ~implementations:[ implementation msgs_per_sec ]
           ~on_unknown_rpc:`Raise
       in
-      Connection.serve ~initial_connection_state:(fun _ -> ()) ~implementations
+      Connection.serve ~initial_connection_state:(fun _ _ -> ()) ~implementations
         ~where_to_listen:Tcp.on_port_chosen_by_os ()
       >>= fun listening_on ->
       let port = Tcp.Server.listening_on listening_on in
@@ -343,7 +343,7 @@ module Rpc_performance_measurements = struct
           ~implementations:[ implementation ]
           ~on_unknown_rpc:`Raise
       in
-      Connection.serve ~initial_connection_state:(fun _ -> ()) ~implementations
+      Connection.serve ~initial_connection_state:(fun _ _ -> ()) ~implementations
         ~where_to_listen:Tcp.on_port_chosen_by_os ()
       >>= fun listening_on ->
       let port = Tcp.Server.listening_on listening_on in

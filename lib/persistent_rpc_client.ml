@@ -3,13 +3,13 @@ open Import
 
 module Event = struct
 
-  type t = [
-    | `Attempting_to_connect
-    | `Obtained_address of Host_and_port.t
-    | `Failed_to_connect of Error.t
-    | `Connected
-    | `Disconnected
-  ] with sexp
+  type t =
+    | Attempting_to_connect
+    | Obtained_address of Host_and_port.t
+    | Failed_to_connect of Error.t
+    | Connected
+    | Disconnected
+  with sexp
 
   type event = t
 
@@ -22,8 +22,8 @@ module Event = struct
   end
 
   let log_level = function
-    | `Attempting_to_connect | `Connected | `Disconnected | `Obtained_address _ -> `Info
-    | `Failed_to_connect _ -> `Error
+    | Attempting_to_connect | Connected | Disconnected | Obtained_address _ -> `Info
+    | Failed_to_connect _ -> `Error
 
   let handle t {Handler.server_name; log; on_event} =
     on_event t;
@@ -73,7 +73,7 @@ let try_connecting_until_successful t =
         | Some previous_address -> Host_and_port.equal addr previous_address
       in
       previous_address := Some addr;
-      if not same_as_previous_address then handle_event t (`Obtained_address addr);
+      if not same_as_previous_address then handle_event t (Obtained_address addr);
       t.connect
         ~host:(Host_and_port.host addr)
         ~port:(Host_and_port.port addr)
@@ -93,7 +93,7 @@ let try_connecting_until_successful t =
         in
         previous_error := Some err;
         if not same_as_previous_error then
-          handle_event t (`Failed_to_connect (Error.of_exn err));
+          handle_event t (Failed_to_connect (Error.of_exn err));
         after (retry_delay ())
         >>= fun () ->
         loop ()
@@ -115,7 +115,7 @@ let create ~server_name ?log ?(on_event = ignore) ?implementations
       close_started = Ivar.create (); close_finished = Ivar.create () }
   in
   don't_wait_for @@ Deferred.repeat_until_finished () (fun () ->
-    handle_event t `Attempting_to_connect;
+    handle_event t Attempting_to_connect;
     let ready_to_retry_connecting = after (retry_delay ()) in
     try_connecting_until_successful t
     >>= fun maybe_conn ->
@@ -123,11 +123,11 @@ let create ~server_name ?log ?(on_event = ignore) ?implementations
     match maybe_conn with
     | None -> return (`Finished ())
     | Some conn ->
-      handle_event t `Connected;
+      handle_event t Connected;
       Rpc.Connection.close_finished conn
       >>= fun () ->
       t.conn <- Ivar.create ();
-      handle_event t `Disconnected;
+      handle_event t Disconnected;
       (* waits until [retry_delay ()] time has passed since the time just before we last
          tried to connect rather than the time we noticed being disconnected, so that if a
          long-lived connection dies, we will attempt to reconnect immediately. *)

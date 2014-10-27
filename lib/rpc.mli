@@ -60,13 +60,14 @@ module Implementations : sig
   val create
     :  implementations:'connection_state Implementation.t list
     -> on_unknown_rpc:[
-    | `Raise
-    | `Continue
-    | `Close_connection (* This used to be the behavior of `Ignore *)
-    (** [rpc_tag] and [version] are the name and version of the unknown rpc *)
-    | `Call of (rpc_tag:string -> version:int
-                -> [ `Close_connection
-                   | `Continue ])
+      | `Raise
+      | `Continue
+      | `Close_connection (* This used to be the behavior of `Ignore *)
+      (** [rpc_tag] and [version] are the name and version of the unknown
+          rpc *)
+      | `Call of (rpc_tag:string -> version:int
+                  -> [ `Close_connection
+                     | `Continue ])
     ]
     -> ( 'connection_state t
        , [`Duplicate_implementations of Implementation.Description.t list]
@@ -75,12 +76,12 @@ module Implementations : sig
   val create_exn
     :  implementations:'connection_state Implementation.t list
     -> on_unknown_rpc:[
-    | `Raise
-    | `Continue
-    | `Close_connection (* This used to be the behavior of `Ignore *)
-    | `Call of (rpc_tag:string -> version:int ->
-                [ `Close_connection
-                | `Continue ])
+      | `Raise
+      | `Continue
+      | `Close_connection (* This used to be the behavior of `Ignore *)
+      | `Call of (rpc_tag:string -> version:int ->
+                  [ `Close_connection
+                  | `Continue ])
     ]
     -> 'connection_state t
 end

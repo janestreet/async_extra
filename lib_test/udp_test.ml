@@ -22,51 +22,70 @@ let tests = [
 
 let with_socks expected sexp_of f =
   let rev_effects = ref [] in
-  bind_any () >>= fun sock1 ->
-  bind_any () >>= fun sock2 ->
-  match Unix.Socket.getsockname sock1, Unix.Socket.getsockname sock2 with
-  | `Inet (_host1, port1), `Inet (_host2, port2) ->
-    with_timeout (sec 0.001)
-      (f ~sock1 ~sock2 ~effect:(fun e -> rev_effects := e :: !rev_effects)
-         ~addr1:(`Inet (Unix.Inet_addr.localhost, port1))
-         ~addr2:(`Inet (Unix.Inet_addr.localhost, port2)))
-    >>= function
-    | `Timeout | `Result () ->
-      Unix.Socket.shutdown sock1 `Both;
-      Unix.Socket.shutdown sock2 `Both;
-      Unix.close (Socket.fd sock1) >>= fun () ->
-      Unix.close (Socket.fd sock2) >>| fun () ->
-      let effects = List.rev !rev_effects in
-      if not (Pervasives.(=) expected effects)
-      then
-        failwiths "unexpected effects" (expected, effects)
-          (Tuple.T2.sexp_of_t
-             (List.sexp_of_t sexp_of)
-             (List.sexp_of_t sexp_of))
+  bind_any ()
+  >>= fun sock1 ->
+  Monitor.protect ~finally:(fun () -> Fd.close (Socket.fd sock1))
+    (fun () ->
+       bind_any ()
+       >>= fun sock2 ->
+       Monitor.protect ~finally:(fun () -> Fd.close (Socket.fd sock2))
+         (fun () ->
+            let `Inet (_host1, port1), `Inet (_host2, port2) =
+              Unix.Socket.getsockname sock1, Unix.Socket.getsockname sock2
+            in
+            with_timeout (sec 0.001)
+              (f ~sock1 ~sock2 ~effect:(fun e -> rev_effects := e :: !rev_effects)
+                 ~addr1:(`Inet (Unix.Inet_addr.localhost, port1))
+                 ~addr2:(`Inet (Unix.Inet_addr.localhost, port2)))
+            >>= function
+            | `Timeout | `Result () ->
+              Unix.Socket.shutdown sock1 `Both;
+              Unix.Socket.shutdown sock2 `Both;
+              Unix.close (Socket.fd sock1) >>= fun () ->
+              Unix.close (Socket.fd sock2) >>| fun () ->
+              let effects = List.rev !rev_effects in
+              if not (Pervasives.(=) expected effects)
+              then
+                failwiths "unexpected effects" (expected, effects)
+                  (Tuple.T2.sexp_of_t
+                     (List.sexp_of_t sexp_of)
+                     (List.sexp_of_t sexp_of))))
 
-exception Stop
-
-let tests = tests @ [
-  "stop smoke", (fun () ->
-    let prefix = ["a"; "b"] in
-    let suffix = ["c"; "d"] in
-    with_socks prefix <:sexp_of< string >> (fun ~sock1 ~sock2 ~effect ~addr1:_ ~addr2 ->
-      match sendto () with
-      | Error e -> eprintf "%s\n" (Error.to_string_hum e); Deferred.unit
-      | Ok sendto ->
-        Deferred.all_unit [
-          (Deferred.List.iter ~how:`Sequential (prefix @ suffix)
-             ~f:(fun str ->
-               sendto (Socket.fd sock1) (Iobuf.of_string str) addr2
-               >>= fun () -> after (Time.Span.of_us 1.)));
-          (Monitor.try_with ~extract_exn:true (fun () ->
-             read_loop (Socket.fd sock2) (fun buf ->
-               let str = Iobuf.to_string buf in
-               effect str;
-               if String.equal str (List.last_exn prefix) then raise Stop))
-           >>| function Error Stop | Ok () -> () | Error e -> raise e);
-        ]));
-]
+let tests =
+  tests
+  @ [
+    "stop smoke", (fun () ->
+      let prefix = ["a"; "b"] in
+      let suffix = ["c"; "d"] in
+      with_socks prefix <:sexp_of< string >>
+        (fun ~sock1 ~sock2 ~effect ~addr1:_ ~addr2 ->
+           match sendto () with
+           | Error nonfatal ->
+             Debug.eprints "nonfatal" nonfatal <:sexp_of< Error.t >>;
+             Deferred.unit
+           | Ok sendto ->
+             let stopped = ref false in
+             Deferred.all_unit [
+               (Deferred.List.iter ~how:`Sequential (prefix @ suffix)
+                  ~f:(fun str ->
+                    if !stopped then Deferred.unit
+                    else
+                      sendto (Socket.fd sock1) (Iobuf.of_string str) addr2
+                      >>= fun () ->
+                      after (Time.Span.of_us 1.)));
+               (Monitor.try_with (fun () ->
+                  read_loop (Socket.fd sock2) (fun buf ->
+                    let str = Iobuf.to_string buf in
+                    effect str;
+                    if String.equal str (List.last_exn prefix) then
+                      (stopped := true;
+                       failwith "Stop")))
+                >>| function
+                | Error _ when !stopped -> ()
+                | Ok () -> ()
+                | Error e -> raise e);
+             ]));
+  ]
 
 let with_fsts send expected sexp_of receiver =
   match send with

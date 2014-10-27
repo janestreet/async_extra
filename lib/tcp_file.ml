@@ -309,7 +309,7 @@ module Server = struct
         | Error (`Duplicate_implementations _) -> assert false
       in
       Rpc.Connection.serve ~auth ~implementations ~where_to_listen ()
-        ~initial_connection_state:(fun _ -> State.global)
+        ~initial_connection_state:(fun _ _ -> State.global)
       >>| fun server ->
         State.global.State.serving_on <- `Server server;
         server

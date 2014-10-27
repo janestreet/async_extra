@@ -158,5 +158,3 @@ val recvmmsg_no_sources_loop
          -> unit)                       (** may modify [bufs] *)
      -> unit Deferred.t)
       Or_error.t
-
-val bind_to_interface_exn : (ifname:string -> Fd.t -> unit) Or_error.t

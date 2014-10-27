@@ -28,12 +28,12 @@ end
 module Message : sig
   type t with sexp_of
 
-  val time    : t -> Time.t
-  val message : t -> string
-  val level   : t -> Level.t option
-  val tags    : t -> (string * string) list
-  (* create a new message with additional tags *)
-  val add_tags : t -> (string * string) list -> t
+  val time        : t -> Time.t
+  val message     : t -> string
+  val raw_message : t -> [ `String of string | `Sexp of Sexp.t ]
+  val level       : t -> Level.t option
+  val tags        : t -> (string * string) list
+  val add_tags    : t -> (string * string) list -> t
 
   module Stable : sig
     module V0 : sig

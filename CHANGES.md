@@ -1,3 +1,26 @@
+## 112.06.00
+
+- In `Log`, exposed the raw message.
+- Changed `Rpc` creators' `connection_state` to be a function that takes
+  the connection and returns the state.
+
+    This makes it possible for the connection state to actually get
+    a handle on the connection itself, which simplifies a number of
+    idioms for using RPC.  In particular, it makes it easier to respond
+    with an RPC back to a client over client's own connection.
+
+- Fixed some nondeterministically failing tests.
+- In `Log`, made logs discard messages when their output list is empty.
+
+    Also, removed redundant tracking of current level.
+
+- Moved `Udp.bind_to_interface_exn` to `Unix` module in `async_unix`.
+- Added `Versioned_typed_tcp.Repeater`.
+
+    Repeater is used in the cases where we want to inspect and possibly
+    alter the flow between a client and a server without having to
+    change either the client or the server or the protocol between them.
+
 ## 112.01.00
 
 - Changed `Persistent_rpc_client.connected` to avoid returning a

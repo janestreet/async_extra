@@ -146,16 +146,16 @@ module Rotation = struct
 end
 
 module Sexp_or_string = struct
-  type t =
-    | Sexp of Sexp.t
-    | String of string
+  type t = [
+    | `Sexp of Sexp.t
+    | `String of string ]
   with bin_io, sexp
 
   let to_string = function
-    | Sexp sexp  -> Sexp.to_string sexp
-    | String str -> str
+    | `Sexp sexp  -> Sexp.to_string_hum sexp
+    | `String str -> str
+  ;;
 end
-open Sexp_or_string
 
 module Message : sig
   type t with sexp, bin_io
@@ -167,11 +167,12 @@ module Message : sig
     -> Sexp_or_string.t
     -> t
 
-  val time     : t -> Time.t
-  val level    : t -> Level.t option
-  val message  : t -> string
-  val tags     : t -> (string * string) list
-  val add_tags : t -> (string * string) list -> t
+  val time        : t -> Time.t
+  val level       : t -> Level.t option
+  val message     : t -> string
+  val raw_message : t -> [ `String of string | `Sexp of Sexp.t ]
+  val tags        : t -> (string * string) list
+  val add_tags    : t -> (string * string) list -> t
 
   val to_write_only_text : ?zone:Time.Zone.t -> t -> string
 
@@ -295,7 +296,7 @@ end = struct
         {
           time    = v0_t.time;
           level   = v0_t.level;
-          message = String v0_t.message;
+          message = `String v0_t.message;
           tags    = v0_t.tags;
         }
 
@@ -352,7 +353,7 @@ end = struct
   TEST_UNIT =
     let msg =
       create ~level:`Info ~tags:["a", "tag"]
-        (String "the quick brown message jumped over the lazy log")
+        (`String "the quick brown message jumped over the lazy log")
     in
     let v0_sexp = Stable.V0.sexp_of_t msg in
     let v2_sexp = Stable.V2.sexp_of_t msg in
@@ -363,16 +364,16 @@ end = struct
   TEST_UNIT =
     let msg =
       create ~level:`Info ~tags:["a", "tag"]
-        (Sexp (Sexp.List [ Sexp.Atom "foo"; Sexp.Atom "bar" ]))
+        (`Sexp (Sexp.List [ Sexp.Atom "foo"; Sexp.Atom "bar" ]))
     in
     let v0_sexp = Stable.V0.sexp_of_t msg in
     let v2_sexp = Stable.V2.sexp_of_t msg in
-    assert (t_of_sexp v0_sexp = { msg with message = String "(foo bar)" });
+    assert (t_of_sexp v0_sexp = { msg with message = `String "(foo bar)" });
     assert (t_of_sexp v2_sexp = msg);
   ;;
 
   TEST_UNIT =
-    let msg = create ~level:`Info ~tags:[] (String "") in
+    let msg = create ~level:`Info ~tags:[] (`String "") in
     match sexp_of_t msg with
     | Sexp.List [ (Sexp.Atom _) as version; _ ] ->
       ignore (Stable.Version.t_of_sexp version)
@@ -381,15 +382,14 @@ end = struct
 
   let time t    = t.time
   let level t   = t.level
-  let message t =
-    let module S = Sexp_or_string in
-    match t.message with
-    | S.String s -> s
-    | S.Sexp sexp -> Sexp.to_string_mach sexp
-  ;;
+
+  let raw_message t = t.message
+
+  let message t = Sexp_or_string.to_string (raw_message t)
 
   let tags t    = t.tags
-  let add_tags t new_tags = { t with tags = List.unordered_append new_tags t.tags }
+
+  let add_tags t tags = {t with tags = List.rev_append tags t.tags}
 
   let to_write_only_text ?zone t =
     let prefix =
@@ -419,22 +419,22 @@ end = struct
       <:test_result<string>> (to_write_only_text ~zone t) ~expect
     in
     check "2013-12-13 15:00:00.000000Z <message>"
-      { time = Time.of_string "2013-12-13 15:00:00Z"
-      ; level = None
-      ; tags = []
-      ; message = String "<message>"
+      { time    = Time.of_string "2013-12-13 15:00:00Z"
+      ; level   = None
+      ; tags    = []
+      ; message = `String "<message>"
       };
     check "2013-12-13 15:00:00.000000Z Info <message>"
-      { time = Time.of_string "2013-12-13 15:00:00Z"
-      ; level = Some `Info
-      ; tags = []
-      ; message = String "<message>"
+      { time    = Time.of_string "2013-12-13 15:00:00Z"
+      ; level   = Some `Info
+      ; tags    = []
+      ; message = `String "<message>"
       };
     check "2013-12-13 15:00:00.000000Z Info <message> -- [k1: v1] [k2: v2]"
-      { time = Time.of_string "2013-12-13 15:00:00Z"
-      ; level = Some `Info
-      ; tags = ["k1", "v1"; "k2", "v2"]
-      ; message = String "<message>"
+      { time    = Time.of_string "2013-12-13 15:00:00Z"
+      ; level   = Some `Info
+      ; tags    = ["k1", "v1"; "k2", "v2"]
+      ; message = `String "<message>"
       };
   ;;
 
@@ -737,7 +737,6 @@ end
 (* A log is a pipe that can take one of three messages.
    | Msg (level, msg) -> write the message to the current output if the level is
    appropriate
-   | New_level l -> set the level of the output
    | New_output f -> set the output function for future messages to f
    | Flush i -> used to get around the current odd design of Pipe flushing.  Sends an
    ivar that the reading side fills in after it has finished handling all
@@ -752,7 +751,6 @@ end
 module Update = struct
   type t =
     | Msg        of Message.Stable.V2.t
-    | New_level  of Level.t
     | New_output of Output.t
     | Flush      of unit Ivar.t
   with sexp_of
@@ -762,7 +760,8 @@ end
 
 type t =
   { updates : Update.t Pipe.Writer.t
-  ; mutable current_level : Level.t }
+  ; mutable current_level : Level.t
+  ; mutable output_is_disabled : bool }
 
 let equal t1 t2 = Pipe.equal t1.updates t2.updates
 let hash t = Pipe.hash t.updates
@@ -838,10 +837,9 @@ end
 
 let close = Flush_at_exit_or_gc.close
 
-let create_log_processor ~level ~output =
+let create_log_processor ~output =
   let batch_size    = 100 in
   let write         = ref (Output.combine output) in
-  let current_level = ref level in
   let msgs          = Queue.create () in
   let output_message_queue f =
     if Queue.length msgs = 0
@@ -876,9 +874,6 @@ let create_log_processor ~level ~output =
            | Update.Msg msg ->
              Queue.enqueue msgs msg;
              loop yield_every
-           | Update.New_level level ->
-             current_level := level;
-             loop yield_every
            | Update.New_output f ->
              output_message_queue (fun () ->
                write := f;
@@ -890,25 +885,26 @@ let create_log_processor ~level ~output =
 
 let create ~level ~output : t =
   let r,w         = Pipe.create () in
-  let process_log = create_log_processor ~level ~output in
+  let process_log = create_log_processor ~output in
   don't_wait_for (Pipe.iter' r ~f:process_log);
   let t =
     { updates = w
-    ; current_level = level }
+    ; current_level = level
+    ; output_is_disabled = List.is_empty output }
   in
   Flush_at_exit_or_gc.add_log t;
   t
 ;;
 
 let set_output t outputs =
+  t.output_is_disabled <- List.is_empty outputs;
   push_update t (Update.New_output (Output.combine outputs))
 ;;
 
 let level t = t.current_level
 
 let set_level t level =
-  t.current_level <- level;
-  push_update t (Update.New_level level)
+  t.current_level <- level
 ;;
 
 TEST_UNIT "Level setting" =
@@ -940,11 +936,15 @@ TEST_UNIT "Level setting" =
 
 let message t msg = push_update t (Update.Msg msg)
 
+let should_send t ~msg_level =
+  (not t.output_is_disabled)
+  && Level.as_or_more_verbose_than ~log_level:(level t) ~msg_level
+
 let printf ?level:msg_level ?time ?tags t k =
   ksprintf (fun msg ->
-    if Level.as_or_more_verbose_than ~log_level:(level t) ~msg_level
+    if should_send t ~msg_level
     then begin
-      Message.create ?level:msg_level ?time ?tags (String msg)
+      Message.create ?level:msg_level ?time ?tags (`String msg)
       |> message t;
     end
   )
@@ -952,17 +952,17 @@ let printf ?level:msg_level ?time ?tags t k =
 ;;
 
 let sexp ?level:msg_level ?time ?tags t v to_sexp =
-  if Level.as_or_more_verbose_than ~log_level:(level t) ~msg_level
+  if should_send t ~msg_level
   then begin
-    Message.create ?level:msg_level ?time ?tags (Sexp (to_sexp v))
+    Message.create ?level:msg_level ?time ?tags (`Sexp (to_sexp v))
     |> message t;
   end
 ;;
 
 let string ?level:msg_level ?time ?tags t s =
-  if Level.as_or_more_verbose_than ~log_level:(level t) ~msg_level
+  if should_send t ~msg_level
   then begin
-    Message.create ?level:msg_level ?time ?tags (String s)
+    Message.create ?level:msg_level ?time ?tags (`String s)
     |> message t;
   end
 ;;
@@ -1072,7 +1072,7 @@ end = struct
     ksprintf (fun msg ->
       if Level.as_or_more_verbose_than ~log_level:(level ()) ~msg_level
       then begin
-        let msg = String msg in
+        let msg = `String msg in
         write (Message.create ?level:msg_level ?time ?tags msg)
       end) k;
   ;;

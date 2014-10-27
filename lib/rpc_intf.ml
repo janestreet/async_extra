@@ -15,10 +15,15 @@ module type Connection = sig
 
   (** Initiate an Rpc connection on the given reader/writer pair.  [server] should be the
       bag of implementations that the calling side implements; it defaults to
-      [Implementations.null] (i.e., "I implement no RPCs"). *)
+      [Implementations.null] (i.e., "I implement no RPCs").
+
+      [connection_state] will be called once, before [create]'s result is determined, on
+      the same connection that [create] returns.  Its output will be provided to the
+      [implementations] when queries arrive.
+  *)
   val create
     :  ?implementations:'s Implementations.t
-    -> connection_state:'s
+    -> connection_state:(t -> 's)
     -> ?max_message_size:int
     -> ?handshake_timeout:Time.Span.t
     -> Reader.t
@@ -66,13 +71,13 @@ module type Connection = sig
     :  ?implementations:'s Implementations.t
     -> ?max_message_size:int
     -> ?handshake_timeout:Time.Span.t
-    -> connection_state:'s
+    -> connection_state:(t -> 's)
     -> Reader.t
     -> Writer.t
     -> dispatch_queries:(t -> 'a Deferred.t)
     -> on_handshake_error:[
-    | `Raise
-    | `Call of (Exn.t -> 'a Deferred.t)
+      | `Raise
+      | `Call of (Exn.t -> 'a Deferred.t)
     ]
     -> 'a Deferred.t
 
@@ -85,11 +90,11 @@ module type Connection = sig
     -> Reader.t
     -> Writer.t
     -> implementations:'s Implementations.t
-    -> connection_state:'s
+    -> connection_state:(t -> 's)
     -> on_handshake_error:[
-    | `Raise
-    | `Ignore
-    | `Call of (Exn.t -> unit Deferred.t)
+      | `Raise
+      | `Ignore
+      | `Call of (Exn.t -> unit Deferred.t)
     ]
     -> unit Deferred.t
 
@@ -101,7 +106,7 @@ module type Connection = sig
       responsibility of the auth function itself. *)
   val serve
     :  implementations:'s Implementations.t
-    -> initial_connection_state:('address -> 's)
+    -> initial_connection_state:('address -> t -> 's)
     -> where_to_listen:('address, 'listening_on) Tcp.Where_to_listen.t
     -> ?max_connections:int
     -> ?max_message_size:int
@@ -109,7 +114,7 @@ module type Connection = sig
     -> ?auth:('address -> bool)
     (** default is [`Ignore] *)
     -> ?on_handshake_error:[
-      | `Raise
+      |  `Raise
       | `Ignore
       | `Call of (Exn.t -> unit)
     ]
@@ -117,8 +122,8 @@ module type Connection = sig
     -> ('address, 'listening_on) Tcp.Server.t Deferred.t
 
   module Client_implementations : sig
-    type 's t = {
-      connection_state : 's;
+    type nonrec 's t = {
+      connection_state : t -> 's;
       implementations : 's Implementations.t;
     }
 
