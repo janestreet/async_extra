@@ -8,7 +8,7 @@ type t = File_descr.t with bin_io, sexp
 include (File_descr : Stringable with type t := t)
 
 let create_fd core_fd =
-  Fd.create Fd.Kind.Fifo core_fd (Info.of_string "dynamic-port-writer")
+  Fd.create Fifo core_fd (Info.of_string "dynamic-port-writer")
 ;;
 
 let create () =

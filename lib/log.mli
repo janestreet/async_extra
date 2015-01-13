@@ -4,7 +4,7 @@
     partially a design choice to minimize the impact of logging in code, and partially the
     result of organic design (i.e. older versions of this interface did the same thing).
 
-    A (limited) [Blocking] module is supplied to accomodate the portion of a program that
+    A (limited) [Blocking] module is supplied to accommodate the portion of a program that
     runs outside of Async.
 *)
 open Core.Std
@@ -14,11 +14,12 @@ module Level : sig
   (** Describes both the level of a log and the level of a message sent to a log.  There
       is an ordering to levels (`Debug < `Info < `Error), and a log set to a level will
       never display messages at a lower log level. *)
-  type t = [
-    | `Debug
+  type t =
+    [ `Debug
     | `Info  (** default level *)
-    | `Error ]
-    with sexp
+    | `Error
+    ]
+  with sexp
 
   include Stringable with type t := t
 
@@ -38,11 +39,11 @@ module Message : sig
   module Stable : sig
     module V0 : sig
       (* [V0.bin_t] is the [Message.bin_t] in jane-111.18 and before *)
-      type nonrec t = t with sexp, bin_io
+      type nonrec t = t with bin_io, sexp
     end
 
     module V2 : sig
-      type nonrec t = t with sexp, bin_io
+      type nonrec t = t with bin_io, sexp
     end
   end
 end
@@ -52,8 +53,8 @@ module Rotation : sig
 
       If all fields are [None] the file will never be rotated.  Any field set to [Some]
       will cause rotation to happen when that boundary is crossed.  Multiple boundaries
-      may be set.  Log rotation always causses incrementing rotation conditions
-      (e.g. size) to reset.
+      may be set.  Log rotation always causes incrementing rotation conditions (e.g. size)
+      to reset.
 
       The condition [keep] is special and does not follow the rules above.  When a log is
       rotated [keep] is examined and logs that do not fall under its instructions are
@@ -62,31 +63,31 @@ module Rotation : sig
 
       - [`All] -- never delete
       - [`Newer_than span] --
-         delete files with a timestamp older than [Time.sub (Time.now ()) span].  This
-         normally means keeping files that contain at least one message logged within
-         span.  If span is short enough this option can delete a just rotated file.
+      delete files with a timestamp older than [Time.sub (Time.now ()) span].  This
+      normally means keeping files that contain at least one message logged within
+      span.  If span is short enough this option can delete a just rotated file.
       - [`At_least i] -- keep the i most recent files
 
       Log rotation does not support symlinks, and you're encouraged to avoid them in
       production applications. Issues with symlinks:
-       - You can't tail symlinks without being careful (e.g. you must remember to pass
-         "-F" to
-         `tail`).
-       - Symlinks are hard to reason about when the program crashes, especially on
-         startup (i.e., is the symlink pointing me at the right log file?).
-       - Atomicity is hard.
-       - Symlinks encourage tailing, which is a bad way to communicate information.
-       - They complicate archiving processes (the symlink must be skipped).
+      - You can't tail symlinks without being careful (e.g. you must remember to pass
+      "-F" to
+      `tail`).
+      - Symlinks are hard to reason about when the program crashes, especially on
+      startup (i.e., is the symlink pointing me at the right log file?).
+      - Atomicity is hard.
+      - Symlinks encourage tailing, which is a bad way to communicate information.
+      - They complicate archiving processes (the symlink must be skipped).
   *)
   type t with sexp
 
   val create
-    :  ?messages:int
-    -> ?size:Byte_units.t
-    -> ?time:Time.Ofday.t
-    -> ?zone:Time.Zone.t
-    -> keep:[`All | `Newer_than of Time.Span.t | `At_least of int]
-    -> naming_scheme:[`Numbered | `Timestamped | `Dated]
+    :  ?messages     : int
+    -> ?size         : Byte_units.t
+    -> ?time         : Time.Ofday.t
+    -> ?zone         : Time.Zone.t
+    -> keep          : [ `All | `Newer_than of Time.Span.t | `At_least of int ]
+    -> naming_scheme : [ `Numbered | `Timestamped | `Dated ]
     -> unit
     -> t
 
@@ -99,7 +100,7 @@ module Rotation : sig
       Logs are never deleted. Best practice is to have an external mechanism archive old
       logs for long term storage. *)
   val default
-    :  ?zone:Time.Zone.t
+    :  ?zone : Time.Zone.t
     -> unit
     -> t
 end
@@ -155,16 +156,32 @@ module Blocking : sig
 
   (** [raw] printf like logging for raw (no level) messages.  Raw messages are still
       output with a timestamp. *)
-  val raw   : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val raw
+    :  ?time : Time.t
+    -> ?tags : (string * string) list
+    -> ('a, unit, string, unit) format4
+    -> 'a
 
   (** [info] printf like logging at the `Info log level *)
-  val info  : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val info
+    :  ?time : Time.t
+    -> ?tags : (string * string) list
+    -> ('a, unit, string, unit) format4
+    -> 'a
 
   (** [error] printf like logging at the `Info log level *)
-  val error : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val error
+    :  ?time : Time.t
+    -> ?tags : (string * string) list
+    -> ('a, unit, string, unit) format4
+    -> 'a
 
   (** [error] printf like logging at the `Info log level *)
-  val debug : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val debug
+    :  ?time : Time.t
+    -> ?tags : (string * string) list
+    -> ('a, unit, string, unit) format4
+    -> 'a
 end
 
 type t with sexp_of
@@ -179,31 +196,47 @@ module type Global_intf = sig
 
   (** logging functions as the functions that operate on a given log.  In this case they
       operate on a single log global to the module *)
-  val raw   : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
-  val info  : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
-  val error : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
-  val debug : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val raw
+    :  ?time : Time.t
+    -> ?tags : (string * string) list
+    -> ('a, unit, string, unit) format4
+    -> 'a
+  val info
+    :  ?time : Time.t
+    -> ?tags : (string * string) list
+    -> ('a, unit, string, unit) format4
+    -> 'a
+  val error
+    :  ?time : Time.t
+    -> ?tags : (string * string) list
+    -> ('a, unit, string, unit) format4
+    -> 'a
+  val debug
+    :  ?time : Time.t
+    -> ?tags : (string * string) list
+    -> ('a, unit, string, unit) format4
+    -> 'a
   val flushed : unit -> unit Deferred.t
 
   val printf
-    :  ?level:Level.t
-    -> ?time:Time.t
-    -> ?tags:(string * string) list
+    :  ?level : Level.t
+    -> ?time  : Time.t
+    -> ?tags  : (string * string) list
     -> ('a, unit, string, unit) format4
     -> 'a
 
   val sexp
-    :  ?level:Level.t
-    -> ?time:Time.t
-    -> ?tags:(string * string) list
+    :  ?level : Level.t
+    -> ?time  : Time.t
+    -> ?tags  : (string * string) list
     -> 'a
     -> ('a -> Sexp.t)
     -> unit
 
   val string
-    :  ?level:Level.t
-    -> ?time:Time.t
-    -> ?tags:(string * string) list
+    :  ?level : Level.t
+    -> ?time  : Time.t
+    -> ?tags  : (string * string) list
     -> string
     -> unit
 
@@ -211,7 +244,7 @@ module type Global_intf = sig
 end
 
 (** This functor can be called to generate "singleton" logging modules *)
-module Make_global (Empty : sig end) : Global_intf
+module Make_global () : Global_intf
 
 (** Programs that want simplistic single-channel logging can open this module.  It
     provides a global logging facility to a single output type at a single level.  More
@@ -243,22 +276,41 @@ val create : level:Level.t -> output:Output.t list -> t
 
 (** [raw] printf like logging for raw (no level) messages.  Raw messages are still
     output with a timestamp. *)
-val raw   : ?time:Time.t -> ?tags:(string * string) list -> t -> ('a, unit, string, unit) format4 -> 'a
+val raw
+  :  ?time : Time.t
+  -> ?tags : (string * string) list
+  -> t
+  -> ('a, unit, string, unit) format4
+  -> 'a
 
 (** [debug] printf like logging at the `Debug log level *)
-val debug : ?time:Time.t -> ?tags:(string * string) list -> t -> ('a, unit, string, unit) format4 -> 'a
+val debug
+  :  ?time : Time.t
+  -> ?tags : (string * string) list
+  -> t
+  -> ('a, unit, string, unit) format4 -> 'a
 
 (** [info] printf like logging at the `Info log level *)
-val info  : ?time:Time.t -> ?tags:(string * string) list -> t -> ('a, unit, string, unit) format4 -> 'a
+val info
+  :  ?time : Time.t
+  -> ?tags : (string * string) list
+  -> t
+  -> ('a, unit, string, unit) format4
+  -> 'a
 
 (** [error] printf like logging at the `Error log level *)
-val error : ?time:Time.t -> ?tags:(string * string) list -> t -> ('a, unit, string, unit) format4 -> 'a
+val error
+  :  ?time : Time.t
+  -> ?tags : (string * string) list
+  -> t
+  -> ('a, unit, string, unit) format4
+  -> 'a
 
 (** [printf] generalized printf style logging *)
 val printf
-  :  ?level:Level.t
-  -> ?time:Time.t
-  -> ?tags:(string * string) list
+  :  ?level : Level.t
+  -> ?time  : Time.t
+  -> ?tags  : (string * string) list
   -> t
   -> ('a, unit, string, unit) format4
   -> 'a
@@ -267,9 +319,9 @@ val printf
     where the log level would discard this message no string conversion will ever be
     done. *)
 val sexp
-  :  ?level:Level.t
-  -> ?time:Time.t
-  -> ?tags:(string * string) list
+  :  ?level : Level.t
+  -> ?time  : Time.t
+  -> ?tags  : (string * string) list
   -> t
   -> 'a
   -> ('a -> Sexp.t)
@@ -277,9 +329,9 @@ val sexp
 
 (** [string] logging of string values *)
 val string
-  :  ?level:Level.t
-  -> ?time:Time.t
-  -> ?tags:(string * string) list
+  :  ?level : Level.t
+  -> ?time  : Time.t
+  -> ?tags  : (string * string) list
   -> t
   -> string
   -> unit
@@ -293,3 +345,4 @@ module Reader : sig
     -> string
     -> Message.t Pipe.Reader.t
 end
+

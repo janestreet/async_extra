@@ -3,7 +3,7 @@
    A bus is useful to:
 
    - break circular dependencies in module communication (i.e. module A needs to update
-     module B and module B needs to update module A).
+   module B and module B needs to update module A).
 
    - collect related information (e.g. a stream of monitoring events) from many
    different parts of a program.

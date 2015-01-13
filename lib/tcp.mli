@@ -5,16 +5,26 @@ open Import
     different types.  We use ['a where_to_connect] to specify a socket to connect to,
     where the ['a] identifies the type of socket. *)
 type 'a where_to_connect constraint 'a = [< Socket.Address.t ]
-val to_host_and_port : string -> int         -> Socket.Address.Inet.t where_to_connect
+
+val to_host_and_port
+  :  ?via_local_interface : Unix.Inet_addr.t  (** default is chosen by OS *)
+  -> string
+  -> int
+  -> Socket.Address.Inet.t where_to_connect
+
+val to_inet_address
+  :  ?via_local_interface : Unix.Inet_addr.t  (** default is chosen by OS *)
+  -> Socket.Address.Inet.t
+  -> Socket.Address.Inet.t where_to_connect
+
 val to_file          : string                -> Socket.Address.Unix.t where_to_connect
-val to_inet_address  : Socket.Address.Inet.t -> Socket.Address.Inet.t where_to_connect
 val to_unix_address  : Socket.Address.Unix.t -> Socket.Address.Unix.t where_to_connect
 
-type 'a with_connect_options =
-  ?buffer_age_limit:[ `At_most of Time.Span.t | `Unlimited ]
-  -> ?interrupt:unit Deferred.t
-  -> ?reader_buffer_size:int
-  -> ?timeout: Time.Span.t
+type 'a with_connect_options
+  =  ?buffer_age_limit   : [ `At_most of Time.Span.t | `Unlimited ]
+  -> ?interrupt          : unit Deferred.t
+  -> ?reader_buffer_size : int
+  -> ?timeout            : Time.Span.t
   -> 'a
 
 (** [with_connection ~host ~port f] looks up host from a string (using DNS as needed),
@@ -61,14 +71,15 @@ val connect
 (** A [Where_to_listen] describes the socket that a tcp server should listen on. *)
 module Where_to_listen : sig
   type ('address, 'listening_on) t constraint 'address = [< Socket.Address.t ]
+  with sexp_of
 
-  type inet = (Socket.Address.Inet.t, int   ) t
-  type unix = (Socket.Address.Unix.t, string) t
+  type inet = (Socket.Address.Inet.t, int   ) t with sexp_of
+  type unix = (Socket.Address.Unix.t, string) t with sexp_of
 
   val create
-    :  socket_type:'address Socket.Type.t
-    -> address:'address
-    -> listening_on:('address -> 'listening_on)
+    :  socket_type  : 'address Socket.Type.t
+    -> address      : 'address
+    -> listening_on : ('address -> 'listening_on)
     -> ('address, 'listening_on) t
 end
 
@@ -95,10 +106,10 @@ module Server : sig
       effect, but will return the same deferred as the original call.
 
       [close_finished] becomes determined after [Fd.close_finished fd] on the socket's fd,
-     i.e. the same deferred that [close] returns.  [close_finished] differs from [close]
-     in that it does not have the side effect of initiating a close.
+      i.e. the same deferred that [close] returns.  [close_finished] differs from [close]
+      in that it does not have the side effect of initiating a close.
 
-     [is_closed t] returns [true] iff [close t] has been called. *)
+      [is_closed t] returns [true] iff [close t] has been called. *)
   val close          : (_, _) t -> unit Deferred.t
   val close_finished : (_, _) t -> unit Deferred.t
   val is_closed      : (_, _) t -> bool
@@ -129,13 +140,13 @@ module Server : sig
       raises (either via [`Raise] or [`Call f] where [f] raises), or if [close] is
       called. *)
   val create
-    :  ?max_connections:int
-    -> ?max_pending_connections:int
-    -> ?buffer_age_limit:Writer.buffer_age_limit
-    -> ?on_handler_error:[ `Raise
-                         | `Ignore
-                         | `Call of ('address -> exn -> unit)
-                         ]
+    :  ?max_connections         : int
+    -> ?max_pending_connections : int
+    -> ?buffer_age_limit        : Writer.buffer_age_limit
+    -> ?on_handler_error        : [ `Raise
+                                  | `Ignore
+                                  | `Call of ('address -> exn -> unit)
+                                  ]
     -> ('address, 'listening_on) Where_to_listen.t
     -> ('address -> Reader.t -> Writer.t -> unit Deferred.t)
     -> ('address, 'listening_on) t Deferred.t
@@ -145,5 +156,4 @@ module Server : sig
       the socket directly will circumvent [max_connections] and [on_handler_error],
       however, and is not recommended. *)
   val listening_socket : ('address, _) t -> ([ `Passive ], 'address) Socket.t
-
 end

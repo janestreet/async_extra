@@ -9,7 +9,7 @@ let for_this_process () =
   let gid = Unix.getgid () in
   Unix.Group.getbygid gid
   >>| function
-  | None -> Or_error.error "Can't find group" (`gid gid) <:sexp_of<[ `gid of int ]>>
-  | Some group -> Ok (create ~user ~group:group.Unix.Group.name)
+  | None -> error "Can't find group" (`gid gid) <:sexp_of< [ `gid of int ] >>
+  | Some group -> Ok (create ~user ~group:group.name)
 
 let for_this_process_exn () = for_this_process () >>| Or_error.ok_exn

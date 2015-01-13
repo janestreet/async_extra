@@ -1,3 +1,60 @@
+## 112.17.00
+
+- Modernized code style in `Async_extra`.
+
+  This was mostly whitespace changes, plus deletions of unneeded
+  module paths.
+- Added `with sexp_of` to `Tcp.Where_to_listen` for debugging.
+- In `Versioned_typed_tcp`, check that the writer on the other side is
+  not closed in the `Pass_on` case.
+- Added a new way to implement an RPC, where the implementation
+  doesn't return a deferred.
+
+  This "blocking" rpc implementation guarantees that the rpc will in
+  fact be fully dispatched by the time the implementation returns.
+
+  This can be used to skip the deserialization of the query, and
+  instead operate directly in the message contents as received.
+
+  Also, fixed a bug in which the query handler (and therefore the
+  connection state) was being called before the internal async rpc
+  handshake was finished.
+- Added an optional `job_tag` argument to `Sequencer_table.enqueue`,
+  to display for debugging.
+- Added an optional argument to TCP-connection functions to control
+  the local interface used to connect.
+
+  To implement this this, extended `Tcp.connect` to work on a bound socket.
+- Added `with compare` to `Process.Output.t`.
+- Added `Process.Output.Stable` module.
+- Exposed concrete rpc in `Versioned_rpc.Both_convert`.
+- Changed `Cpu_usage` to take its first sample after waiting, rather
+  than immediately.
+
+  This fixes a problem where the first sample could be `NAN` or `Inf`.
+- Made `Log` buffer-age be unlimited, to avoid exceptions when log
+  writes are blocked for long periods.
+- Improved `Log.t_of_sexp`'s error message.
+- Changed `Rpc.Connection.client` and `with_client` to raise some
+  errors which had been dropped during RPC dispatch.
+
+  Previously, errors dispatching `Rpc.Rpc.t`'s were handled correctly
+  and returned or raised by the relevant dispatch functions.  However,
+  errors that occurred in the middle of handling a `Rpc.Pipe_rpc.t` or
+  `Rpc.State_rpc.t` were swallowed.  This is because they happen after
+  the dispatch functions have returned, and the dispatch interface
+  doesn't allow for errors to occur in the middle of the pipe -- they
+  must be raised to the monitor in effect when the `Rpc.Connection.t`
+  is created.  Errors could be raised to the effective monitor at the
+  dispatch call, but the failure causes the entire connection to go
+  into error, so the connection's monitor seems more appropriate.
+  These errors weren't propagated to the caller because `client` and
+  `with_client` both used `Monitor.try_with` without `rest` handling,
+  causing /any/ errors caused while handling the connection (after the
+  `Connection.t` has been returned to the user) to be dropped.
+- In `Rpc`, exposed some optional parameters from the `Tcp` module:
+  `?max_pending_connections` and `?buffer_age_limit`.
+
 ## 112.06.00
 
 - In `Log`, exposed the raw message.

@@ -1,13 +1,12 @@
 open Core.Std
 open Import
 
-
 module Result = struct
   type ('a, 'b) t =
-  | Input_closed
-  | Input_closed_in_the_middle_of_data of ('a, 'b) Unpack_buffer.t
-  | Output_closed of 'a Queue.t * ('a, 'b) Unpack_buffer.t
-  | Unpack_error of Error.t
+    | Input_closed
+    | Input_closed_in_the_middle_of_data of ('a, 'b) Unpack_buffer.t
+    | Output_closed                      of 'a Queue.t * ('a, 'b) Unpack_buffer.t
+    | Unpack_error                       of Error.t
   with sexp_of
 
   let to_error = function
@@ -19,11 +18,11 @@ module Result = struct
   ;;
 end
 
-let eof unpack_buffer =
+let eof unpack_buffer : (_, _) Result.t =
   match Unpack_buffer.is_empty unpack_buffer with
-  | Error error -> Result.Unpack_error error
-  | Ok true     -> Result.Input_closed
-  | Ok false    -> Result.Input_closed_in_the_middle_of_data unpack_buffer
+  | Error error -> Unpack_error error
+  | Ok true     -> Input_closed
+  | Ok false    -> Input_closed_in_the_middle_of_data unpack_buffer
 ;;
 
 let handle_unpack unpack_result unpack_buffer output_writer =
@@ -83,7 +82,7 @@ let unpack_from_reader unpack_buffer reader =
     | Ok (`Stopped result) -> result
     | Ok `Eof  -> eof unpack_buffer
     | Ok (`Eof_with_unconsumed_data _) -> assert false (* not possible since we always
-                                                           consume everithing *)
+                                                          consume everithing *)
   in
   (output_reader, result)
 ;;

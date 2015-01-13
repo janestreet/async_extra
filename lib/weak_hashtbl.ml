@@ -3,8 +3,8 @@ open Import    let _ = _squelch_unused_module_warning_
 
 include Core.Std.Weak_hashtbl
 
-let create hashable =
-  let t = create hashable in
+let create ?growth_allowed ?size hashable =
+  let t = create ?growth_allowed ?size hashable in
   (* To avoid having keys around that should be cleaned, we must ensure that after any
      call to [thread_safe_f], there is a call to
      [reclaim_space_for_keys_with_unused_data].  We do this via [reclaim_will_happen],

@@ -1,4 +1,3 @@
-
 open Core.Std
 open Import
 
@@ -8,10 +7,10 @@ include Core.Std.Command
 let in_async spec on_result =
   Spec.wrap
     (fun ~run ~main ->
-      let args_applied = run main in
-      (fun () ->
-        upon (args_applied ()) on_result;
-        (never_returns (Scheduler.go ()) : unit)))
+       let args_applied = run main in
+       (fun () ->
+          upon (args_applied ()) on_result;
+          (never_returns (Scheduler.go ()) : unit)))
     spec
 ;;
 

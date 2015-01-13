@@ -1,13 +1,13 @@
-
 open Core.Std
 open Import
 
 module Level = struct
-  type t = [
-    | `Debug
+  type t =
+    [ `Debug
     | `Info
-    | `Error ]
-    with sexp, bin_io
+    | `Error
+    ]
+  with bin_io, sexp
 
   let to_string = function
     | `Debug -> "Debug"
@@ -51,29 +51,31 @@ module Rotation = struct
      responsibililty of the caller to should_rotate.
   *)
   module V1 = struct
-    type t = {
-      messages      : int option;
-      size          : Byte_units.t option;
-      time          : (Time.Ofday.t * Time.Zone.t) option;
-      keep          : [ `All | `Newer_than of Time.Span.t | `At_least of int ];
-      naming_scheme : [ `Numbered | `Timestamped ];
-    } with sexp, fields
+    type t =
+      { messages      : int option
+      ; size          : Byte_units.t option
+      ; time          : (Time.Ofday.t * Time.Zone.t) option
+      ; keep          : [ `All | `Newer_than of Time.Span.t | `At_least of int ]
+      ; naming_scheme : [ `Numbered | `Timestamped ]
+      }
+    with fields, sexp
   end
 
   module V2 = struct
-    type t = {
-      messages      : int sexp_option;
-      size          : Byte_units.t sexp_option;
-      time          : Time.Ofday.t sexp_option;
-      keep          : [ `All | `Newer_than of Time.Span.t | `At_least of int ];
-      naming_scheme : [ `Numbered | `Timestamped | `Dated ];
-      zone          : Time.Zone.t with default(Time.Zone.machine_zone ());
-    } with sexp, fields
+    type t =
+      { messages      : int sexp_option
+      ; size          : Byte_units.t sexp_option
+      ; time          : Time.Ofday.t sexp_option
+      ; keep          : [ `All | `Newer_than of Time.Span.t | `At_least of int ]
+      ; naming_scheme : [ `Numbered | `Timestamped | `Dated ]
+      ; zone          : Time.Zone.t with default(Time.Zone.local)
+      }
+    with fields, sexp
 
     let of_v1 { V1. messages; size; time; keep; naming_scheme } =
       let time, zone =
         match time with
-        | None -> None, Time.Zone.machine_zone ()
+        | None -> None, Time.Zone.local
         | Some (ofday, zone) -> Some ofday, zone
       in
       let naming_scheme = (naming_scheme :> [ `Numbered | `Timestamped | `Dated ]) in
@@ -86,7 +88,7 @@ module Rotation = struct
     { messages
     ; size
     ; time
-    ; zone = Option.value zone ~default:(Time.Zone.machine_zone ())
+    ; zone          = Option.value zone ~default:Time.Zone.local
     ; keep
     ; naming_scheme
     }
@@ -135,20 +137,21 @@ module Rotation = struct
       ~naming_scheme:(fun acc _ -> acc)
   ;;
 
-  let default ?(zone=Time.Zone.machine_zone ()) () =
-    { messages = None
-    ; size = None
-    ; time = Some Time.Ofday.start_of_day
-    ; keep = `All
+  let default ?(zone = Time.Zone.local) () =
+    { messages      = None
+    ; size          = None
+    ; time          = Some Time.Ofday.start_of_day
+    ; keep          = `All
     ; naming_scheme = `Dated
     ; zone
     }
 end
 
 module Sexp_or_string = struct
-  type t = [
-    | `Sexp of Sexp.t
-    | `String of string ]
+  type t =
+    [ `Sexp   of Sexp.t
+    | `String of string
+    ]
   with bin_io, sexp
 
   let to_string = function
@@ -158,7 +161,7 @@ module Sexp_or_string = struct
 end
 
 module Message : sig
-  type t with sexp, bin_io
+  type t with bin_io, sexp
 
   val create
     :  ?level:Level.t
@@ -182,21 +185,22 @@ module Message : sig
 
   module Stable : sig
     module V0 : sig
-      type nonrec t = t with sexp, bin_io
+      type nonrec t = t with bin_io, sexp
     end
 
     module V2 : sig
-      type nonrec t = t with sexp, bin_io
+      type nonrec t = t with bin_io, sexp
     end
   end
 end = struct
   module T = struct
-    type 'a t = {
-      time    : Time.t;
-      level   : Level.t option;
-      message : 'a;
-      tags    : (string * string) list;
-    } with sexp, bin_io
+    type 'a t =
+      { time    : Time.t
+      ; level   : Level.t option
+      ; message : 'a
+      ; tags    : (string * string) list
+      }
+    with bin_io, sexp
 
     let (=) t1 t2 =
       let compare_tags =
@@ -206,10 +210,10 @@ end = struct
       && t1.level = t2.level
       && t1.message = t2.message
       (* The same key can appear more than once in tags, and order shouldn't matter
-          when comparing *)
+         when comparing *)
       && List.Assoc.compare String.compare String.compare
-          (List.sort ~cmp:compare_tags t1.tags) (List.sort ~cmp:compare_tags t2.tags)
-        = 0
+           (List.sort ~cmp:compare_tags t1.tags) (List.sort ~cmp:compare_tags t2.tags)
+         = 0
     ;;
 
     TEST_UNIT =
@@ -236,23 +240,23 @@ end = struct
     module Version = struct
       type t =
         | V2
-      with sexp, bin_io, compare
+      with bin_io, sexp, compare
 
       let (<>) t1 t2 = compare t1 t2 <> 0
       let to_string t = Sexp.to_string (sexp_of_t t)
     end
 
     module type Versioned_serializable = sig
-      type t with sexp, bin_io
+      type t with bin_io, sexp
 
       val version : Version.t
     end
 
     module Make_versioned_serializable(T : Versioned_serializable) : sig
-      type t with sexp, bin_io
+      type t with bin_io, sexp
     end with type t = T.t = struct
       type t = T.t
-      type versioned_serializable = Version.t * T.t with sexp, bin_io
+      type versioned_serializable = Version.t * T.t with bin_io, sexp
 
       let t_of_versioned_serializable (version, t) =
         if Version.(<>) version T.version
@@ -283,14 +287,14 @@ end = struct
     end
 
     module V2 = Make_versioned_serializable (struct
-      type nonrec t = Sexp_or_string.t t with sexp, bin_io
+      type nonrec t = Sexp_or_string.t t with bin_io, sexp
 
       let version = Version.V2
     end)
 
     (* this is the serialization scheme in 111.18 and before *)
     module V0 = struct
-      type v0_t = string T.t with sexp, bin_io
+      type v0_t = string T.t with bin_io, sexp
 
       let v0_to_v2 (v0_t : v0_t) : V2.t =
         {
@@ -301,11 +305,10 @@ end = struct
         }
 
       let v2_to_v0 (v2_t : V2.t) : v0_t =
-        {
-          time    = v2_t.time;
-          level   = v2_t.level;
-          message = Sexp_or_string.to_string v2_t.message;
-          tags    = v2_t.tags;
+        { time    = v2_t.time
+        ; level   = v2_t.level
+        ; message = Sexp_or_string.to_string v2_t.message
+        ; tags    = v2_t.tags
         }
 
       include Bin_prot.Utils.Make_binable (struct
@@ -331,15 +334,15 @@ end = struct
 
   (* this allows for automagical reading of any versioned sexp, so long as we can always
      lift to a Message.t *)
-  let t_of_sexp sexp =
+  let t_of_sexp (sexp : Sexp.t) =
     match sexp with
-    | Sexp.List (Sexp.List (Sexp.Atom "time" :: _) :: _) ->
+    | List (List (Atom "time" :: _) :: _) ->
       Stable.V0.t_of_sexp sexp
-    | Sexp.List [ (Sexp.Atom _) as version; _ ] ->
+    | List [ (Atom _) as version; _ ] ->
       begin match Stable.Version.t_of_sexp version with
       | V2 -> Stable.V2.t_of_sexp sexp
       end
-    | _ -> failwithf !"malformed sexp: %{Sexp}" sexp ()
+    | _ -> failwithf !"Log.Message.t_of_sexp: malformed sexp: %{Sexp}" sexp ()
   ;;
 
   let create
@@ -364,7 +367,7 @@ end = struct
   TEST_UNIT =
     let msg =
       create ~level:`Info ~tags:["a", "tag"]
-        (`Sexp (Sexp.List [ Sexp.Atom "foo"; Sexp.Atom "bar" ]))
+        (`Sexp (Sexp.List [ Atom "foo"; Atom "bar" ]))
     in
     let v0_sexp = Stable.V0.sexp_of_t msg in
     let v2_sexp = Stable.V2.sexp_of_t msg in
@@ -375,8 +378,7 @@ end = struct
   TEST_UNIT =
     let msg = create ~level:`Info ~tags:[] (`String "") in
     match sexp_of_t msg with
-    | Sexp.List [ (Sexp.Atom _) as version; _ ] ->
-      ignore (Stable.Version.t_of_sexp version)
+    | List [ (Atom _) as version; _ ] -> ignore (Stable.Version.t_of_sexp version)
     | _ -> assert false
   ;;
 
@@ -391,7 +393,7 @@ end = struct
 
   let add_tags t tags = {t with tags = List.rev_append tags t.tags}
 
-  let to_write_only_text ?zone t =
+  let to_write_only_text ?(zone=Time.Zone.local) t =
     let prefix =
       match t.level with
       | None   -> ""
@@ -406,7 +408,7 @@ end = struct
           [" ["; t; ": "; v; "]"])
     in
     String.concat ~sep:"" (
-      Time.to_string_abs ?zone t.time
+      Time.to_string_abs ~zone t.time
       :: " "
       :: prefix
       :: message t
@@ -416,7 +418,7 @@ end = struct
   TEST_UNIT =
     let check expect t =
       let zone = Time.Zone.utc in
-      <:test_result<string>> (to_write_only_text ~zone t) ~expect
+      <:test_result< string >> (to_write_only_text ~zone t) ~expect
     in
     check "2013-12-13 15:00:00.000000Z <message>"
       { time    = Time.of_string "2013-12-13 15:00:00Z"
@@ -508,6 +510,12 @@ end = struct
   end = struct
     let write' format ~filename msgs =
       Writer.with_file ~append:true filename ~f:(fun w ->
+        (* if we are writing to a slow device, or a temporarily disconnected
+           device it's better to push back on memory in the hopes that the
+           disconnection will resolve than to blow up after a timeout.  If
+           we had a better logging error reporting mechanism we could
+           potentially deal with it that way, but we currently don't. *)
+        Writer.set_buffer_age_limit w `Unlimited;
         Queue.iter msgs ~f:(fun msg -> basic_write format w msg);
         Writer.flushed w
         >>| fun () ->
@@ -556,7 +564,8 @@ end = struct
       ;;
 
       let parse_filename_id ~basename filename =
-        if Filename.basename filename = basename ^ ".log" then Id.of_string_opt None
+        if Filename.basename filename = basename ^ ".log"
+        then Id.of_string_opt None
         else begin
           let open Option.Monad_infix in
           String.chop_prefix (Filename.basename filename) ~prefix:(basename ^ ".")
@@ -585,11 +594,11 @@ end = struct
           current_log_files ~dirname ~basename
           >>= fun files ->
           let cutoff = Time.sub (Time.now ()) span in
-          Deferred.List.filter files ~f:(fun (_,filename) ->
+          Deferred.List.filter files ~f:(fun (_, filename) ->
             Deferred.Or_error.try_with (fun () -> Unix.stat filename)
             >>| function
             | Error _ -> false
-            | Ok stats -> Time.(<) stats.Unix.Stats.mtime cutoff)
+            | Ok stats -> Time.(<) stats.mtime cutoff)
         | `At_least i ->
           current_log_files ~dirname ~basename
           >>| fun files ->
@@ -612,7 +621,8 @@ end = struct
         ; mutable last_messages : int
         ; mutable last_size     : int
         ; mutable last_time     : Time.t
-        } with sexp
+        }
+      with sexp
 
       let rotate t =
         let basename, dirname = t.basename, t.dirname in
@@ -625,7 +635,7 @@ end = struct
           then Unix.rename ~src ~dst:(make_filename ~dirname ~basename id')
           else Deferred.unit)
         >>= fun () ->
-        maybe_delete_old_logs ~dirname ~basename t.rotation.Rotation.keep
+        maybe_delete_old_logs ~dirname ~basename t.rotation.keep
         >>| fun () ->
         t.filename <-
           make_filename ~dirname ~basename (Id.create (Rotation.zone t.rotation))
@@ -647,11 +657,11 @@ end = struct
             ; dirname
             ; rotation
             ; sequencer
-            ; filename =
-                make_filename ~dirname ~basename (Id.create (Rotation.zone rotation))
-            ; last_size = 0
+            ; filename      = make_filename ~dirname ~basename
+                                (Id.create (Rotation.zone rotation))
+            ; last_size     = 0
             ; last_messages = 0
-            ; last_time = Time.now ()
+            ; last_time     = Time.now ()
             }
           in
           Throttle.enqueue t.sequencer (fun () -> rotate t)
@@ -699,18 +709,19 @@ end = struct
       type t               = Time.t
       let create _zone     = Time.now ()
       let rotate_one       = ident
-      let to_string_opt ts = Some (Time.to_filename_string ts)
+      let to_string_opt ts = Some (Time.to_filename_string ~zone:Time.Zone.local ts)
       let cmp_newest_first     = Time.descending
 
       let of_string_opt    = function
         | None   -> None
-        | Some s -> try Some (Time.of_filename_string s) with _ -> None
+        | Some s ->
+          try Some (Time.of_filename_string ~zone:Time.Zone.local s) with _ -> None
       ;;
     end)
 
     module Dated = Make (struct
       type t = Date.t
-      let create zone = Time.to_date (Time.now ()) zone
+      let create zone = Date.today ~zone
       let rotate_one = ident
       let to_string_opt date = Some (Date.to_string date)
       let of_string_opt = function
@@ -719,8 +730,8 @@ end = struct
       let cmp_newest_first = Date.descending
     end)
 
-    let create format ~basename rotation =
-      match rotation.Rotation.naming_scheme with
+    let create format ~basename (rotation : Rotation.t) =
+      match rotation.naming_scheme with
       | `Numbered    -> Numbered.create format ~basename rotation
       | `Timestamped -> Timestamped.create format ~basename rotation
       | `Dated       -> Dated.create format ~basename rotation
@@ -759,9 +770,10 @@ module Update = struct
 end
 
 type t =
-  { updates : Update.t Pipe.Writer.t
-  ; mutable current_level : Level.t
-  ; mutable output_is_disabled : bool }
+  { updates                    : Update.t Pipe.Writer.t
+  ; mutable current_level      : Level.t
+  ; mutable output_is_disabled : bool
+  }
 
 let equal t1 t2 = Pipe.equal t1.updates t2.updates
 let hash t = Pipe.hash t.updates
@@ -771,12 +783,11 @@ let sexp_of_t _t = Sexp.Atom "<opaque>"
 let push_update t update =
   if not (Pipe.is_closed t.updates)
   then Pipe.write_without_pushback t.updates update
-  else
-    failwithf "Log: can't process %s because this log has been closed"
-      (Update.to_string update) ()
+  else failwithf "Log: can't process %s because this log has been closed"
+         (Update.to_string update) ()
 ;;
 
-let flushed t = Deferred.create (fun i -> push_update t (Update.Flush i))
+let flushed t = Deferred.create (fun i -> push_update t (Flush i))
 
 let closed t = Pipe.is_closed t.updates
 
@@ -817,10 +828,10 @@ end = struct
   let finish_at_shutdown =
     lazy
       (Shutdown.at_shutdown (fun () ->
-        let live_logs = Lazy.force live_logs in
-        let flush_bag = Lazy.force flush_bag in
-        Weak_table.iter (fun log -> flush log) live_logs;
-        Deferred.all_unit (Bag.to_list flush_bag)))
+         let live_logs = Lazy.force live_logs in
+         let flush_bag = Lazy.force flush_bag in
+         Weak_table.iter (fun log -> flush log) live_logs;
+         Deferred.all_unit (Bag.to_list flush_bag)))
   ;;
 
   let add_log log =
@@ -851,7 +862,7 @@ let create_log_processor ~output =
       f ()
     end
   in
-  (fun updates ->
+  (fun (updates : Update.t Queue.t) ->
      let rec loop yield_every =
        let yield_every = yield_every - 1 in
        if yield_every = 0
@@ -863,18 +874,17 @@ let create_log_processor ~output =
          loop batch_size
        end else begin
          match Queue.dequeue updates with
-         | None        ->
-           output_message_queue (fun _ -> Deferred.unit)
+         | None -> output_message_queue (fun _ -> Deferred.unit)
          | Some update ->
            match update with
-           | Update.Flush i ->
+           | Flush i ->
              output_message_queue (fun () ->
                Ivar.fill i ();
                loop yield_every)
-           | Update.Msg msg ->
+           | Msg msg ->
              Queue.enqueue msgs msg;
              loop yield_every
-           | Update.New_output f ->
+           | New_output f ->
              output_message_queue (fun () ->
                write := f;
                loop yield_every)
@@ -888,9 +898,10 @@ let create ~level ~output : t =
   let process_log = create_log_processor ~output in
   don't_wait_for (Pipe.iter' r ~f:process_log);
   let t =
-    { updates = w
-    ; current_level = level
-    ; output_is_disabled = List.is_empty output }
+    { updates            = w
+    ; current_level      = level
+    ; output_is_disabled = List.is_empty output
+    }
   in
   Flush_at_exit_or_gc.add_log t;
   t
@@ -898,7 +909,7 @@ let create ~level ~output : t =
 
 let set_output t outputs =
   t.output_is_disabled <- List.is_empty outputs;
-  push_update t (Update.New_output (Output.combine outputs))
+  push_update t (New_output (Output.combine outputs))
 ;;
 
 let level t = t.current_level
@@ -934,7 +945,7 @@ TEST_UNIT "Level setting" =
   Or_error.ok_exn answer
 ;;
 
-let message t msg = push_update t (Update.Msg msg)
+let message t msg = push_update t (Msg msg)
 
 let should_send t ~msg_level =
   (not t.output_is_disabled)
@@ -1009,7 +1020,7 @@ module type Global_intf = sig
   val message : Message.t -> unit
 end
 
-module Make_global(Empty : sig end) : Global_intf = struct
+module Make_global() : Global_intf = struct
   let log               = lazy (create ~level:`Info ~output:[Output.stderr ()])
   let level ()          = level (Lazy.force log)
   let set_level level   = set_level (Lazy.force log) level
@@ -1063,8 +1074,8 @@ end = struct
   let set_output output = write := output
 
   let write msg =
-    if Scheduler.is_running () then
-      failwith "Log.Global.Blocking function called after scheduler started";
+    if Scheduler.is_running ()
+    then failwith "Log.Global.Blocking function called after scheduler started";
     !write msg
   ;;
 
@@ -1085,7 +1096,7 @@ end
 
 (* Programs that want simplistic single-channel logging can open this module.  It provides
    a global logging facility to a single output type at a single level. *)
-module Global = Make_global(struct end)
+module Global = Make_global()
 
 module Reader = struct
   let pipe format filename =

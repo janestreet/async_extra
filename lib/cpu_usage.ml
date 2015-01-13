@@ -15,12 +15,12 @@ end = struct
   type t =
     { mutable last_usage : Time.Span.t
     ; mutable last_time  : Time.t
-    } with sexp_of
+    }
+  with sexp_of
 
   let time_used () =
-    let module R = Core.Std.Unix.Resource_usage in
-    let r = R.get `Self in
-    sec (r.R.utime +. r.R.stime)
+    let r = Core.Std.Unix.Resource_usage.get `Self in
+    sec (r.utime +. r.stime)
   ;;
 
   let take_sample t =
@@ -75,7 +75,7 @@ end = struct
       ; subscribers = Bag.create ()
       }
     in
-    every sample_every (fun () -> take_sample t);
+    every ~start:(Clock.after sample_every) sample_every (fun () -> take_sample t);
     t
   ;;
 end
@@ -177,8 +177,8 @@ end = struct
     let num_samples = ref 0            in
     let max         = ref (Percent.of_mult Float.min_value) in
     let min         = ref (Percent.of_mult Float.max_value) in
-    let process_one processed_subscribers subscriber =
-      if Pipe.is_closed subscriber.Subscriber.write_summaries_to
+    let process_one processed_subscribers (subscriber : Subscriber.t) =
+      if Pipe.is_closed subscriber.write_summaries_to
       then processed_subscribers
       else begin
         let avg =
@@ -186,14 +186,14 @@ end = struct
           |> Percent.of_mult
         in
         let summary =
-          (subscriber.Subscriber.window_duration,
+          (subscriber.window_duration,
            { Summary.
              avg
            ; max = !max
            ; min = !min
            })
         in
-        Pipe.write_without_pushback subscriber.Subscriber.write_summaries_to summary;
+        Pipe.write_without_pushback subscriber.write_summaries_to summary;
         subscriber :: processed_subscribers;
       end
     in
@@ -208,10 +208,10 @@ end = struct
             sum := Percent.(+) !sum sample;
             max := Percent.max !max sample;
             min := Percent.min !min sample;
-            if !num_samples < subscriber.Subscriber.num_samples
+            if !num_samples < subscriber.num_samples
             then subscribers, processed_subscribers
             else begin
-              assert (!num_samples = subscriber.Subscriber.num_samples);
+              assert (!num_samples = subscriber.num_samples);
               let processed_subscribers =
                 process_one processed_subscribers subscriber
               in
@@ -227,7 +227,7 @@ end = struct
     t.max_num_samples <-
       (match rev_processed_subscribers with
        | [] -> max_num_samples_when_no_subscribers
-       | subscriber :: _ -> subscriber.Subscriber.num_samples);
+       | subscriber :: _ -> subscriber.num_samples);
     drop_old_samples_if_necessary t;
   ;;
 
@@ -309,9 +309,9 @@ end = struct
           Pipe.read r
           >>| function
           | `Ok (_, summary) ->
-            robustly_test_eq summary.Summary.avg (List.nth_exn avg i);
-            robustly_test_eq summary.Summary.max (List.nth_exn max i);
-            robustly_test_eq summary.Summary.min (List.nth_exn min i);
+            robustly_test_eq summary.avg (List.nth_exn avg i);
+            robustly_test_eq summary.max (List.nth_exn max i);
+            robustly_test_eq summary.min (List.nth_exn min i);
           | _ -> assert false))
   end
 end
@@ -324,5 +324,5 @@ let samples =
 let summaries =
   let t = lazy (Summaries.create (samples ())) in
   fun ~windows ->
-  Summaries.subscribe (Lazy.force t) windows
+    Summaries.subscribe (Lazy.force t) windows
 ;;

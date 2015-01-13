@@ -1,4 +1,3 @@
-
 (** A grab-bag of performance-oriented, UDP-oriented network tools.  These provide some
     convenience, but they are more complex than basic applications require.
 
@@ -48,21 +47,22 @@ val default_capacity : int
     iteration, to prevent starvation of other Async jobs. *)
 module Config : sig
   type t =
-    { capacity : int
-    ; init : write_buffer
-    ; before : write_buffer -> unit
-    ; after : write_buffer -> unit
-    ; stop : unit Deferred.t
+    { capacity  : int
+    ; init      : write_buffer
+    ; before    : write_buffer -> unit
+    ; after     : write_buffer -> unit
+    ; stop      : unit Deferred.t
     ; max_ready : int
-    } with fields
+    }
+  with fields
 
   val create
-    :  ?capacity:int                    (** default is [default_capacity] *)
-    -> ?init:write_buffer               (** default is [Iobuf.create ~len:capacity] *)
-    -> ?before:(write_buffer -> unit)   (** default is [Iobuf.flip_lo] *)
-    -> ?after:(write_buffer -> unit)    (** default is [Iobuf.reset] *)
-    -> ?stop:(unit Deferred.t)          (** default is [Deferred.never] *)
-    -> ?max_ready:int                   (** default is [12] *)
+    :  ?capacity  : int                     (** default is [default_capacity] *)
+    -> ?init      : write_buffer            (** default is [Iobuf.create ~len:capacity] *)
+    -> ?before    : (write_buffer -> unit)  (** default is [Iobuf.flip_lo] *)
+    -> ?after     : (write_buffer -> unit)  (** default is [Iobuf.reset] *)
+    -> ?stop      : (unit Deferred.t)       (** default is [Deferred.never] *)
+    -> ?max_ready : int                     (** default is [12] *)
     -> unit
     -> t
 end
@@ -77,16 +77,22 @@ end
     {!Bigstring.sendto_nonblocking_no_sigpipe}. *)
 val sendto_sync
   :  unit
-  -> (Fd.t -> (_, Iobuf.seek) Iobuf.t -> Socket.Address.Inet.t -> [ `Not_ready | `Ok ])
-       Or_error.t
+  -> (Fd.t
+      -> ([> read ], Iobuf.seek) Iobuf.t
+      -> Socket.Address.Inet.t
+      -> [ `Not_ready | `Ok ]
+     ) Or_error.t
 (** [sendto sock buf addr] retries if [sock] is not ready to write. *)
 val sendto
   :  unit
-  -> (Fd.t -> (_, Iobuf.seek) Iobuf.t -> Socket.Address.Inet.t -> unit Deferred.t)
-       Or_error.t
+  -> (Fd.t
+      -> ([> read ], Iobuf.seek) Iobuf.t
+      -> Socket.Address.Inet.t
+      -> unit Deferred.t
+     ) Or_error.t
 
 val bind
-  :  ?ifname:string
+  :  ?ifname : string
   -> Socket.Address.Inet.t
   -> ([ `Bound ], Socket.Address.Inet.t) Socket.t Deferred.t
 
@@ -94,7 +100,7 @@ val bind_any : unit -> ([ `Bound ], Socket.Address.Inet.t) Socket.t Deferred.t
 
 (* Loops, including [recvfrom_loop], terminate normally when the socket is closed. *)
 val recvfrom_loop
-  :  ?config:Config.t
+  :  ?config : Config.t
   -> Fd.t
   -> (write_buffer -> Socket.Address.Inet.t -> unit)
   -> unit Deferred.t
@@ -104,18 +110,18 @@ val recvfrom_loop
     immediate buffer reuse in the common case and fallback to allocation if we want to
     save the packet buffer for asynchronous processing. *)
 val recvfrom_loop_with_buffer_replacement
-  :  ?config:Config.t
+  :  ?config : Config.t
   -> Fd.t
   -> (write_buffer -> Socket.Address.Inet.t -> write_buffer)
   -> write_buffer Deferred.t
 
 val read_loop
-  :  ?config:Config.t
+  :  ?config : Config.t
   -> Fd.t
   -> (write_buffer -> unit)
   -> unit Deferred.t
 val read_loop_with_buffer_replacement
-  :  ?config:Config.t
+  :  ?config : Config.t
   -> Fd.t
   -> (write_buffer -> write_buffer)
   -> write_buffer Deferred.t
@@ -131,15 +137,15 @@ val read_loop_with_buffer_replacement
 
     [Config.init config] is used as a prototype for [bufs] and as one of the elements. *)
 val recvmmsg_loop
-  : (?config:Config.t                   (** default is [Config.create ()] *)
-     -> ?create_srcs:bool               (** default is [false] *)
-     -> ?max_count:int
-     -> ?bufs:(write_buffer array)      (** supplies the packet buffers explicitly *)
-     -> ?on_wouldblock:(unit -> unit)   (** callback if recvmmsg would block *)
+  : (?config           : Config.t              (** default is [Config.create ()] *)
+     -> ?create_srcs   : bool                  (** default is [false] *)
+     -> ?max_count     : int
+     -> ?bufs          : (write_buffer array)  (** supplies the packet buffers explicitly *)
+     -> ?on_wouldblock : (unit -> unit)        (** callback if recvmmsg would block *)
      -> Fd.t
-     -> (?srcs:(Core.Std.Unix.sockaddr array)
+     -> (?srcs : (Core.Std.Unix.sockaddr array)
          -> write_buffer array
-         -> count:int
+         -> count : int
          -> unit)                       (** may modify [bufs] or [srcs] *)
      -> unit Deferred.t)
       Or_error.t
@@ -148,13 +154,13 @@ val recvmmsg_loop
     be used when sources are ignored to avoid some overhead incurred by optional
     arguments. *)
 val recvmmsg_no_sources_loop
-  : (?config:Config.t                   (** default is [Config.create ()] *)
+  : (?config           : Config.t              (** default is [Config.create ()] *)
      -> Fd.t
-     -> ?max_count:int
-     -> ?bufs:(write_buffer array)      (** supplies the packet buffers explicitly *)
-     -> ?on_wouldblock:(unit -> unit)   (** callback if recvmmsg would block *)
+     -> ?max_count     : int
+     -> ?bufs          : (write_buffer array)  (** supplies the packet buffers explicitly *)
+     -> ?on_wouldblock : (unit -> unit)        (** called if [recvmmsg] would block *)
      -> (write_buffer array
-         -> count:int
-         -> unit)                       (** may modify [bufs] *)
+         -> count : int
+         -> unit)  (** may modify [bufs] *)
      -> unit Deferred.t)
       Or_error.t

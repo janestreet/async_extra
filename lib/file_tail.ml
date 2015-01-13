@@ -12,10 +12,10 @@ end
 
 module Error = struct
   type t =
-  | File_replaced
-  | File_shrank
-  | Read_failed of exn
-  | Stat_failed of exn
+    | File_replaced
+    | File_shrank
+    | Read_failed   of exn
+    | Stat_failed   of exn
   with sexp_of
 
   let to_string_hum t =
@@ -29,10 +29,10 @@ end
 
 module Warning = struct
   type t =
-  | Did_not_reach_eof_for of Time.Span.t
-  | Reached_eof
-  | Delayed_due_to_null_reads_for of Time.Span.t
-  | No_longer_delayed_due_to_null_reads
+    | Did_not_reach_eof_for               of Time.Span.t
+    | Reached_eof
+    | Delayed_due_to_null_reads_for       of Time.Span.t
+    | No_longer_delayed_due_to_null_reads
   with sexp_of
 
   let to_string_hum t =
@@ -48,9 +48,9 @@ end
 
 module Update = struct
   type t =
-  | Data of string
-  | Warning of string * Warning.t
-  | Error of string * Error.t
+    | Data    of string
+    | Warning of string * Warning.t
+    | Error   of string * Error.t
   with sexp_of
 
   let to_string_hum = function
@@ -70,8 +70,8 @@ module Chunker : sig
   val feed : t -> string -> pos:int -> len:int -> Update.t Queue.t
 end = struct
   type t =
-  | Simple
-  | By_line of Buffer.t sexp_opaque
+    | Simple
+    | By_line of Buffer.t sexp_opaque
   with sexp_of
 
   let newline = '\n'
@@ -92,19 +92,19 @@ end = struct
   ;;
 
   let feed t buf ~pos ~len =
-    let result = Queue.create () in
-    let enqueue data = Queue.enqueue result (Update.Data data) in
+    let result : Update.t Queue.t = Queue.create () in
+    let enqueue data = Queue.enqueue result (Data data) in
     begin match t with
     | Simple -> enqueue (String.sub buf ~pos ~len)
     | By_line buffer ->
       for i = pos to pos + len - 1 do
         let c = buf.[i] in
-        if c <> newline then
-          Buffer.add_char buffer c
+        if c <> newline
+        then Buffer.add_char buffer c
         else begin
           let current_line =
-            if Buffer.length buffer = 0 then
-              ""
+            if Buffer.length buffer = 0
+            then ""
             else begin
               let n = Buffer.length buffer in
               (* Strip off terminating '\r', if present. *)
@@ -126,11 +126,10 @@ TEST_UNIT =
   let buf =
     String.concat
       (List.init 10 ~f:(fun string_length ->
-        String.init string_length ~f:(fun i ->
-          if i = string_length - 1 then
-            '\n'
-          else
-            Char.of_int_exn (i + Char.to_int '0'))))
+         String.init string_length ~f:(fun i ->
+           if i = string_length - 1
+           then '\n'
+           else Char.of_int_exn (i + Char.to_int '0'))))
   in
   for bytes_at_a_time = 1 to 10 do
     let result = Queue.create () in
@@ -147,30 +146,30 @@ TEST_UNIT =
     let output =
       String.concat
         (List.map (Queue.to_list result) ~f:(function
-          | Update.Data d -> d ^ "\n"
-          | _ -> assert false))
+           | Data d -> d ^ "\n"
+           | _ -> assert false))
     in
     assert (buf = output);
   done
 ;;
 
 type t =
-  { file : string;
-    read_delay : Time.Span.t;
-    retry_null_reads : bool;
-    chunker : Chunker.t;
-    pipe_w : Update.t Pipe.Writer.t;
-    ignore_inode_change : bool;
-    eof_latency_tolerance : Time.Span.t;
-    null_read_tolerance : Time.Span.t;
-    mutable read_buf : string;
-    mutable file_pos : int64;
-    mutable file_len : int64;
-    mutable most_recent_file_len_increase : Time.t;
-    mutable file_inode : int;
-    (* [need_to_report_eof] is used to ensure that we report [Reached_eof] exactly once
-       each time we reach EOF. *)
-    mutable need_to_report_eof : bool;
+  { file                                  : string
+  ; read_delay                            : Time.Span.t
+  ; retry_null_reads                      : bool
+  ; chunker                               : Chunker.t
+  ; pipe_w                                : Update.t Pipe.Writer.t
+  ; ignore_inode_change                   : bool
+  ; eof_latency_tolerance                 : Time.Span.t
+  ; null_read_tolerance                   : Time.Span.t
+  ; mutable read_buf                      : string
+  ; mutable file_pos                      : int64
+  ; mutable file_len                      : int64
+  ; mutable most_recent_file_len_increase : Time.t
+  ; mutable file_inode                    : int
+  (* [need_to_report_eof] is used to ensure that we report [Reached_eof] exactly once each
+     time we reach EOF. *)
+  ; mutable need_to_report_eof            : bool
   }
 with fields, sexp_of
 
@@ -190,10 +189,9 @@ let need_to_read t = t.file_pos < t.file_len
 let am_alive t = not (Pipe.is_closed t.pipe_w)
 
 let write t updates =
-  if am_alive t then
-    Pipe.write' t.pipe_w updates
-  else
-    Deferred.unit
+  if am_alive t
+  then Pipe.write' t.pipe_w updates
+  else Deferred.unit
 ;;
 
 let warning t w = don't_wait_for (write t (Queue.singleton (Update.Warning (t.file, w))))
@@ -208,31 +206,31 @@ let error t e =
 (* [stat t] stats [t.file] and possibly updates [t.file_inode], [t.file_len], and
    [t.most_recent_file_len_increase]. *)
 let stat t ~initial_call =
-  let module U = Core.Std.Unix in
   try_with (fun () ->
     Global_throttle.enqueue (fun () ->
       In_thread.run (fun () ->
-        (* We use [U.with_file t.file ~f:U.fstat], which does [open; fstat; close], rather
-           than just [stat t.file] because [File_tail] is often used over NFS and this
-           leverages open-to-close cache consistency to get a fresh answer from [stat]
-           regardless of the metadata caching options on the underlying mount.  The
+        (* We use [Unix.with_file t.file ~f:Unix.fstat], which does [open; fstat; close],
+           rather than just [stat t.file] because [File_tail] is often used over NFS and
+           this leverages open-to-close cache consistency to get a fresh answer from
+           [stat] regardless of the metadata caching options on the underlying mount.  The
            downside is that this adds two more system calls per for every [stat], and in
            the case where the file has grown "wastes" the open file descriptor since we
            are just going to re-open it. *)
-        U.with_file t.file ~mode:[U.O_RDONLY] ~f:U.fstat)))
+        let module Unix = Core.Std.Unix in
+        Unix.with_file t.file ~mode:[ O_RDONLY ] ~f:Unix.fstat)))
   >>| fun result ->
   let error e = error t e; Error () in
   match result with
-  | Error exn -> error (Error.Stat_failed exn)
+  | Error exn -> error (Stat_failed exn)
   | Ok stats ->
-    let new_inode = stats.U.st_ino in
-    if not initial_call && not t.ignore_inode_change && new_inode <> t.file_inode then
-      error Error.File_replaced
+    let new_inode = stats.st_ino in
+    if not initial_call && not t.ignore_inode_change && new_inode <> t.file_inode
+    then error File_replaced
     else begin
       t.file_inode <- new_inode;
-      let new_len = stats.U.st_size in
-      if new_len < t.file_len then
-        error Error.File_shrank
+      let new_len = stats.st_size in
+      if new_len < t.file_len
+      then error File_shrank
       else begin
         if new_len > t.file_len then begin
           t.file_len <- new_len;
@@ -250,7 +248,7 @@ let start_eof_latency_check t =
       let now = Time.now () in
       let eof_delay = Time.diff now t.most_recent_file_len_increase in
       if Time.Span.(eof_delay > t.eof_latency_tolerance) then
-        warning t (Warning.Did_not_reach_eof_for eof_delay);
+        warning t (Did_not_reach_eof_for eof_delay);
     end)
 ;;
 
@@ -259,10 +257,10 @@ let start_eof_latency_check t =
 let read_once t =
   Global_throttle.enqueue (fun () ->
     In_thread.run (fun () ->
-      let module U = Core.Std.Unix in
-      U.with_file t.file ~mode:[U.O_RDONLY] ~f:(fun fd ->
-        ignore (U.lseek fd t.file_pos ~mode:U.SEEK_SET);
-        U.read fd ~buf:t.read_buf)))
+      let module Unix = Core.Std.Unix in
+      Unix.with_file t.file ~mode:[ O_RDONLY ] ~f:(fun fd ->
+        ignore (Unix.lseek fd t.file_pos ~mode:SEEK_SET);
+        Unix.read fd ~buf:t.read_buf)))
 ;;
 
 (* [read t] repeatedly does [read_once] until the data read doesn't contain nulls, unless
@@ -282,13 +280,13 @@ let read t =
              [read] because [t.file_pos < t.file_len], where the [t.file_len] was set by
              the most recent [stat].  Since we're at EOF before reading up to
              [t.file_len], the file must have shrunk. *)
-          error t Error.File_shrank
+          error t File_shrank
         end
         else if t.retry_null_reads && String.contains t.read_buf ~len '\000'
         then begin
           let delayed_for = Time.(diff (now ()) started) in
           if Time.Span.(>=) delayed_for t.null_read_tolerance then
-            warning t (Warning.Delayed_due_to_null_reads_for delayed_for);
+            warning t (Delayed_due_to_null_reads_for delayed_for);
           have_warned_about_null_delay := true;
           after (sec 0.2)
           >>> fun () ->
@@ -296,7 +294,7 @@ let read t =
         end else begin
           t.file_pos <- Int64.(t.file_pos + of_int len);
           if !have_warned_about_null_delay then
-            warning t Warning.No_longer_delayed_due_to_null_reads;
+            warning t No_longer_delayed_due_to_null_reads;
           Ivar.fill finished (Chunker.feed t.chunker t.read_buf ~pos:0 ~len)
         end
       end
@@ -312,7 +310,7 @@ let read_while_needed t =
         if need_to_read t then begin
           try_with (fun () -> read t)
           >>> function
-          | Error exn -> error t (Error.Read_failed exn)
+          | Error exn -> error t (Read_failed exn)
           | Ok updates ->
             write t updates
             >>> fun () ->
@@ -320,7 +318,7 @@ let read_while_needed t =
         end else begin
           if t.need_to_report_eof then begin
             t.need_to_report_eof <- false;
-            warning t Warning.Reached_eof;
+            warning t Reached_eof;
           end;
           Ivar.fill finished ()
         end
@@ -337,13 +335,13 @@ let start_stat_loop t =
       let stat_loop_delay = after t.read_delay in
       stat t ~initial_call:false
       >>> function
-        | Error () -> ()
-        | Ok () ->
-          read_while_needed t
-          >>> fun () ->
-          stat_loop_delay
-          >>> fun () ->
-          loop ()
+      | Error () -> ()
+      | Ok () ->
+        read_while_needed t
+        >>> fun () ->
+        stat_loop_delay
+        >>> fun () ->
+        loop ()
     end
   in
   loop ()
@@ -359,39 +357,39 @@ let start_reading t ~start_at =
   | Ok () ->
     t.file_pos <-
       (match start_at with
-      | `Beginning -> 0L
-      | `End -> t.file_len
-      | `Pos pos -> pos);
+       | `Beginning -> 0L
+       | `End -> t.file_len
+       | `Pos pos -> pos);
     start_eof_latency_check t;
     start_stat_loop t;
 ;;
 
 let create
-    ?(read_buf_len = 32 * 1024)
-    ?(read_delay = sec 0.5)
-    ?(retry_null_reads = true)
-    ?(break_on_lines = true)
-    ?(ignore_inode_change = false)
-    ?(start_at = `Beginning)
-    ?(eof_latency_tolerance = sec 5.)
-    ?(null_read_tolerance = sec 0.)
-    file =
+      ?(read_buf_len = 32 * 1024)
+      ?(read_delay = sec 0.5)
+      ?(retry_null_reads = true)
+      ?(break_on_lines = true)
+      ?(ignore_inode_change = false)
+      ?(start_at = `Beginning)
+      ?(eof_latency_tolerance = sec 5.)
+      ?(null_read_tolerance = sec 0.)
+      file =
   let pipe_r, pipe_w = Pipe.create () in
   let t =
-    { file;
-      read_delay;
-      retry_null_reads;
-      chunker = Chunker.create ~break_on_lines;
-      pipe_w;
-      ignore_inode_change;
-      eof_latency_tolerance;
-      null_read_tolerance;
-      read_buf = String.create read_buf_len;
-      file_len = 0L;
-      most_recent_file_len_increase = Time.epoch;
-      file_pos = 0L;
-      file_inode = 0;
-      need_to_report_eof = true;
+    { file
+    ; read_delay
+    ; retry_null_reads
+    ; chunker                       = Chunker.create ~break_on_lines
+    ; pipe_w
+    ; ignore_inode_change
+    ; eof_latency_tolerance
+    ; null_read_tolerance
+    ; read_buf                      = String.create read_buf_len
+    ; file_len                      = 0L
+    ; most_recent_file_len_increase = Time.epoch
+    ; file_pos                      = 0L
+    ; file_inode                    = 0
+    ; need_to_report_eof            = true
     }
   in
   start_reading t ~start_at;

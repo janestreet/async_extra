@@ -5,8 +5,8 @@ module Event = struct
 
   type t =
     | Attempting_to_connect
-    | Obtained_address of Host_and_port.t
-    | Failed_to_connect of Error.t
+    | Obtained_address      of Host_and_port.t
+    | Failed_to_connect     of Error.t
     | Connected
     | Disconnected
   with sexp
@@ -14,18 +14,18 @@ module Event = struct
   type event = t
 
   module Handler = struct
-    type t = {
-      server_name : string;
-      on_event : event -> unit;
-      log : Log.t option;
-    }
+    type t =
+      { server_name : string
+      ; on_event    : event -> unit
+      ; log         : Log.t option
+      }
   end
 
   let log_level = function
     | Attempting_to_connect | Connected | Disconnected | Obtained_address _ -> `Info
     | Failed_to_connect _ -> `Error
 
-  let handle t {Handler.server_name; log; on_event} =
+  let handle t { Handler. server_name; log; on_event } =
     on_event t;
     Option.iter log ~f:(fun log ->
       Log.sexp log t sexp_of_t ~level:(log_level t)
@@ -33,14 +33,15 @@ module Event = struct
 
 end
 
-type t = {
-  get_address : unit -> Host_and_port.t Or_error.t Deferred.t;
-  connect : host:string -> port:int -> (Rpc.Connection.t, exn) Result.t Deferred.t;
-  mutable conn : Rpc.Connection.t option Ivar.t; (* None iff [close] has been called *)
-  event_handler : Event.Handler.t;
-  close_started : unit Ivar.t;
-  close_finished : unit Ivar.t;
-} with fields
+type t =
+  { get_address    : unit -> Host_and_port.t Or_error.t Deferred.t
+  ; connect        : host:string -> port:int -> (Rpc.Connection.t, exn) Result.t Deferred.t
+  ; mutable conn   : Rpc.Connection.t option Ivar.t (* None iff [close] has been called *)
+  ; event_handler  : Event.Handler.t
+  ; close_started  : unit Ivar.t
+  ; close_finished : unit Ivar.t
+  }
+with fields
 
 let handle_event t event = Event.handle event t.event_handler
 
@@ -79,8 +80,8 @@ let try_connecting_until_successful t =
         ~port:(Host_and_port.port addr)
   in
   let rec loop () =
-    if Ivar.is_full t.close_started then
-      return None
+    if Ivar.is_full t.close_started
+    then return None
     else begin
       connect ()
       >>= function
@@ -103,7 +104,7 @@ let try_connecting_until_successful t =
 
 let create ~server_name ?log ?(on_event = ignore) ?implementations
       ?max_message_size ?handshake_timeout get_address =
-  let event_handler = {Event.Handler.server_name; log; on_event} in
+  let event_handler = { Event.Handler. server_name; log; on_event } in
   (* package up the call to [Rpc.Connection.client] so that the polymorphism over
      [implementations] is hidden away *)
   let connect ~host ~port =
@@ -111,8 +112,13 @@ let create ~server_name ?log ?(on_event = ignore) ?implementations
       ?implementations ?max_message_size ?handshake_timeout ()
   in
   let t =
-    { event_handler; get_address; connect; conn = Ivar.create ();
-      close_started = Ivar.create (); close_finished = Ivar.create () }
+    { event_handler
+    ; get_address
+    ; connect
+    ; conn           = Ivar.create ()
+    ; close_started  = Ivar.create ()
+    ; close_finished = Ivar.create ()
+    }
   in
   don't_wait_for @@ Deferred.repeat_until_finished () (fun () ->
     handle_event t Attempting_to_connect;
@@ -166,7 +172,8 @@ let connected t =
         | Some conn -> return conn
       end
     | Some conn ->
-      if Rpc.Connection.is_closed conn then
+      if Rpc.Connection.is_closed conn
+      then
         (* give the reconnection loop a chance to overwrite the ivar *)
         Rpc.Connection.close_finished conn >>= loop
       else
@@ -179,7 +186,8 @@ let current_connection t = Ivar.read t.conn |> Deferred.peek |> Option.join
 let close_finished t = Ivar.read t.close_finished
 
 let close t =
-  if Ivar.is_full t.close_started then
+  if Ivar.is_full t.close_started
+  then
     (* Another call to close is already in progress.  Wait for it to finish. *)
     close_finished t
   else begin

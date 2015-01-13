@@ -38,10 +38,10 @@ module type S = sig
 
   module Server_read_result : sig
     type t =
-    | Connect of Client_id.t
-    | Disconnect of Client_id.t * Sexp.t
-    | Denied_access of string
-    | Data of Client_id.t * Client_message.t
+      | Connect       of Client_id.t
+      | Disconnect    of Client_id.t * Sexp.t
+      | Denied_access of string
+      | Data          of Client_id.t * Client_message.t
 
     include Sexpable with type t := t
   end
@@ -49,13 +49,15 @@ module type S = sig
   type t
 
   val create
-    :  ?max_pending_connections:int
-    -> ?verbose:bool (** default is [false] *)
-    -> ?log_disconnects:bool (** default is [true] *)
-    -> ?buffer_age_limit:[ `At_most of Time.Span.t | `Unlimited ]
-    -> port:int
-    -> auth:(Unix.Inet_addr.t -> int -> Client_id.t
-             -> [`Allow | `Deny of string option] Deferred.t)
+    :  ?max_pending_connections : int
+    -> ?verbose                 : bool (** default is [false] *)
+    -> ?log_disconnects         : bool (** default is [true] *)
+    -> ?buffer_age_limit        : [ `At_most of Time.Span.t | `Unlimited ]
+    -> port                     : int
+    -> auth                     : (Unix.Inet_addr.t
+                                   -> int
+                                   -> Client_id.t
+                                   -> [ `Allow | `Deny of string option ] Deferred.t)
     -> unit
     -> t Deferred.t
 

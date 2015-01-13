@@ -1,4 +1,3 @@
-
 open Core.Std
 open Import
 
@@ -22,10 +21,10 @@ module type Connection = sig
       [implementations] when queries arrive.
   *)
   val create
-    :  ?implementations:'s Implementations.t
-    -> connection_state:(t -> 's)
-    -> ?max_message_size:int
-    -> ?handshake_timeout:Time.Span.t
+    :  ?implementations   : 's Implementations.t
+    -> connection_state   : (t -> 's)
+    -> ?max_message_size  : int
+    -> ?handshake_timeout : Time.Span.t
     -> Reader.t
     -> Writer.t
     -> (t, Exn.t) Result.t Deferred.t
@@ -68,34 +67,32 @@ module type Connection = sig
       function like [create].
   *)
   val with_close
-    :  ?implementations:'s Implementations.t
-    -> ?max_message_size:int
-    -> ?handshake_timeout:Time.Span.t
-    -> connection_state:(t -> 's)
+    :  ?implementations   : 's Implementations.t
+    -> ?max_message_size  : int
+    -> ?handshake_timeout : Time.Span.t
+    -> connection_state   : (t -> 's)
     -> Reader.t
     -> Writer.t
-    -> dispatch_queries:(t -> 'a Deferred.t)
-    -> on_handshake_error:[
-      | `Raise
-      | `Call of (Exn.t -> 'a Deferred.t)
-    ]
+    -> dispatch_queries   : (t -> 'a Deferred.t)
+    -> on_handshake_error : [ `Raise
+                            | `Call of (Exn.t -> 'a Deferred.t)
+                            ]
     -> 'a Deferred.t
 
   (** Runs [with_close] but dispatches no queries. The implementations are required
       because this function doesn't let you dispatch any queries (i.e., act as a client),
       it would be pointless to call it if you didn't want to act as a server.*)
   val server_with_close
-    :  ?max_message_size:int
-    -> ?handshake_timeout:Time.Span.t
+    :  ?max_message_size  : int
+    -> ?handshake_timeout : Time.Span.t
     -> Reader.t
     -> Writer.t
-    -> implementations:'s Implementations.t
-    -> connection_state:(t -> 's)
-    -> on_handshake_error:[
-      | `Raise
-      | `Ignore
-      | `Call of (Exn.t -> unit Deferred.t)
-    ]
+    -> implementations    : 's Implementations.t
+    -> connection_state   : (t -> 's)
+    -> on_handshake_error : [ `Raise
+                            | `Ignore
+                            | `Call of (Exn.t -> unit Deferred.t)
+                            ]
     -> unit Deferred.t
 
   (** [serve implementations ~port ?on_handshake_error ()] starts a server with the given
@@ -105,27 +102,28 @@ module type Connection = sig
       other than disconnect the client - any logging or record of the reasons is the
       responsibility of the auth function itself. *)
   val serve
-    :  implementations:'s Implementations.t
-    -> initial_connection_state:('address -> t -> 's)
-    -> where_to_listen:('address, 'listening_on) Tcp.Where_to_listen.t
-    -> ?max_connections:int
-    -> ?max_message_size:int
-    -> ?handshake_timeout:Time.Span.t
-    -> ?auth:('address -> bool)
+    :  implementations          : 's Implementations.t
+    -> initial_connection_state : ('address -> t -> 's)
+    -> where_to_listen          : ('address, 'listening_on) Tcp.Where_to_listen.t
+    -> ?max_connections         : int
+    -> ?max_pending_connections : int
+    -> ?buffer_age_limit        : Writer.buffer_age_limit
+    -> ?max_message_size        : int
+    -> ?handshake_timeout       : Time.Span.t
+    -> ?auth                    : ('address -> bool)
     (** default is [`Ignore] *)
-    -> ?on_handshake_error:[
-      |  `Raise
-      | `Ignore
-      | `Call of (Exn.t -> unit)
-    ]
+    -> ?on_handshake_error      : [ `Raise
+                                  | `Ignore
+                                  | `Call of (Exn.t -> unit)
+                                  ]
     -> unit
     -> ('address, 'listening_on) Tcp.Server.t Deferred.t
 
   module Client_implementations : sig
-    type nonrec 's t = {
-      connection_state : t -> 's;
-      implementations : 's Implementations.t;
-    }
+    type nonrec 's t =
+      { connection_state : t -> 's
+      ; implementations  : 's Implementations.t
+      }
 
     val null : unit -> unit t
   end
@@ -138,11 +136,13 @@ module type Connection = sig
       connection timeout and the timeout for this module's own handshake.
   *)
   val client
-    :  host:string
-    -> port:int
-    -> ?implementations:_ Client_implementations.t
-    -> ?max_message_size:int
-    -> ?handshake_timeout:Time.Span.t
+    :  host                 : string
+    -> port                 : int
+    -> ?via_local_interface : Unix.Inet_addr.t  (** default is chosen by OS *)
+    -> ?implementations     : _ Client_implementations.t
+    -> ?max_message_size    : int
+    -> ?buffer_age_limit    : Writer.buffer_age_limit
+    -> ?handshake_timeout   : Time.Span.t
     -> unit
     -> (t, Exn.t) Result.t Deferred.t
 
@@ -153,11 +153,12 @@ module type Connection = sig
       See [with_close] for more information.
   *)
   val with_client
-    :  host:string
-    -> port:int
-    -> ?implementations:_ Client_implementations.t
-    -> ?max_message_size:int
-    -> ?handshake_timeout:Time.Span.t
+    :  host                 : string
+    -> port                 : int
+    -> ?via_local_interface : Unix.Inet_addr.t  (** default is chosen by OS *)
+    -> ?implementations     : _ Client_implementations.t
+    -> ?max_message_size    : int
+    -> ?handshake_timeout   : Time.Span.t
     -> (t -> 'a Deferred.t)
     -> ('a, Exn.t) Result.t Deferred.t
 end

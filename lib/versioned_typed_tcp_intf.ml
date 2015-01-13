@@ -24,7 +24,7 @@ end = struct
 end
 
 module type Versions = sig
-  val low_version : Version.t
+  val low_version  : Version.t
   val prod_version : Version.t
   val test_version : Version.t
 end
@@ -91,13 +91,14 @@ module type Arg = sig
 end
 
 module Read_result = struct
-  type ('name, 'data) t = {
-    from : 'name;
-    ip : string;
-    time_received : Time.t;
-    time_sent : Time.t;
-    data : 'data;
-  } with bin_io, sexp
+  type ('name, 'data) t =
+    { from          : 'name
+    ; ip            : string
+    ; time_received : Time.t
+    ; time_sent     : Time.t
+    ; data          : 'data
+    }
+  with bin_io, sexp
 end
 
 (** The messages which the code using this library on the server side needs to process.
@@ -106,16 +107,16 @@ end
 module Server_msg = struct
   module Control = struct
     type 'name t =
-      | Unauthorized of string
-      | Duplicate of 'name
-      | Wrong_mode of 'name
+      | Unauthorized     of string
+      | Duplicate        of 'name
+      | Wrong_mode       of 'name
       | Too_many_clients of string
-      | Almost_full of int (* number of free connections *)
-      | Connect of ('name * [`credentials of string])
-      | Disconnect of 'name * Sexp.t
-      | Parse_error of 'name * string
-      | Protocol_error of string
-    with sexp, bin_io
+      | Almost_full      of int (* number of free connections *)
+      | Connect          of ('name * [`credentials of string])
+      | Disconnect       of 'name * Sexp.t
+      | Parse_error      of 'name * string
+      | Protocol_error   of string
+    with bin_io, sexp
   end
 
   type ('name, 'data) t =
@@ -131,16 +132,16 @@ module Client_msg = struct
   module Control = struct
     type 'name t =
       | Connecting
-      | Connect of ('name * [`credentials of string])
-      | Disconnect of 'name * Sexp.t
-      | Parse_error of 'name * string
+      | Connect        of ('name * [`credentials of string])
+      | Disconnect     of 'name * Sexp.t
+      | Parse_error    of 'name * string
       | Protocol_error of string
-    with sexp, bin_io
+    with bin_io, sexp
   end
 
   type ('name, 'data) t =
     | Control of 'name Control.t
-    | Data of ('name, 'data) Read_result.t
+    | Data    of ('name, 'data) Read_result.t
   with bin_io, sexp
 end
 
@@ -162,19 +163,19 @@ module type S = sig
 
     (** create a new server, and start listening *)
     val create
-      :  ?logfun:< send : To_client_msg.t;
-                   recv : To_server_msg.t;
-                   remote_name : Client_name.t > logfun
-      -> ?now:(unit -> Time.t) (** defualt: Scheduler.cycle_start *)
-      -> ?enforce_unique_remote_name:bool (** default is [true] *) (** remote names must be unique *)
-      -> ?is_client_ip_authorized:(string -> bool)
+      :  ?logfun                             : < send : To_client_msg.t;
+                                                 recv : To_server_msg.t;
+                                                 remote_name : Client_name.t > logfun
+      -> ?now:(unit -> Time.t) (** defualt is [Scheduler.cycle_start] *)
+      -> ?enforce_unique_remote_name         : bool (** default is [true] *)
+      -> ?is_client_ip_authorized            : (string -> bool)
       (** [warn_when_free_connections_lte_pct].  If the number of free connections falls
           below this percentage of max connections an Almost_full event will be generated.
           The default is 5%.  It is required that 0.0 <=
           warn_when_free_connections_lte_pct <= 1.0 *)
-      -> ?warn_when_free_connections_lte_pct:float
-      -> ?max_clients:int (** max connected clients. default 500 *)
-      -> listen_port:int
+      -> ?warn_when_free_connections_lte_pct : float
+      -> ?max_clients                        : int (** max connected clients. default 500 *)
+      -> listen_port                         : int
       -> Server_name.t
       -> t Deferred.t
 
@@ -217,23 +218,26 @@ module type S = sig
     val send_ignore_errors : t -> Client_name.t -> To_client_msg.t -> unit
 
     (** [send_to_all t msg] send the same message to all connected clients. *)
-    val send_to_all : t
+    val send_to_all
+      :  t
       -> To_client_msg.t
-      -> [ `Sent (** sent successfuly to all clients *)
-         | `Dropped (** not sent successfully to any client *)
-         | `Partial_success (** sent to some clients *)] Deferred.t
+      -> [ `Sent             (** sent successfuly to all clients *)
+         | `Dropped          (** not sent successfully to any client *)
+         | `Partial_success  (** sent to some clients *)
+         ] Deferred.t
 
     (** [send_to_all_ignore_errors t msg] Just like [send_to_all] but with no error
         reporting. *)
     val send_to_all_ignore_errors : t -> To_client_msg.t -> unit
 
     (** [send_to_some t msg names] send the same message to multiple connected clients. *)
-    val send_to_some : t
+    val send_to_some
+      :  t
       -> To_client_msg.t
       -> Client_name.t list
-      -> [ `Sent (** sent successfuly to all clients *)
-         | `Dropped (** not sent successfully to any client *)
-         | `Partial_success (** sent to some clients *)
+      -> [ `Sent             (** sent successfuly to all clients *)
+         | `Dropped          (** not sent successfully to any client *)
+         | `Partial_success  (** sent to some clients *)
          ] Deferred.t
 
     (** [send_to_some_ignore_errors t msg] Just like [send_to_some] but with no error
@@ -248,7 +252,7 @@ module type S = sig
       :  t
       -> cutoff:unit Deferred.t
       -> ( [ `Flushed of Client_name.t list ]
-         * [ `Not_flushed of Client_name.t list ]
+           * [ `Not_flushed of Client_name.t list ]
          ) Deferred.t
 
     val shutdown : t -> unit Deferred.t
@@ -259,33 +263,33 @@ module type S = sig
 
     (** create a new (initially disconnected) client *)
     val create'
-      :  ?logfun:< recv : To_client_msg.t;
-                   send : To_server_msg.t;
-                   remote_name : Server_name.t> logfun
-      -> ?now:(unit -> Time.t) (** defualt: Scheduler.cycle_start *)
-      -> ?check_remote_name:bool (** default is [true] *) (** remote name must match expected remote name. *)
-      -> ?credentials:string
-      -> ip:string
-      -> port:int
-      -> expected_remote_name:Server_name.t
+      :  ?logfun              : < recv : To_client_msg.t;
+                                  send : To_server_msg.t;
+                                  remote_name : Server_name.t> logfun
+      -> ?now                 : (unit -> Time.t) (** default is [Scheduler.cycle_start] *)
+      -> ?check_remote_name   : bool             (** default is [true] *)
+      -> ?credentials         : string
+      -> ip                   : string
+      -> port                 : int
+      -> expected_remote_name : Server_name.t
       -> Client_name.t
       -> t
 
     (** Just like [create'], but assume empty credentials (for backwards compatibility) *)
     val create
-      :  ?logfun:< recv : To_client_msg.t;
-                   send : To_server_msg.t;
-                   remote_name : Server_name.t> logfun
-      -> ?now:(unit -> Time.t) (** defualt: Scheduler.cycle_start *)
-      -> ?check_remote_name:bool (** default is [true] *) (** remote name must match expected remote name. *)
-      -> ip:string
-      -> port:int
-      -> expected_remote_name:Server_name.t
+      :  ?logfun              : < recv : To_client_msg.t;
+                                  send : To_server_msg.t;
+                                  remote_name : Server_name.t> logfun
+      -> ?now                 : (unit -> Time.t)  (** default is [Scheduler.cycle_start] *)
+      -> ?check_remote_name   : bool              (** default is [true] *)
+      -> ip                   : string
+      -> port                 : int
+      -> expected_remote_name : Server_name.t
       -> Client_name.t
       -> t
 
-    (** [connect t] If the connection is not currently established, initiate one.
-        @return a deferred that becomes determined when the connection is established. *)
+    (** [connect t] If the connection is not currently established, initiate one.  Returns
+        a deferred that becomes determined when the connection is established. *)
     val connect : t -> unit Deferred.t
 
     (** If a connection is currently established, close it.  Also, if we're trying to
@@ -326,16 +330,16 @@ end
 
 module Repeater_error = struct
   type t =
-    | Parse_error of string
+    | Parse_error      of string
     | Marshaling_error
-    | Disconnect of Error.t
+    | Disconnect       of Error.t
 end
 
 module Repeater_hook_result = struct
   type ('send, 'recv) t =
     | Do_nothing
-    | Send_back of 'send list
-    | Send of 'recv
+    | Send_back             of 'send list
+    | Send                  of 'recv
     | Pass_on
     | Pass_on_and_send_back of 'send list
 end

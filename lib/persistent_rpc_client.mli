@@ -10,8 +10,8 @@ type t
 module Event : sig
   type t =
     | Attempting_to_connect
-    | Obtained_address of Host_and_port.t
-    | Failed_to_connect of Error.t
+    | Obtained_address      of Host_and_port.t
+    | Failed_to_connect     of Error.t
     | Connected
     | Disconnected
   with sexp
@@ -36,12 +36,12 @@ end
     The [implementations], [max_message_size], and [handshake_timeout] arguments are just
     as for [Rpc.Connection.create]. *)
 val create
-  :  server_name:string
-  -> ?log:Log.t
-  -> ?on_event:(Event.t -> unit)
-  -> ?implementations:_ Rpc.Connection.Client_implementations.t
-  -> ?max_message_size:int
-  -> ?handshake_timeout:Time.Span.t
+  :  server_name        : string
+  -> ?log               : Log.t
+  -> ?on_event          : (Event.t -> unit)
+  -> ?implementations   : _ Rpc.Connection.Client_implementations.t
+  -> ?max_message_size  : int
+  -> ?handshake_timeout : Time.Span.t
   -> (unit -> Host_and_port.t Or_error.t Deferred.t)
   -> t
 

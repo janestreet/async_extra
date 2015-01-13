@@ -5,35 +5,42 @@ module Host = Unix.Host
 module Socket = Unix.Socket
 
 type 'addr where_to_connect =
-  { socket_type : 'addr Socket.Type.t;
-    address : unit -> 'addr Deferred.t;
+  { socket_type         : 'addr Socket.Type.t
+  ; address             : unit -> 'addr Deferred.t
+  ; via_local_interface : 'addr option
   }
 
-let to_host_and_port host port =
-  { socket_type = Socket.Type.tcp;
-    address =
+let to_host_and_port ?via_local_interface host port =
+  { socket_type = Socket.Type.tcp
+  ; address     =
       (fun () ->
-        Unix.Inet_addr.of_string_or_getbyname host
-        >>| fun inet_addr ->
-        Socket.Address.Inet.create inet_addr ~port);
+         Unix.Inet_addr.of_string_or_getbyname host
+         >>| fun inet_addr->
+         Socket.Address.Inet.create inet_addr ~port)
+  ; via_local_interface =
+      Option.map via_local_interface ~f:(Socket.Address.Inet.create ~port:0)
   }
 ;;
 
 let to_file file =
-  { socket_type = Socket.Type.unix;
-    address = fun () -> return (Socket.Address.Unix.create file);
+  { socket_type = Socket.Type.unix
+  ; address     = (fun () -> return (Socket.Address.Unix.create file))
+  ; via_local_interface = None
   }
 ;;
 
-let to_inet_address address =
-  { socket_type = Socket.Type.tcp;
-    address = fun () -> return address;
+let to_inet_address ?via_local_interface address =
+  { socket_type = Socket.Type.tcp
+  ; address     = (fun () -> return address)
+  ; via_local_interface =
+      Option.map via_local_interface ~f:(Socket.Address.Inet.create ~port:0)
   }
 ;;
 
 let to_unix_address address =
-  { socket_type = Socket.Type.unix;
-    address = fun () -> return address;
+  { socket_type = Socket.Type.unix
+  ; address     = (fun () -> return address)
+  ; via_local_interface = None
   }
 ;;
 
@@ -46,13 +53,13 @@ let create_socket socket_type =
 let close_sock_on_error s f =
   try_with ~name:"Tcp.close_sock_on_error" f
   >>| function
-    | Ok v -> v
-    | Error e ->
-      (* [close] may fail, but we don't really care, since it will fail
-         asynchronously.  The error we really care about is [e], and the
-         [raise_error] will cause the current monitor to see that. *)
-      don't_wait_for (Unix.close (Socket.fd s));
-      raise e;
+  | Ok v -> v
+  | Error e ->
+    (* [close] may fail, but we don't really care, since it will fail
+       asynchronously.  The error we really care about is [e], and the
+       [raise_error] will cause the current monitor to see that. *)
+    don't_wait_for (Unix.close (Socket.fd s));
+    raise e;
 ;;
 
 let reader_writer_of_sock ?buffer_age_limit ?reader_buffer_size s =
@@ -70,26 +77,33 @@ let connect_sock ?interrupt ?(timeout = sec 10.) where_to_connect =
     | None           -> timeout
     | Some interrupt -> Deferred.any [ interrupt; timeout ]
   in
+  let connect_interruptible s =
+    Socket.connect_interruptible s address ~interrupt
+  in
   Deferred.create (fun result ->
     let s = create_socket where_to_connect.socket_type in
     close_sock_on_error s (fun () ->
-      Socket.connect_interruptible s address ~interrupt)
+      match where_to_connect.via_local_interface with
+      | None -> connect_interruptible s
+      | Some local_interface ->
+        Socket.bind s local_interface
+        >>= fun s ->
+        connect_interruptible s)
     >>> function
     | `Ok s -> Ivar.fill result s
     | `Interrupted ->
       don't_wait_for (Unix.close (Socket.fd s));
       let address = Socket.Address.to_string address in
-      if Option.is_some (Deferred.peek timeout) then
-        failwiths "connection attempt timeout" address <:sexp_of< string >>
-      else
-        failwiths "connection attempt aborted" address <:sexp_of< string >>)
+      if Option.is_some (Deferred.peek timeout)
+      then failwiths "connection attempt timeout" address <:sexp_of< string >>
+      else failwiths "connection attempt aborted" address <:sexp_of< string >>)
 ;;
 
-type 'a with_connect_options =
-     ?buffer_age_limit:[ `At_most of Time.Span.t | `Unlimited ]
-  -> ?interrupt:unit Deferred.t
-  -> ?reader_buffer_size:int
-  -> ?timeout: Time.Span.t
+type 'a with_connect_options
+  =  ?buffer_age_limit   : [ `At_most of Time.Span.t | `Unlimited ]
+  -> ?interrupt          : unit Deferred.t
+  -> ?reader_buffer_size : int
+  -> ?timeout            : Time.Span.t
   -> 'a
 
 let connect ?buffer_age_limit ?interrupt ?reader_buffer_size ?timeout where_to_connect =
@@ -115,8 +129,8 @@ let close_connection r w =
 ;;
 
 let with_connection
-    ?buffer_age_limit ?interrupt ?reader_buffer_size ?timeout
-    where_to_connect f =
+      ?buffer_age_limit ?interrupt ?reader_buffer_size ?timeout
+      where_to_connect f =
   connect_sock ?interrupt ?timeout where_to_connect
   >>= fun socket ->
   let r, w = reader_writer_of_sock ?buffer_age_limit ?reader_buffer_size socket in
@@ -140,13 +154,14 @@ let connect_sock where_to_connect = connect_sock where_to_connect
 module Where_to_listen = struct
 
   type ('address, 'listening_on) t =
-    { socket_type : 'address Socket.Type.t;
-      address : 'address;
-      listening_on : 'address -> 'listening_on;
+    { socket_type  : 'address Socket.Type.t
+    ; address      : 'address
+    ; listening_on : ('address -> 'listening_on) sexp_opaque
     }
+  with sexp_of
 
-  type inet = (Socket.Address.Inet.t, int   ) t
-  type unix = (Socket.Address.Unix.t, string) t
+  type inet = (Socket.Address.Inet.t, int   ) t with sexp_of
+  type unix = (Socket.Address.Unix.t, string) t with sexp_of
 
   let create ~socket_type ~address ~listening_on =
     { socket_type; address; listening_on }
@@ -155,9 +170,9 @@ end
 
 let on_port port =
   { Where_to_listen.
-    socket_type          = Socket.Type.tcp;
-    address              = Socket.Address.Inet.create_bind_any ~port;
-    listening_on         = function `Inet (_, port) -> port;
+    socket_type  = Socket.Type.tcp
+  ; address      = Socket.Address.Inet.create_bind_any ~port
+  ; listening_on = function `Inet (_, port) -> port
   }
 ;;
 
@@ -166,26 +181,26 @@ let on_port_chosen_by_os = on_port 0
 
 let on_file path =
   { Where_to_listen.
-    socket_type          = Socket.Type.unix;
-    address              = Socket.Address.Unix.create path;
-    listening_on         = fun _ -> path;
+    socket_type  = Socket.Type.unix
+  ; address      = Socket.Address.Unix.create path
+  ; listening_on = fun _ -> path
   }
 ;;
 
 module Server = struct
 
   type ('address, 'listening_on)  t =
-    { socket : ([ `Passive ], 'address) Socket.t;
-      listening_on : 'listening_on;
-      buffer_age_limit : Writer.buffer_age_limit option;
-      on_handler_error : [ `Raise
-                         | `Ignore
-                         | `Call of ('address -> exn -> unit)
-                         ];
-      handle_client : 'address -> Reader.t -> Writer.t -> unit Deferred.t;
-      max_connections : int;
-      mutable num_connections : int;
-      mutable accept_is_pending : bool;
+    { socket                    : ([ `Passive ], 'address) Socket.t
+    ; listening_on              : 'listening_on
+    ; buffer_age_limit          : Writer.buffer_age_limit option
+    ; on_handler_error          : [ `Raise
+                                  | `Ignore
+                                  | `Call of ('address -> exn -> unit)
+                                  ]
+    ; handle_client             : 'address -> Reader.t -> Writer.t -> unit Deferred.t
+    ; max_connections           : int
+    ; mutable num_connections   : int
+    ; mutable accept_is_pending : bool
     }
   with fields, sexp_of
 
@@ -235,8 +250,8 @@ module Server = struct
       | `Ok (client_socket, client_address) ->
         (* It is possible that someone called [close t] after the [accept] returned but
            before we got here.  In that case, we just close the client. *)
-        if is_closed t then
-          don't_wait_for (Fd.close (Socket.fd client_socket))
+        if is_closed t
+        then don't_wait_for (Fd.close (Socket.fd client_socket))
         else begin
           t.num_connections <- t.num_connections + 1;
           (* immediately recurse to try to accept another client *)
@@ -271,31 +286,30 @@ module Server = struct
   ;;
 
   let create
-      ?(max_connections = 10_000)
-      ?max_pending_connections
-      ?buffer_age_limit
-      ?(on_handler_error = `Raise)
-      where_to_listen
-      handle_client =
-    if max_connections <= 0 then
-      Error.failwiths "Tcp.Server.creater got negative [max_connections]" max_connections
-        sexp_of_int;
-    let module W = Where_to_listen in
-    let socket = create_socket where_to_listen.W.socket_type in
+        ?(max_connections = 10_000)
+        ?max_pending_connections
+        ?buffer_age_limit
+        ?(on_handler_error = `Raise)
+        (where_to_listen : _ Where_to_listen.t)
+        handle_client =
+    if max_connections <= 0
+    then failwiths "Tcp.Server.creater got negative [max_connections]" max_connections
+           sexp_of_int;
+    let socket = create_socket where_to_listen.socket_type in
     close_sock_on_error socket (fun () ->
       Socket.setopt socket Socket.Opt.reuseaddr true;
-      Socket.bind socket where_to_listen.W.address
+      Socket.bind socket where_to_listen.address
       >>| Socket.listen ?max_pending_connections)
     >>| fun socket ->
     let t =
-      { socket;
-        listening_on      = where_to_listen.W.listening_on (Socket.getsockname socket);
-        buffer_age_limit;
-        on_handler_error;
-        handle_client;
-        max_connections;
-        num_connections   = 0;
-        accept_is_pending = false;
+      { socket
+      ; listening_on      = where_to_listen.listening_on (Socket.getsockname socket)
+      ; buffer_age_limit
+      ; on_handler_error
+      ; handle_client
+      ; max_connections
+      ; num_connections   = 0
+      ; accept_is_pending = false
       }
     in
     maybe_accept t;

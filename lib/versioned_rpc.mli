@@ -5,36 +5,36 @@
 
     {ul
 
-     {li
+    {li
 
-     The {i caller} is responsible for managing versions and dispatches to callees that
-     are written in a version-oblivious way.
+    The {i caller} is responsible for managing versions and dispatches to callees that
+    are written in a version-oblivious way.
 
-     The proto-typical example of this scenario is a commander that needs to call out to
-     many assistants for that same system.  In this scenario, the assistants each
-     implement a single version of the rpc and the commander has to take this into
-     account. }
+    The proto-typical example of this scenario is a commander that needs to call out to
+    many assistants for that same system.  In this scenario, the assistants each
+    implement a single version of the rpc and the commander has to take this into
+    account. }
 
-     {li
+    {li
 
-     The {i callee} is responsible for managing versions and callers need not bother
-     themselves with any versions.
+    The {i callee} is responsible for managing versions and callers need not bother
+    themselves with any versions.
 
-     The proto-typical example of this scenario is an assistant from one system calling
-     out the commander of another system.  In this scenario, the assistants each know a
-     single version of the rpc to call and the commander has to implement them all. }
+    The proto-typical example of this scenario is an assistant from one system calling
+    out the commander of another system.  In this scenario, the assistants each know a
+    single version of the rpc to call and the commander has to implement them all. }
 
-     {li
+    {li
 
-     Both {i caller} and {i callee} cooperate to decide which version to use, each one
-     being able to use some subset of all possible versions.
+    Both {i caller} and {i callee} cooperate to decide which version to use, each one
+    being able to use some subset of all possible versions.
 
-     The proto-typical example of this scenario is when two systems developed
-     independently with their rpc types defined in some shared library that has yet
-     another independent rollout schedule.  In this case one may roll out a new rpc
-     version (V) in the shared library (L) and then the caller and callee systems can each
-     upgrade to the new version of L supporting version V at their own pace, with version
-     V only being exercised once both caller and callee have upgraded.  }
+    The proto-typical example of this scenario is when two systems developed
+    independently with their rpc types defined in some shared library that has yet
+    another independent rollout schedule.  In this case one may roll out a new rpc
+    version (V) in the shared library (L) and then the caller and callee systems can each
+    upgrade to the new version of L supporting version V at their own pace, with version
+    V only being exercised once both caller and callee have upgraded.  }
     }
 
     In each scenario, it is desirable that the party responsible for managing versions be
@@ -123,7 +123,7 @@ module Caller_converts : sig
         a mechanism for registering the individual versions that [dispatch_multi] knows
         about.  Registration requires knowing how to get into and out of the model.
 
-       {v
+        {v
            ,-->-- Q1 --> R1 -->-.
           /                      \
          Q --->-- Q2 --> R2 -->-- R
@@ -132,19 +132,19 @@ module Caller_converts : sig
        v}
     *)
     module Make (Model : sig
-      val name : string  (* the name of the Rpc's being unified in the model *)
-      type query
-      type response
-    end) : sig
+                   val name : string  (* the name of the Rpc's being unified in the model *)
+                   type query
+                   type response
+                 end) : sig
 
       (** add a new version to the set of versions available via [dispatch_multi]. *)
       module Register (Version_i : sig
-        val version : int
-        type query with bin_io
-        type response with bin_io
-        val query_of_model : Model.query -> query
-        val model_of_response : response -> Model.response
-      end) : sig
+                         val version : int
+                         type query with bin_io
+                         type response with bin_io
+                         val query_of_model : Model.query -> query
+                         val model_of_response : response -> Model.response
+                       end) : sig
         val rpc : (Version_i.query, Version_i.response) Rpc.t
       end
 
@@ -169,7 +169,7 @@ module Caller_converts : sig
           that conversion of each individual element in the returned pipe may fail. *)
 
       val deprecated_dispatch_multi
-        :  version:int
+        :  version : int
         -> Connection.t
         -> query
         -> ( response Or_error.t Pipe.Reader.t * Pipe_rpc.Id.t
@@ -203,11 +203,11 @@ module Caller_converts : sig
         v}
     *)
     module Make (Model : sig
-      val name : string  (* the name of the Rpc's being unified in the model *)
-      type query
-      type response
-      type error
-    end) : sig
+                   val name : string  (* the name of the Rpc's being unified in the model *)
+                   type query
+                   type response
+                   type error
+                 end) : sig
 
       module type Version_shared = sig
         val version : int
@@ -216,13 +216,14 @@ module Caller_converts : sig
         type error with bin_io
         val query_of_model : Model.query -> query
         val model_of_error : error -> Model.error
+        val client_pushes_back : bool
       end
 
       (** add a new version to the set of versions available via [dispatch_multi]. *)
       module Register (Version_i : sig
-        include Version_shared
-        val model_of_response : response -> Model.response
-      end) : sig
+                         include Version_shared
+                         val model_of_response : response -> Model.response
+                       end) : sig
         val rpc : (Version_i.query, Version_i.response, Version_i.error) Pipe_rpc.t
       end
 
@@ -230,9 +231,9 @@ module Caller_converts : sig
          with. This is useful if, e.g., your [model_of_response] function can fail, so
          that you'd like to filter items out from the result queue. *)
       module Register' (Version_i : sig
-        include Version_shared
-        val model_of_response : response Queue.t -> Model.response Queue.t Deferred.t
-      end) : sig
+                          include Version_shared
+                          val model_of_response : response Queue.t -> Model.response Queue.t Deferred.t
+                        end) : sig
         val rpc : (Version_i.query, Version_i.response, Version_i.error) Pipe_rpc.t
       end
 
@@ -241,11 +242,8 @@ module Caller_converts : sig
         with type response := Model.response
         with type error    := Model.error
     end
-
   end
-
 end
-
 
 module Callee_converts : sig
 
@@ -260,18 +258,18 @@ module Callee_converts : sig
 
       val add_version
         :  ('query, 'response) t
-        -> version:int
-        -> bin_query:'old_query Bin_prot.Type_class.t
-        -> bin_response:'old_response Bin_prot.Type_class.t
+        -> version      : int
+        -> bin_query    : 'old_query Bin_prot.Type_class.t
+        -> bin_response : 'old_response Bin_prot.Type_class.t
         -> ('old_query -> 'query)
         -> ('response -> 'old_response)
         -> ('query, 'response) t Or_error.t
 
       val add_version_with_failure
         :  ('query, 'response Or_error.t) t
-        -> version:int
-        -> bin_query:'old_query Bin_prot.Type_class.t
-        -> bin_response:('old_response, string) Result.t Bin_prot.Type_class.t
+        -> version      : int
+        -> bin_query    : 'old_query Bin_prot.Type_class.t
+        -> bin_response : ('old_response, string) Result.t Bin_prot.Type_class.t
         -> ('old_query -> 'query Or_error.t)
         -> ('response -> 'old_response Or_error.t)
         -> ('query, 'response Or_error.t) t Or_error.t
@@ -304,7 +302,7 @@ module Callee_converts : sig
 
       (** implement multiple versions at once *)
       val implement_multi
-        :  ?log_not_previously_seen_version:(name:string -> int -> unit)
+        :  ?log_not_previously_seen_version : (name:string -> int -> unit)
         -> ('state -> version:int -> query -> response Deferred.t)
         -> 'state Implementation.t list
 
@@ -330,19 +328,19 @@ module Callee_converts : sig
         v}
     *)
     module Make (Model : sig
-      val name : string  (* the name of the Rpc's being unified in the model *)
-      type query
-      type response
-    end) : sig
+                   val name : string  (* the name of the Rpc's being unified in the model *)
+                   type query
+                   type response
+                 end) : sig
 
       (** Add a new version to the set of versions implemented by [implement_multi]. *)
       module Register (Version_i : sig
-        val version : int
-        type query with bin_io
-        type response with bin_io
-        val model_of_query : query -> Model.query
-        val response_of_model : Model.response -> response
-      end) : sig
+                         val version : int
+                         type query with bin_io
+                         type response with bin_io
+                         val model_of_query : query -> Model.query
+                         val response_of_model : Model.response -> response
+                       end) : sig
         val rpc : (Version_i.query, Version_i.response) Rpc.t
       end
 
@@ -362,11 +360,11 @@ module Callee_converts : sig
 
       (** implement multiple versions at once *)
       val implement_multi
-        :  ?log_not_previously_seen_version:(name:string -> int -> unit)
+        :  ?log_not_previously_seen_version : (name:string -> int -> unit)
         -> ('state
-            -> version:int
+            -> version : int
             -> query
-            -> aborted:unit Deferred.t
+            -> aborted : unit Deferred.t
             -> (response Pipe.Reader.t, error) Result.t Deferred.t)
         -> 'state Implementation.t list
 
@@ -392,11 +390,11 @@ module Callee_converts : sig
         v}
     *)
     module Make (Model : sig
-      val name : string  (* the name of the Rpc's being unified in the model *)
-      type query
-      type response
-      type error
-    end) : sig
+                   val name : string  (* the name of the Rpc's being unified in the model *)
+                   type query
+                   type response
+                   type error
+                 end) : sig
 
       module type Version_shared = sig
         val version : int
@@ -405,13 +403,14 @@ module Callee_converts : sig
         type error with bin_io
         val model_of_query : query -> Model.query
         val error_of_model : Model.error -> error
+        val client_pushes_back : bool
       end
 
       (** add a new version to the set of versions available via [implement_multi]. *)
       module Register (Version_i : sig
-        include Version_shared
-        val response_of_model : Model.response -> response
-      end) : sig
+                         include Version_shared
+                         val response_of_model : Model.response -> response
+                       end) : sig
         val rpc : (Version_i.query, Version_i.response, Version_i.error) Pipe_rpc.t
       end
 
@@ -419,9 +418,9 @@ module Callee_converts : sig
          with. This is useful if, e.g., your [model_of_response] function can fail, so
          that you'd like to filter items out from the result queue. *)
       module Register' (Version_i : sig
-        include Version_shared
-        val response_of_model : Model.response Queue.t -> response Queue.t Deferred.t
-      end) : sig
+                          include Version_shared
+                          val response_of_model : Model.response Queue.t -> response Queue.t Deferred.t
+                        end) : sig
         val rpc : (Version_i.query, Version_i.response, Version_i.error) Pipe_rpc.t
       end
 
@@ -467,7 +466,7 @@ module Both_convert : sig
 
       (** implement multiple versions at once *)
       val implement_multi
-        :  ?log_not_previously_seen_version:(name:string -> int -> unit)
+        :  ?log_not_previously_seen_version : (name:string -> int -> unit)
         -> ('state -> version:int -> callee_query -> callee_response Deferred.t)
         -> 'state Implementation.t list
 
@@ -478,22 +477,24 @@ module Both_convert : sig
 
 
     module Make (Model : sig
-      val name : string
-      module Caller : sig type query type response end
-      module Callee : sig type query type response end
-    end) : sig
+                   val name : string
+                   module Caller : sig type query type response end
+                   module Callee : sig type query type response end
+                 end) : sig
 
       open Model
 
-      module Register (Version : sig
-        val version : int
-        type query    with bin_io
-        type response with bin_io
-        val query_of_caller_model : Caller.query -> query
-        val callee_model_of_query :                 query -> Callee.query
-        val response_of_callee_model : Callee.response -> response
-        val caller_model_of_response :                    response -> Caller.response
-      end) : sig
+      module Register
+               (Version : sig
+                  val version : int
+                  type query    with bin_io
+                  type response with bin_io
+                  val query_of_caller_model : Caller.query -> query
+                  val callee_model_of_query :                 query -> Callee.query
+                  val response_of_callee_model : Callee.response -> response
+                  val caller_model_of_response :                    response -> Caller.response
+                end) : sig
+        val rpc : (Version.query, Version.response) Rpc.t
       end
 
       include S
@@ -501,7 +502,6 @@ module Both_convert : sig
         with type caller_response := Caller.response
         with type callee_query    := Callee.query
         with type callee_response := Callee.response
-
     end
   end
 end

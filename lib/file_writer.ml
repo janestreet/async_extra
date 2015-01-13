@@ -9,9 +9,9 @@ let bytes_to_write () =
 ;;
 
 type t =
-  { writer: Writer.t;
-    monitor: Monitor.t;
-    mutable failed: bool;
+  { writer         : Writer.t
+  ; monitor        : Monitor.t
+  ; mutable failed : bool
   }
 with sexp_of
 
@@ -53,33 +53,32 @@ let create ?(append = true) file =
   within' ~monitor (fun () ->
     Deferred.create
       (fun result ->
-        let append_flag = if append then [`Append] else [] in
-        Unix.openfile file ~mode:(append_flag @ [`Wronly; `Creat]) ~perm:0o644
-        >>> fun fd ->
-        let writer =
-          Writer.create ~syscall:(`Periodic (sec 0.1)) fd
-        in
-        let t =
-          { writer;
-            failed = false;
-            monitor;
-          }
-        in
-        Stream.iter (Monitor.detach_and_get_error_stream (Writer.monitor writer))
-          ~f:(fun e ->
-            if not t.failed then begin
-              t.failed <- true;
-              raise e;
-            end);
-        writers := writer :: !writers;
-        Ivar.fill result t))
+         let append_flag = if append then [`Append] else [] in
+         Unix.openfile file ~mode:(append_flag @ [`Wronly; `Creat]) ~perm:0o644
+         >>> fun fd ->
+         let writer =
+           Writer.create ~syscall:(`Periodic (sec 0.1)) fd
+         in
+         let t =
+           { writer
+           ; failed = false
+           ; monitor
+           }
+         in
+         Stream.iter (Monitor.detach_and_get_error_stream (Writer.monitor writer))
+           ~f:(fun e ->
+             if not t.failed then begin
+               t.failed <- true;
+               raise e;
+             end);
+         writers := writer :: !writers;
+         Ivar.fill result t))
 ;;
 
 let flushed t =
-  if not t.failed then
-    Deferred.ignore (Writer.flushed t.writer)
-  else
-    return ()
+  if not t.failed
+  then Deferred.ignore (Writer.flushed t.writer)
+  else return ()
 ;;
 
 let close t = flushed t >>= fun () -> Writer.close t.writer

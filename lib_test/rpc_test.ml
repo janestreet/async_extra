@@ -86,7 +86,7 @@ module Pipe_simple_test = struct
   module Memory_consumption = struct
     let init () =
       let major_cycles = ref 0 in
-      ignore (Gc.create_alarm (fun () -> incr major_cycles));
+      ignore (Gc.Alarm.create (fun () -> incr major_cycles));
       Clock.every (Time.Span.of_sec 5.) (fun () ->
         Log.Global.printf "%d major cycles" !major_cycles)
   end

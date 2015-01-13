@@ -1,4 +1,3 @@
-
 open Core.Std
 open Import
 open Rpc_intf
@@ -30,10 +29,14 @@ module Implementation : sig
       The reason for this is that rpcs often do something like look something up in a
       master structure.  This way, [Implementation.t]'s can be created without having the
       master structure in your hands. *)
-  type 'connection_state t
+ type 'connection_state t
 
   module Description : sig
-    type t = { name : string; version : int; } with compare, sexp
+    type t =
+      { name    : string
+      ; version : int
+      }
+    with compare, sexp
   end
 
   val description : _ t -> Description.t
@@ -58,31 +61,33 @@ module Implementations : sig
       [on_unknown_rpc] to [`Raise] because other programs may mistakenly connect to this
       one causing it to crash. *)
   val create
-    :  implementations:'connection_state Implementation.t list
-    -> on_unknown_rpc:[
-      | `Raise
-      | `Continue
-      | `Close_connection (* This used to be the behavior of `Ignore *)
-      (** [rpc_tag] and [version] are the name and version of the unknown
-          rpc *)
-      | `Call of (rpc_tag:string -> version:int
-                  -> [ `Close_connection
-                     | `Continue ])
-    ]
+    :  implementations : 'connection_state Implementation.t list
+    -> on_unknown_rpc  : [ `Raise
+                         | `Continue
+                         | `Close_connection  (** used to be the behavior of [`Ignore] *)
+                         (** [rpc_tag] and [version] are the name and version of the
+                             unknown rpc *)
+                         | `Call of (rpc_tag    : string
+                                     -> version : int
+                                     -> [ `Close_connection
+                                        | `Continue
+                                        ])
+                         ]
     -> ( 'connection_state t
        , [`Duplicate_implementations of Implementation.Description.t list]
        ) Result.t
 
   val create_exn
-    :  implementations:'connection_state Implementation.t list
-    -> on_unknown_rpc:[
-      | `Raise
-      | `Continue
-      | `Close_connection (* This used to be the behavior of `Ignore *)
-      | `Call of (rpc_tag:string -> version:int ->
-                  [ `Close_connection
-                  | `Continue ])
-    ]
+    :  implementations : 'connection_state Implementation.t list
+    -> on_unknown_rpc  : [ `Raise
+                         | `Continue
+                         | `Close_connection  (** used to be the behavior of [`Ignore] *)
+                         | `Call of (rpc_tag    : string
+                                     -> version : int
+                                     -> [ `Close_connection
+                                        | `Continue
+                                        ])
+                         ]
     -> 'connection_state t
 end
 
@@ -94,8 +99,8 @@ module Rpc : sig
   type ('query, 'response) t
 
   val create
-    :  name:string
-    -> version:int
+    :  name         : string
+    -> version      : int
     -> bin_query    : 'query    Bin_prot.Type_class.t
     -> bin_response : 'response Bin_prot.Type_class.t
     -> ('query, 'response) t
@@ -112,6 +117,13 @@ module Rpc : sig
     -> ('connection_state
         -> 'query
         -> 'response Deferred.t)
+    -> 'connection_state Implementation.t
+
+  val implement'
+    :  ('query, 'response) t
+    -> ('connection_state
+        -> 'query
+        -> 'response)
     -> 'connection_state Implementation.t
 
   val dispatch
@@ -143,19 +155,19 @@ module Pipe_rpc : sig
         up and slow down its work accordingly.  However, it has some drawbacks:
 
         - RPC multiplexing doesn't work as well.  The client will stop reading *all*
-          messages on the connection if any pipe gets saturated, not just ones relating
-          to that pipe.
+        messages on the connection if any pipe gets saturated, not just ones relating
+        to that pipe.
 
         - A server that doesn't pay attention to pushback on its end will accumulate
-          elements on its side of the connection, rather than on the client's side,
-          meaning a slow client can make the server run out of memory.
+        elements on its side of the connection, rather than on the client's side,
+        meaning a slow client can make the server run out of memory.
     *)
-    :  ?client_pushes_back:unit
-    -> name:string
-    -> version:int
-    -> bin_query    : 'query    Bin_prot.Type_class.t
-    -> bin_response : 'response Bin_prot.Type_class.t
-    -> bin_error    : 'error    Bin_prot.Type_class.t
+    :  ?client_pushes_back : unit
+    -> name                : string
+    -> version             : int
+    -> bin_query           : 'query    Bin_prot.Type_class.t
+    -> bin_response        : 'response Bin_prot.Type_class.t
+    -> bin_error           : 'error    Bin_prot.Type_class.t
     -> unit
     -> ('query, 'response, 'error) t
 
@@ -167,7 +179,7 @@ module Pipe_rpc : sig
     :  ('query, 'response, 'error) t
     -> ('connection_state
         -> 'query
-        -> aborted:unit Deferred.t
+        -> aborted : unit Deferred.t
         -> ('response Pipe.Reader.t, 'error) Result.t Deferred.t)
     -> 'connection_state Implementation.t
 
@@ -196,7 +208,7 @@ module Pipe_rpc : sig
       updates. *)
   val abort : (_, _, _) t -> Connection.t -> Id.t -> unit
 
-  val name : (_, _, _) t -> string
+  val name    : (_, _, _) t -> string
   val version : (_, _, _) t -> int
 end
 
@@ -210,13 +222,13 @@ module State_rpc : sig
   module Id : sig type t end
 
   val create
-    :  ?client_pushes_back:unit
-    -> name:string
-    -> version:int
-    -> bin_query  : 'query  Bin_prot.Type_class.t
-    -> bin_state  : 'state  Bin_prot.Type_class.t
-    -> bin_update : 'update Bin_prot.Type_class.t
-    -> bin_error  : 'error  Bin_prot.Type_class.t
+    :  ?client_pushes_back : unit
+    -> name                : string
+    -> version             : int
+    -> bin_query           : 'query  Bin_prot.Type_class.t
+    -> bin_state           : 'state  Bin_prot.Type_class.t
+    -> bin_update          : 'update Bin_prot.Type_class.t
+    -> bin_error           : 'error  Bin_prot.Type_class.t
     -> unit
     -> ('query, 'state, 'update, 'error) t
 
@@ -229,7 +241,7 @@ module State_rpc : sig
     :  ('query, 'state, 'update, 'error) t
     -> ('connection_state
         -> 'query
-        -> aborted:unit Deferred.t
+        -> aborted : unit Deferred.t
         -> (('state * 'update Pipe.Reader.t), 'error) Result.t Deferred.t)
     -> 'connection_state Implementation.t
 
@@ -237,20 +249,20 @@ module State_rpc : sig
     :  ('query, 'state, 'update, 'error) t
     -> Connection.t
     -> 'query
-    -> update:('state -> 'update -> 'state)
+    -> update : ('state -> 'update -> 'state)
     -> ( 'state * ('state * 'update) Pipe.Reader.t * Id.t
        , 'error
        ) Result.t Or_error.t Deferred.t
 
   val abort : (_, _, _, _) t -> Connection.t -> Id.t -> unit
 
-  val name : (_, _, _, _) t -> string
+  val name    : (_, _, _, _) t -> string
   val version : (_, _, _, _) t -> int
 end
 
 module Any : sig
   type t =
-    | Rpc : ('q, 'r) Rpc.t -> t
-    | Pipe : ('q, 'r, 'e) Pipe_rpc.t -> t
+    | Rpc   : ('q, 'r) Rpc.t -> t
+    | Pipe  : ('q, 'r, 'e) Pipe_rpc.t -> t
     | State : ('q, 's, 'u, 'e) State_rpc.t -> t
 end

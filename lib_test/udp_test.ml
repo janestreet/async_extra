@@ -20,8 +20,7 @@ let tests = [
   "bind_any", sock (bind_any ());
 ]
 
-let with_socks expected sexp_of f =
-  let rev_effects = ref [] in
+let with_socks expected sexp_of_effect f =
   bind_any ()
   >>= fun sock1 ->
   Monitor.protect ~finally:(fun () -> Fd.close (Socket.fd sock1))
@@ -33,23 +32,27 @@ let with_socks expected sexp_of f =
             let `Inet (_host1, port1), `Inet (_host2, port2) =
               Unix.Socket.getsockname sock1, Unix.Socket.getsockname sock2
             in
-            with_timeout (sec 0.001)
+            let rev_effects = ref [] in
+            (* This timeout looks long, but with substantial concurrency, as may occur on
+               Hydra workers, even 10ms is too short. *)
+            with_timeout (sec 0.1)
               (f ~sock1 ~sock2 ~effect:(fun e -> rev_effects := e :: !rev_effects)
                  ~addr1:(`Inet (Unix.Inet_addr.localhost, port1))
                  ~addr2:(`Inet (Unix.Inet_addr.localhost, port2)))
-            >>= function
-            | `Timeout | `Result () ->
-              Unix.Socket.shutdown sock1 `Both;
-              Unix.Socket.shutdown sock2 `Both;
-              Unix.close (Socket.fd sock1) >>= fun () ->
-              Unix.close (Socket.fd sock2) >>| fun () ->
-              let effects = List.rev !rev_effects in
-              if not (Pervasives.(=) expected effects)
-              then
-                failwiths "unexpected effects" (expected, effects)
-                  (Tuple.T2.sexp_of_t
-                     (List.sexp_of_t sexp_of)
-                     (List.sexp_of_t sexp_of))))
+            >>= fun outcome ->
+            Unix.Socket.shutdown sock1 `Both;
+            Unix.Socket.shutdown sock2 `Both;
+            Unix.close (Socket.fd sock1)
+            >>= fun () ->
+            Unix.close (Socket.fd sock2)
+            >>| fun () ->
+            let effects = List.rev !rev_effects in
+            if not (Pervasives.(=) expected effects)
+            then
+              failwiths "unexpected effects" (outcome, expected, effects)
+                <:sexp_of< [ `Result of unit | `Timeout ]
+                           * effect list
+                           * effect list >>))
 
 let tests =
   tests

@@ -3,7 +3,7 @@ open Async_kernel.Std
 
 module Debug (Bus : module type of Bus) = struct
 
-  module Debug = Debug.Make (struct end)
+  module Debug = Debug.Make ()
 
   include Debug
 

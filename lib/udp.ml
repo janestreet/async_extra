@@ -10,11 +10,11 @@ let default_retry = 12
 
 module Config = struct
   type t =
-    { capacity : int
-    ; init : write_buffer
-    ; before : write_buffer -> unit
-    ; after : write_buffer -> unit
-    ; stop : unit Deferred.t
+    { capacity  : int
+    ; init      : write_buffer
+    ; before    : write_buffer -> unit
+    ; after     : write_buffer -> unit
+    ; stop      : unit Deferred.t
     ; max_ready : int
     } with fields
 
@@ -58,7 +58,9 @@ let sendto_sync () =
     other Async jobs to run. *)
 let ready_iter fd ~stop ~max_ready ~f read_or_write =
   let rec inner_loop i file_descr =
-    if i < max_ready && Ivar.is_empty stop && Fd.is_open fd then match f file_descr with
+    if i < max_ready && Ivar.is_empty stop && Fd.is_open fd
+    then
+      match f file_descr with
       | `Continue -> inner_loop (i + 1) file_descr
       | `Stop -> `Stopped
     else `Interrupted_or_closed
@@ -73,7 +75,7 @@ let ready_iter fd ~stop ~max_ready ~f read_or_write =
            | `Interrupted_or_closed -> ()
            | `Stopped -> Ivar.fill_if_empty stop ()
          with
-         | Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _) -> ()
+         | Unix.Unix_error ((EAGAIN | EWOULDBLOCK | EINTR), _, _) -> ()
          | e -> Ivar.fill_if_empty stop (); raise e)
       file_descr)
   with
@@ -128,12 +130,12 @@ let recvfrom_loop_with_buffer_replacement ?(config = Config.create ()) fd f =
   Config.stop config
   >>> Ivar.fill_if_empty stop;
   let buf = ref (Config.init config) in
-  ready_iter ~stop ~max_ready:config.Config.max_ready fd `Read ~f:(fun file_descr ->
+  ready_iter ~stop ~max_ready:config.max_ready fd `Read ~f:(fun file_descr ->
     let addr = Iobuf.recvfrom_assume_fd_is_nonblocking !buf file_descr in
     match addr with
-    | Core.Std.Unix.ADDR_UNIX dom ->
+    | ADDR_UNIX dom ->
       fail !buf "Unix domain socket addresses not supported" dom <:sexp_of< string >>
-    | Core.Std.Unix.ADDR_INET (host, port) ->
+    | ADDR_INET (host, port) ->
       Config.before config !buf;
       buf := f !buf (`Inet (host, port));
       Config.after  config !buf;
@@ -155,8 +157,10 @@ let read_loop_with_buffer_replacement ?(config = Config.create ()) fd f =
   Config.stop config
   >>> Ivar.fill_if_empty stop;
   let buf = ref (Config.init config) in
-  ready_iter ~stop ~max_ready:config.Config.max_ready fd `Read ~f:(fun file_descr ->
-    Iobuf.read_assume_fd_is_nonblocking !buf file_descr;
+  ready_iter ~stop ~max_ready:config.max_ready fd `Read ~f:(fun file_descr ->
+    Core.Syscall_result.Unit.ok_or_unix_error_exn
+      (Iobuf.read_assume_fd_is_nonblocking !buf file_descr)
+      ~syscall_name:"read";
     Config.before config !buf;
     buf := f !buf;
     Config.after  config !buf;
@@ -190,33 +194,39 @@ let recvmmsg_loop =
       ->
         let srcs : Core.Std.Unix.sockaddr array option =
           if create_srcs
-          then
-            Some
-              (Array.create ~len:(Array.length bufs)
-                 (Socket.Address.to_sockaddr (`Inet (Unix.Inet_addr.bind_any, 0))))
+          then Some
+                 (Array.create ~len:(Array.length bufs)
+                    (Socket.Address.to_sockaddr (`Inet (Unix.Inet_addr.bind_any, 0))))
           else None
         in
         let stop = Ivar.create () in
         Config.stop config
         >>> Ivar.fill_if_empty stop;
-        ready_iter ~stop ~max_ready:config.Config.max_ready fd `Read ~f:(fun file_descr ->
-          let count = recvmmsg ?srcs file_descr bufs in
-          if count > Array.length bufs
-          then
-            failwithf
-              "Unexpected result from Iobuf.recvmmsg_assume_fd_is_nonblocking: \
-               count (%d) > Array.length bufs (%d)"
-              count
-              (Array.length bufs)
-              ()
-          else if count >= 0 then
-            (for i = 0 to count - 1 do Config.before config bufs.(i) done;
-             f ?srcs bufs ~count;
-             for i = 0 to count - 1 do Config.after  config bufs.(i) done;
-             `Continue)
-          else (* EWOULDBLOCK/EAGAIN is reported as a negative value *)
-            (on_wouldblock ();
-            `Continue))
+        ready_iter ~stop ~max_ready:config.max_ready fd `Read ~f:(fun file_descr ->
+          let result = recvmmsg ?srcs file_descr bufs in
+          if Unix.Syscall_result.Int.is_ok result then begin
+            let count = Unix.Syscall_result.Int.ok_exn result in
+            if count > Array.length bufs
+            then
+              failwithf
+                "Unexpected result from Iobuf.recvmmsg_assume_fd_is_nonblocking: \
+                 count (%d) > Array.length bufs (%d)"
+                count
+                (Array.length bufs)
+                ()
+            else begin
+              for i = 0 to count - 1 do Config.before config bufs.(i) done;
+              f ?srcs bufs ~count;
+              for i = 0 to count - 1 do Config.after  config bufs.(i) done;
+              `Continue
+            end
+          end else
+            match Unix.Syscall_result.Int.error_exn result with
+            | EWOULDBLOCK | EAGAIN ->
+              on_wouldblock ();
+              `Continue
+            | error ->
+              raise (Unix.Unix_error(error, "recvmmsg", "")))
         >>| function
         | (`Bad_fd | `Unsupported) as error ->
           failwiths "Udp.recvmmsg_loop" (error, fd)
@@ -241,24 +251,30 @@ let recvmmsg_no_sources_loop =
         Config.stop config
         >>> Ivar.fill_if_empty stop;
         ready_iter ~stop ~max_ready:config.Config.max_ready fd `Read ~f:(fun file_descr ->
-          let count = recvmmsg file_descr ~count:max_count bufs in
-          if count > Array.length bufs
-          then
-            failwithf
-              "Unexpected result from \
-               Iobuf.recvmmsg_assume_fd_is_nonblocking_no_options: \
-               count (%d) > Array.length bufs (%d)"
-              count
-              (Array.length bufs)
-              ()
-          else if count >= 0 then
-            (for i = 0 to count - 1 do Config.before config bufs.(i) done;
-             callback bufs ~count;
-             for i = 0 to count - 1 do Config.after  config bufs.(i) done;
-             `Continue)
-          else (* EWOULDBLOCK/EAGAIN is reported as a negative value *)
-            (on_wouldblock ();
-             `Continue))
+          let result = recvmmsg file_descr ~count:max_count bufs in
+          if Unix.Syscall_result.Int.is_ok result then begin
+            let count = Unix.Syscall_result.Int.ok_exn result in
+            if count > Array.length bufs
+            then
+              failwithf
+                "Unexpected result from \
+                 Iobuf.recvmmsg_assume_fd_is_nonblocking_no_options: \
+                 count (%d) > Array.length bufs (%d)"
+                count
+                (Array.length bufs)
+                ()
+            else begin
+              for i = 0 to count - 1 do Config.before config bufs.(i) done;
+              callback bufs ~count;
+              for i = 0 to count - 1 do Config.after  config bufs.(i) done;
+              `Continue
+            end
+          end else
+            match Unix.Syscall_result.Int.error_exn result with
+            | EWOULDBLOCK | EAGAIN ->
+              on_wouldblock ();
+              `Continue
+            | error -> raise (Unix.Unix_error (error, "recvmmsg", "")))
         >>| function
         | (`Bad_fd | `Unsupported) as error ->
           failwiths "Udp.recvmmsg_no_sources_loop" (error, fd)

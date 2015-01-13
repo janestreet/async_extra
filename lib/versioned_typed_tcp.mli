@@ -9,10 +9,10 @@ module Dont_care_about_mode : Mode
 
 module Make (Z : Arg) :
   S with
-    module To_server_msg = Z.To_server_msg and
-    module To_client_msg = Z.To_client_msg and
-    module Client_name = Z.Client_name and
-    module Server_name = Z.Server_name
+  module To_server_msg = Z.To_server_msg and
+module To_client_msg = Z.To_client_msg and
+module Client_name = Z.Client_name and
+module Server_name = Z.Server_name
 
 (* Repeater is used in the cases where we want to inspect and possible alter the flow
    between a client and a server without having to change either the client or the server
@@ -45,18 +45,19 @@ sig
   type t
 
   val create
-    :  ?is_client_ip_authorized:(string -> bool)
-    -> repeater_name:string
-    -> listen_port:int  (* repeater will listen on this port *)
-    -> server_ip:string (* the real server's ip, port and name *)
-    -> server_port:int
-    -> server_name:Server_name.t
+    :  ?is_client_ip_authorized : (string -> bool)
+    -> repeater_name            : string
+    -> listen_port              : int  (* repeater will listen on this port *)
+    -> server_ip                : string (* the real server's ip, port and name *)
+    -> server_port              : int
+    -> server_name              : Server_name.t
     -> t Deferred.t
 
-  type ('state, 'send, 'recv) filter =
-    'recv -> state:'state
-    -> client_name:Client_name.t
-    -> server_name:Server_name.t
+  type ('state, 'send, 'recv) filter
+    = 'recv
+    -> state       : 'state
+    -> client_name : Client_name.t
+    -> server_name : Server_name.t
     -> ('send, 'recv) Repeater_hook_result.t
 
   (* [start t ~on_connect ~to_server_msg_filter ~to_client_msg_filter ~on_error] starts
@@ -86,13 +87,15 @@ sig
      and will be propagated to the monitor that called [start]. *)
   val start
     :  t
-    -> on_connect:(Client_name.t -> 'state Or_error.t)
-    -> to_server_msg_filter:('state, To_client_msg.t, To_server_msg.t) filter
-    -> to_client_msg_filter:('state, To_server_msg.t, To_client_msg.t) filter
-    -> on_error:(client_name:Client_name.t ->
-                 server_name:Server_name.t ->
-                 state:'state ->
-                 [ `repeater_to_client | `repeater_to_server ] -> Repeater_error.t -> unit)
+    -> on_connect           : (Client_name.t -> 'state Or_error.t)
+    -> to_server_msg_filter : ('state, To_client_msg.t, To_server_msg.t) filter
+    -> to_client_msg_filter : ('state, To_server_msg.t, To_client_msg.t) filter
+    -> on_error             : (client_name    : Client_name.t
+                               -> server_name : Server_name.t
+                               -> state       : 'state
+                               -> [ `repeater_to_client | `repeater_to_server ]
+                               -> Repeater_error.t
+                               -> unit)
     -> unit
 
   val send_to_all_clients : t -> To_client_msg.t -> unit
@@ -122,18 +125,18 @@ module Datumable_of_binable : sig
   end
 
   module Make_datumable5
-    (Versions : Versions)
-    (T : T)
-    (V1 : T_bin)
-    (V2 : T_bin)
-    (V3 : T_bin)
-    (V4 : T_bin)
-    (V5 : T_bin)
-    (V1_cvt : V(V1)(T).S)
-    (V2_cvt : V(V2)(T).S)
-    (V3_cvt : V(V3)(T).S)
-    (V4_cvt : V(V4)(T).S)
-    (V5_cvt : V(V5)(T).S)
+           (Versions : Versions)
+           (T : T)
+           (V1 : T_bin)
+           (V2 : T_bin)
+           (V3 : T_bin)
+           (V4 : T_bin)
+           (V5 : T_bin)
+           (V1_cvt : V(V1)(T).S)
+           (V2_cvt : V(V2)(T).S)
+           (V3_cvt : V(V3)(T).S)
+           (V4_cvt : V(V4)(T).S)
+           (V5_cvt : V(V5)(T).S)
     : Datumable with type datum = T.t
 
   module type Pre_versions = sig
@@ -142,62 +145,62 @@ module Datumable_of_binable : sig
   end
 
   module Five_versions
-    (Versions : Pre_versions)
-    (T : T)
-    (V1 : T_bin)
-    (V2 : T_bin)
-    (V3 : T_bin)
-    (V4 : T_bin)
-    (V5 : T_bin)
-    (V1_cvt : V(V1)(T).S)
-    (V2_cvt : V(V2)(T).S)
-    (V3_cvt : V(V3)(T).S)
-    (V4_cvt : V(V4)(T).S)
-    (V5_cvt : V(V5)(T).S)
+           (Versions : Pre_versions)
+           (T : T)
+           (V1 : T_bin)
+           (V2 : T_bin)
+           (V3 : T_bin)
+           (V4 : T_bin)
+           (V5 : T_bin)
+           (V1_cvt : V(V1)(T).S)
+           (V2_cvt : V(V2)(T).S)
+           (V3_cvt : V(V3)(T).S)
+           (V4_cvt : V(V4)(T).S)
+           (V5_cvt : V(V5)(T).S)
     : Datumable with type datum = T.t
   ;;
 
   module Four_versions
-    (Versions : Pre_versions)
-    (T : T)
-    (V1 : T_bin)
-    (V2 : T_bin)
-    (V3 : T_bin)
-    (V4 : T_bin)
-    (V1_cvt : V(V1)(T).S)
-    (V2_cvt : V(V2)(T).S)
-    (V3_cvt : V(V3)(T).S)
-    (V4_cvt : V(V4)(T).S)
+           (Versions : Pre_versions)
+           (T : T)
+           (V1 : T_bin)
+           (V2 : T_bin)
+           (V3 : T_bin)
+           (V4 : T_bin)
+           (V1_cvt : V(V1)(T).S)
+           (V2_cvt : V(V2)(T).S)
+           (V3_cvt : V(V3)(T).S)
+           (V4_cvt : V(V4)(T).S)
     : Datumable with type datum = T.t
   ;;
 
   module Three_versions
-    (Versions : Pre_versions)
-    (T : T)
-    (V1 : T_bin)
-    (V2 : T_bin)
-    (V3 : T_bin)
-    (V1_cvt : V(V1)(T).S)
-    (V2_cvt : V(V2)(T).S)
-    (V3_cvt : V(V3)(T).S)
+           (Versions : Pre_versions)
+           (T : T)
+           (V1 : T_bin)
+           (V2 : T_bin)
+           (V3 : T_bin)
+           (V1_cvt : V(V1)(T).S)
+           (V2_cvt : V(V2)(T).S)
+           (V3_cvt : V(V3)(T).S)
     : Datumable with type datum = T.t
   ;;
 
   module Two_versions
-    (Versions : Pre_versions)
-    (T : T)
-    (V1 : T_bin)
-    (V2 : T_bin)
-    (V1_cvt : V(V1)(T).S)
-    (V2_cvt : V(V2)(T).S)
+           (Versions : Pre_versions)
+           (T : T)
+           (V1 : T_bin)
+           (V2 : T_bin)
+           (V1_cvt : V(V1)(T).S)
+           (V2_cvt : V(V2)(T).S)
     : Datumable with type datum = T.t
   ;;
 
   module One_version
-    (Versions : Pre_versions)
-    (T : T)
-    (V1 : T_bin)
-    (V1_cvt : V(V1)(T).S)
+           (Versions : Pre_versions)
+           (T : T)
+           (V1 : T_bin)
+           (V1_cvt : V(V1)(T).S)
     : Datumable with type datum = T.t
   ;;
 end

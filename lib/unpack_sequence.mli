@@ -6,10 +6,10 @@ open Import
 
 module Result : sig
   type ('a, 'b) t =
-  | Input_closed
-  | Input_closed_in_the_middle_of_data of ('a, 'b) Unpack_buffer.t
-  | Output_closed of 'a Queue.t * ('a, 'b) Unpack_buffer.t
-  | Unpack_error of Error.t
+    | Input_closed
+    | Input_closed_in_the_middle_of_data of ('a, 'b) Unpack_buffer.t
+    | Output_closed                      of 'a Queue.t * ('a, 'b) Unpack_buffer.t
+    | Unpack_error                       of Error.t
   with sexp_of
 
   val to_error : (_, _) t -> Error.t

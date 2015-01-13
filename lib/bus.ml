@@ -3,14 +3,14 @@ open Import
 
 let verbose = false
 
-module Bus_id = Unique_id.Int (struct end)
+module Bus_id = Unique_id.Int ()
 
 module State = struct
   type t =
     | Created
     | Started
     | Syncing
-    with sexp_of
+  with sexp_of
 end
 
 open State
@@ -56,7 +56,7 @@ module Todo = struct
       | Subscribe subscriber      -> Subscriber.invariant invariant_a subscriber
       | Unsubscribe subscriber    ->
         Subscriber.invariant invariant_a subscriber;
-        assert (not subscriber.Subscriber.am_subscribed));
+        assert (not subscriber.am_subscribed));
   ;;
 end
 
@@ -86,8 +86,8 @@ let invariant invariant_a t =
         | Started -> assert (Queue.is_empty t.todo)
         | Created ->
           Queue.iter todo ~f:(function
-            | Todo.Flushed _ | Todo.Write _ -> ()
-            | Todo.Subscribe _ | Todo.Unsubscribe _ -> assert false))))
+            | Flushed _ | Write _ -> ()
+            | Subscribe _ | Unsubscribe _ -> assert false))))
 ;;
 
 let create ~can_subscribe_after_start =
@@ -99,22 +99,21 @@ let create ~can_subscribe_after_start =
   }
 ;;
 
-let do_subscribe t subscriber =
-  assert subscriber.Subscriber.am_subscribed;
-  subscriber.Subscriber.subscribers_elt <- Some (Bag.add t.subscribers subscriber);
+let do_subscribe t (subscriber : _ Subscriber.t) =
+  assert subscriber.am_subscribed;
+  subscriber.subscribers_elt <- Some (Bag.add t.subscribers subscriber);
 ;;
 
-let do_unsubscribe t subscriber =
-  assert (not subscriber.Subscriber.am_subscribed);
-  let module S = Subscriber in
-  match subscriber.S.subscribers_elt with
+let do_unsubscribe t (subscriber : _ Subscriber.t) =
+  assert (not subscriber.am_subscribed);
+  match subscriber.subscribers_elt with
   | None ->
     (* This can happen if [unsubscribe t subscriber] is called before [Todo.Subscribe] is
        processed. *)
     ()
   | Some elt ->
     Bag.remove t.subscribers elt;
-    subscriber.S.subscribers_elt <- None;
+    subscriber.subscribers_elt <- None;
 ;;
 
 let sync t =
@@ -126,20 +125,20 @@ let sync t =
     upon Deferred.unit (fun () ->
       while not (Queue.is_empty t.todo) do
         match Queue.dequeue_exn t.todo with
-        | Todo.Flushed fill_when_flushed -> Ivar.fill fill_when_flushed ();
-        | Todo.Subscribe subscriber ->
-          if subscriber.Subscriber.am_subscribed then do_subscribe t subscriber;
-        | Todo.Unsubscribe subscriber -> do_unsubscribe t subscriber;
-        | Todo.Write a ->
+        | Flushed fill_when_flushed -> Ivar.fill fill_when_flushed ();
+        | Subscribe subscriber ->
+          if subscriber.am_subscribed then do_subscribe t subscriber;
+        | Unsubscribe subscriber -> do_unsubscribe t subscriber;
+        | Write a ->
           Bag.iter t.subscribers ~f:(fun subscriber ->
             let { Subscriber. am_subscribed; send_f_raises_to; f; _ } = subscriber in
             if am_subscribed then
               match Scheduler.within_v ~monitor:send_f_raises_to (fun () -> f a) with
               | Some () -> ()
               | None    ->
-                if subscriber.Subscriber.am_subscribed then begin
-                  subscriber.Subscriber.am_subscribed <- false;
-                  Queue.enqueue t.todo (Todo.Unsubscribe subscriber);
+                if subscriber.am_subscribed then begin
+                  subscriber.am_subscribed <- false;
+                  Queue.enqueue t.todo (Unsubscribe subscriber);
                 end);
       done;
       t.state <- Started)
@@ -147,9 +146,9 @@ let sync t =
 
 let enqueue t todo = Queue.enqueue t.todo todo; sync t
 
-let flushed t = Deferred.create (fun ivar -> enqueue t (Todo.Flushed ivar))
+let flushed t = Deferred.create (fun ivar -> enqueue t (Flushed ivar))
 
-let write t a = enqueue t (Todo.Write a)
+let write t a = enqueue t (Write a)
 
 let start t =
   match t.state with
@@ -185,22 +184,22 @@ let subscribe_exn t ~f =
   | Started ->
     fail_if_not_can_subscribe_after_start t; do_subscribe t subscriber
   | Syncing ->
-    fail_if_not_can_subscribe_after_start t; enqueue t (Todo.Subscribe subscriber)
+    fail_if_not_can_subscribe_after_start t; enqueue t (Subscribe subscriber)
   end;
   subscriber;
 ;;
 
-let unsubscribe t subscriber =
-  if not (Bus_id.equal t.id subscriber.Subscriber.bus_id)
+let unsubscribe t (subscriber : _ Subscriber.t) =
+  if not (Bus_id.equal t.id subscriber.bus_id)
   then failwiths "Bus.unsubscribe of mismatched bus and subscriber" (t, subscriber)
          <:sexp_of< _ t * _ Subscriber.t >>;
-  if subscriber.Subscriber.am_subscribed then begin
-    subscriber.Subscriber.am_subscribed <- false;
+  if subscriber.am_subscribed then begin
+    subscriber.am_subscribed <- false;
     match t.state with
     (* If [t.state = Created] or [t.state = Started], we can [do_unsubscribe] now
        since we can not be running a subscriber. *)
     | Created | Started -> do_unsubscribe t subscriber
-    | Syncing -> enqueue t (Todo.Unsubscribe subscriber)
+    | Syncing -> enqueue t (Unsubscribe subscriber)
   end;
 ;;
 

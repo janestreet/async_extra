@@ -70,8 +70,8 @@ module Nfs = struct
     repeat_with_abort ~abort ~f:(fun () ->
       create ?message path
       >>| function
-        | Ok ()   -> true
-        | Error _ -> false)
+      | Ok ()   -> true
+      | Error _ -> false)
     >>| fail_on_abort path
   ;;
 

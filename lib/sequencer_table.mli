@@ -4,8 +4,8 @@
     An ['a Sequencer_table.Make(Key).t] is similar in concept to:
 
     {[
-      { mutable state : 'a option;
-        jobs  : 'a option Throttle.Sequencer.t;
+      { mutable state : 'a option
+      ; jobs  : 'a option Throttle.Sequencer.t
       } Key.Table.t
     ]}
 
@@ -19,8 +19,8 @@
     implemented with two tables, one of states and one of sequencers:
 
     {[
-      { states : 'a Key.Table.t;
-        jobs   : ('a option -> unit Deferred.t) Sequencer.t Key.Table.t;
+      { states : 'a Key.Table.t
+      ; jobs   : ('a option -> unit Deferred.t) Sequencer.t Key.Table.t
       }
     ]}
 
@@ -37,7 +37,11 @@ open Import
 
 module Make (Key : Hashable) : sig
 
-  type 'a t
+  (** Every [Key.t] in the table has an associated [state], which each job running on that
+      key gets access to.  Jobs maybe have an associated [job_tag] which is provided
+      purely to assist debugging, as the tag is included in the sexp serialization of
+      [t]. *)
+  type ('state, 'job_tag) t with sexp_of
 
   val create : unit -> _ t
 
@@ -53,13 +57,18 @@ module Make (Key : Hashable) : sig
       state and calling [f] with the state found.  Otherwise, the user would need to
       consider the race that the state passed to [f] might have been changed by
       [set_state]. *)
-  val enqueue : 'a t -> key:Key.t -> ('a option -> 'b Deferred.t) -> 'b Deferred.t
+  val enqueue
+    :  ('state, 'job_tag) t
+    -> key:Key.t
+    -> ?tag:'job_tag
+    -> ('state option -> 'b Deferred.t)
+    -> 'b Deferred.t
 
   (** [set_state t key state_opt] sets the state for [key] immediately.  The state will be
       kept internally until set to [None] *)
-  val set_state : 'a t -> key:Key.t -> 'a option -> unit
+  val set_state : ('state, _) t -> key:Key.t -> 'state option -> unit
 
-  val find_state : 'a t -> Key.t -> 'a option
+  val find_state : ('state, _) t -> Key.t -> 'state option
 
   (** [num_unfinished_jobs t key] returns the number of jobs for [key] including including
       pending and running. *)
@@ -70,11 +79,11 @@ module Make (Key : Hashable) : sig
 
   (** Fold over keys with states or pending/running jobs. It's safe to mutate ([enqueue]
       or [set_state]) when folding *)
-  val fold : 'a t -> init:'b -> f:('b -> key:Key.t -> 'a option -> 'b) -> 'b
+  val fold : ('state, _) t -> init:'b -> f:('b -> key:Key.t -> 'state option -> 'b) -> 'b
 
   (** The result is determined when all jobs enqueued before this are finished.  The
       implementation adds a new job to every key currently with at least one running job
       attached, so it will affect [num_unfinished_jobs] *)
-  val prior_jobs_done : _ t -> unit Deferred.t
+  val prior_jobs_done : (_, _) t -> unit Deferred.t
 
 end

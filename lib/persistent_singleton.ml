@@ -36,9 +36,9 @@ module Make (Z : Arg) : S with type persistent_singleton = Z.t = struct
     let res =
       Sys.file_exists file
       >>= function
-        | `Yes -> Reader.load_sexp_exn file (Option.t_of_sexp Z.t_of_sexp)
-        | `No -> return (Some default)
-        | `Unknown -> raise (Can_not_determine_whether_file_exists file)
+      | `Yes -> Reader.load_sexp_exn file (Option.t_of_sexp Z.t_of_sexp)
+      | `No -> return (Some default)
+      | `Unknown -> raise (Can_not_determine_whether_file_exists file)
     in
     res
     >>= fun res ->

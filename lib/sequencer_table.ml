@@ -4,13 +4,30 @@ open Import
 let debug_on_find_state = ref ignore
 
 module Make (Key : Hashable) = struct
-  type 'a t =
-    { states : 'a Key.Table.t
+  module Tag = struct
+    type 'job_tag t =
+      | User_job of 'job_tag option
+      | Prior_jobs_done
+    with sexp
+  end
+
+  module Job = struct
+    type ('state, 'job_tag) t =
+      { tag : 'job_tag Tag.t
+      ; run : ('state option -> unit Deferred.t) sexp_opaque
+      }
+
+    let sexp_of_t _ sexp_of_job_tag t = t.tag |> <:sexp_of< job_tag Tag.t >>
+  end
+
+  type ('state, 'job_tag) t =
+    { states : 'state Key.Table.t
     (* We use a [Queue.t] and implement the [Throttle.Sequencer] functionality ourselves,
        because throttles don't provide a way to get notified when they are empty, and we
        need to remove the table entry for an emptied throttle. *)
-    ; jobs : ('a option -> unit Deferred.t) Queue.t Key.Table.t
-    } with fields
+    ; jobs   : ('state, 'job_tag) Job.t Queue.t Key.Table.t
+    }
+  with sexp_of, fields
 
   let create () =
     { states = Key.Table.create ()
@@ -18,7 +35,7 @@ module Make (Key : Hashable) = struct
     }
   ;;
 
-  let rec run_jobs_until_none_remain t ~key queue =
+  let rec run_jobs_until_none_remain t ~key (queue : (_, _) Job.t Queue.t) =
     match Queue.peek queue with
     | None -> Hashtbl.remove t.jobs key
     | Some job ->
@@ -26,7 +43,7 @@ module Make (Key : Hashable) = struct
          deferred in between. *)
       let state = Hashtbl.find t.states key in
       !debug_on_find_state ();
-      job state >>> fun () ->
+      job.run state >>> fun () ->
       assert (phys_equal (Queue.dequeue_exn queue) job);
       run_jobs_until_none_remain t ~key queue;
   ;;
@@ -36,16 +53,16 @@ module Make (Key : Hashable) = struct
     | Some state -> Hashtbl.set t.states ~key ~data:state
   ;;
 
-  let enqueue t ~key f =
+  let enqueue t ~key ?tag f =
     Deferred.create (fun ivar ->
       (* when job is called, [f] is invoked immediately, there shall be no deferred in
          between *)
-      let job state_opt =
+      let run state_opt =
         Monitor.try_with ~run:`Now (fun () -> f state_opt) >>| Ivar.fill ivar
       in
+      let job = { Job. tag = Tag.User_job tag; run } in
       match Hashtbl.find t.jobs key with
-      | Some queue ->
-        Queue.enqueue queue job
+      | Some queue -> Queue.enqueue queue job
       | None ->
         let queue = Queue.create () in
         Queue.enqueue queue job;
@@ -83,9 +100,10 @@ module Make (Key : Hashable) = struct
     Hashtbl.fold t.jobs ~init:[] ~f:(fun ~key:_ ~data:queue acc ->
       let this_key_done =
         Deferred.create (fun ivar ->
-          Queue.enqueue queue (fun _ ->
-            Ivar.fill ivar ();
-            Deferred.unit))
+          Queue.enqueue queue
+            { tag = Tag.Prior_jobs_done
+            ; run = (fun _ -> Ivar.fill ivar (); Deferred.unit)
+            })
       in
       this_key_done :: acc)
     |> Deferred.all_unit

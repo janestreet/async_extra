@@ -39,7 +39,7 @@ module Summary : sig
 end
 
 (** Get summarized cpu usage.  Each window is the duration over which the summary should
-     be calculated.  The underlying data structure adapts to keep a sufficiently large
+    be calculated.  The underlying data structure adapts to keep a sufficiently large
     history of samples to calculate summaries for all windows.  The pipe will deliver one
     update per window per second.  Window durations are rounded up to the nearest second.
 

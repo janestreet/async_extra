@@ -27,8 +27,8 @@ module Server : sig
   (** [open_file filename] open a file for writing.  The filename given should
       be a real path on the server, and will create a real file there *)
   val open_file
-    :  ?append:bool (** default is [false] *)
-    -> ?dos_format:bool (** default is [false] *)
+    :  ?append     : bool  (** default is [false] *)
+    -> ?dos_format : bool  (** default is [false] *)
     -> string
     -> File.t Deferred.t
 
@@ -72,9 +72,9 @@ module Server : sig
       [t].  When the deferred returned by [f] is determined, [t] will be
       closed. *)
   val with_file
-    :  ?append:bool (** default is [false] *)
+    :  ?append : bool  (** default is [false] *)
     -> string
-    -> f:(File.t -> 'a Deferred.t)
+    -> f       : (File.t -> 'a Deferred.t)
     -> 'a Deferred.t
 
   (** [monitor t] returns a monitor which will listen to errors arising from the
@@ -92,7 +92,7 @@ module Client : sig
   module Error : sig
     type t =
       | File_not_found of string
-      | Unknown of string
+      | Unknown        of string
     with sexp
 
     val to_string : t -> string
@@ -100,9 +100,9 @@ module Client : sig
 
   module Message : sig
     type t =
-      | String of string
+      | String    of string
       | Bigstring of Bigstring.t
-      with bin_io
+    with bin_io
 
     val length        : t -> int
     (** None is returned in cases where the message cannot fit into a string (original
@@ -133,7 +133,7 @@ module Client : sig
       disconnected.
   *)
   val read
-    : ?client_pushes_back:unit
+    :  ?client_pushes_back : unit
     -> t
     -> string
     -> Response.t Pipe.Reader.t Deferred.t
@@ -143,7 +143,7 @@ module Client : sig
       server calls [unlink] or [close]. The client can indicate that it is no longer
       interested by calling [Pipe.close_reader]. *)
   val tail
-    : ?client_pushes_back:unit
+    :  ?client_pushes_back : unit
     -> t
     -> string
     -> Response.t Pipe.Reader.t Deferred.t
