@@ -80,8 +80,8 @@ let try_connecting_until_successful t =
         ~port:(Host_and_port.port addr)
   in
   let rec loop () =
-    if Ivar.is_full t.close_started
-    then return None
+    if Ivar.is_full t.close_started then
+      return None
     else begin
       connect ()
       >>= function
@@ -172,8 +172,7 @@ let connected t =
         | Some conn -> return conn
       end
     | Some conn ->
-      if Rpc.Connection.is_closed conn
-      then
+      if Rpc.Connection.is_closed conn then
         (* give the reconnection loop a chance to overwrite the ivar *)
         Rpc.Connection.close_finished conn >>= loop
       else
@@ -186,8 +185,7 @@ let current_connection t = Ivar.read t.conn |> Deferred.peek |> Option.join
 let close_finished t = Ivar.read t.close_finished
 
 let close t =
-  if Ivar.is_full t.close_started
-  then
+  if Ivar.is_full t.close_started then
     (* Another call to close is already in progress.  Wait for it to finish. *)
     close_finished t
   else begin

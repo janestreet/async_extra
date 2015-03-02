@@ -156,4 +156,6 @@ module Server : sig
       the socket directly will circumvent [max_connections] and [on_handler_error],
       however, and is not recommended. *)
   val listening_socket : ('address, _) t -> ([ `Passive ], 'address) Socket.t
+
+  val num_connections : (_, _) t -> int
 end

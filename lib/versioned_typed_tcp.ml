@@ -27,13 +27,6 @@ module Dont_care_about_mode = struct
   let (=) (a : t) b = a = b
 end
 
-module Repeater_hook = struct
-  type ('msg, 'conn) t =
-    { on_error : Repeater_error.t -> unit
-    ; on_data  : msg:'msg -> raw_msg:Bigsubstring.t -> conn:'conn -> unit
-    }
-end
-
 (* helper types to make signatures clearer *)
 type 'a wo_my_name =
   < send : 'send;
@@ -41,9 +34,9 @@ type 'a wo_my_name =
     remote_name : 'remote_name >
   constraint 'a =
     < send : 'send;
-    recv : 'recv;
-    my_name : 'my_name;
-    remote_name : 'remote_name >
+      recv : 'recv;
+      my_name     : 'my_name;
+      remote_name : 'remote_name >
 
 type 'a flipped =
   < send : 'recv;
@@ -62,10 +55,8 @@ module Make (Z : Arg) = struct
 
   module Constants = struct
     let negotiate_timeout = sec 10.
-    let wait_after_exn = sec 0.5
 
     let wait_after_connect_failure = sec 4.
-    let connect_timeout = sec 10.
   end
 
   open Constants
@@ -121,11 +112,11 @@ module Make (Z : Arg) = struct
       }
       constraint 'a =
         < send        : 'send;
-        recv        : 'recv;
-        my_name     : 'my_name;
-        remote_name : 'remote_name >
+          recv        : 'recv;
+          my_name     : 'my_name;
+          remote_name : 'remote_name >
 
-                      let kill t = t.kill ()
+    let kill t = t.kill ()
   end
 
   let try_with = Monitor.try_with
@@ -201,7 +192,9 @@ module Make (Z : Arg) = struct
     | `Not_sent -> return `Dropped
   ;;
 
-  let negotiate (type r) (type s)  ~reader ~writer ~my_name ~credentials ~auth_error ~recv ~send =
+  let negotiate (type r) (type s)
+        ~reader ~writer ~my_name ~credentials
+        ~recv ~send ?received_hello () =
     let module Recv = (val recv : Datum with type t = r) in
     let module Send = (val send : Datum with type t = s) in
     let (recv_version, send_version) =
@@ -209,7 +202,7 @@ module Make (Z : Arg) = struct
       | `Prod -> (Recv.prod_version, Send.prod_version)
       | `Test -> (Recv.test_version, Send.test_version)
     in
-    let h =
+    let my_hello =
       Hello.create
         ~name:my_name
         ~send_version
@@ -217,21 +210,28 @@ module Make (Z : Arg) = struct
         ~credentials
     in
     wrap_write_bin_prot ~sexp:Hello.sexp_of_t ~tc:Hello.bin_writer_t
-      ~writer ~name:"negotiate" h;
-    Reader.read_bin_prot reader Hello.bin_reader_t >>| (function
-      | `Eof -> `Eof
-      | `Ok h ->
-        match auth_error h with
-        | Some e -> `Auth_error e
-        | None ->
-          let recv_version = Version.min recv_version h.send_version in
-          let send_version = Version.min send_version h.recv_version in
+      ~writer ~name:"negotiate" my_hello;
+    begin match received_hello with
+    | Some h -> return (`Ok h)
+    | None -> Reader.read_bin_prot reader Hello.bin_reader_t
+    end
+    >>| function
+    | `Eof -> `Eof
+    | `Ok received_hello ->
+      if not Mode.(my_hello.mode = received_hello.mode)
+      then `Wrong_mode received_hello.name
+      else
+        begin
+          let recv_version = Version.min my_hello.recv_version received_hello.send_version in
+          let send_version = Version.min my_hello.send_version received_hello.recv_version in
           match Recv.lookup_unmarshal_fun recv_version with
           | Error _ -> `Version_error
           | Ok unmarshal_fun ->
             match Send.lookup_marshal_fun send_version with
             | Error _ -> `Version_error
-            | Ok marshal_fun -> `Ok (h, send_version, marshal_fun, unmarshal_fun))
+            | Ok marshal_fun ->
+              `Ok (received_hello, send_version, marshal_fun, unmarshal_fun)
+        end
   ;;
 
   exception Eof with sexp
@@ -240,12 +240,13 @@ module Make (Z : Arg) = struct
   let dummy_bigsubstring = Bigsubstring.of_string ""
 
   let handle_incoming
-        ~logfun ~remote_name ~ip ~(con : _ Connection.t) ~extend_data_needs_raw
+        ~logfun ~ip ~(con : _ Connection.t) ~extend_data_needs_raw
         (* functions to extend the tail (with various messages) *)
         ~extend_disconnect
         ~extend_parse_error
         ~extend_data
     =
+    let remote_name = con.remote_name in
     Writer.set_raise_when_consumer_leaves con.writer false;
     upon (Writer.consumer_left con.writer) con.kill;
     (* Benign errors like EPIPE and ECONNRESET will not be raised, so we are left with
@@ -331,7 +332,7 @@ module Make (Z : Arg) = struct
     in
     Reader.read_one_chunk_at_a_time con.reader
       ~handle_chunk:(handle_chunk ~consumed:0)
-    >>> (fun result ->
+    >>| (fun result ->
       con.kill ();
       let exn =
         match result with
@@ -574,11 +575,7 @@ module Make (Z : Arg) = struct
       { tail                       : (Client_name.t, To_server_msg.t) Server_msg.t Tail.t
       ; logfun                     : logfun option
       ; connections                : Connections.t
-      ; mutable am_listening       : bool
-      ; socket                     : ([ `Bound ], Socket.Address.Inet.t) Socket.t
       ; warn_free_connections_pct  : float
-      ; mutable free_connections   : int
-      ; mutable when_free          : unit Ivar.t option
       ; max_clients                : int
       ; is_client_ip_authorized    : string -> bool
       ; my_name                    : Server_name.t
@@ -586,12 +583,15 @@ module Make (Z : Arg) = struct
       ; now                        : unit -> Time.t
       ; mutable num_accepts        : Int63.t
       ; credentials                : string
+      ; tcp_server : Tcp.Server.inet
+      ; handler : (Socket.Address.Inet.t -> Reader.t -> Writer.t -> unit Deferred.t) Set_once.t
       }
 
     let invariant t =
-      assert (t.free_connections >= 0);
-      assert (t.free_connections <= t.max_clients);
-      assert ((t.free_connections = 0) = is_some t.when_free);
+      let num_connections = Tcp.Server.num_connections t.tcp_server in
+      let free_connections = t.max_clients - num_connections in
+      assert (free_connections >= 0);
+      assert (free_connections <= t.max_clients);
     ;;
 
     let flushed t ~cutoff =
@@ -611,9 +611,7 @@ module Make (Z : Arg) = struct
       `Flushed flushed, `Not_flushed not_flushed
     ;;
 
-    let shutdown t =
-      Fd.close (Socket.fd t.socket)
-    ;;
+    let shutdown t = Tcp.Server.close t.tcp_server
 
     let send t name d =
       match Connections.find t.connections name with
@@ -643,181 +641,144 @@ module Make (Z : Arg) = struct
       Connections.send_to_some_ignore_errors t.connections d ~now:t.now ~logfun:t.logfun names
     ;;
 
-    let client_is_authorized t ip =
-      t.is_client_ip_authorized (Unix.Inet_addr.to_string ip)
-    ;;
-
     let close t name =
       Option.iter (Connections.find t.connections name) ~f:Connection.kill
     ;;
 
-    let handle_client t addr port fd ~create_repeater_hook =
-      let control e = Tail.extend t.tail (Control e) in
-      let close () = don't_wait_for (Deferred.ignore (Unix.close fd)) in
-      if not (client_is_authorized t addr)
+    let maybe_accept_client t addr reader writer ?received_hello () =
+      let control_error (e : _ Server_msg.Control.t) = return (Error e) in
+      let protocol_error msg =
+        let s = sprintf "Error while negotiating with [%s]: %s"
+                  (Socket.Address.Inet.to_string addr)
+                  msg
+        in
+        control_error (Protocol_error s)
+      in
+      let ip = Unix.Inet_addr.to_string (Socket.Address.Inet.addr addr) in
+      if not (t.is_client_ip_authorized ip)
       then begin
-        control (Unauthorized (Unix.Inet_addr.to_string addr));
-        close ();
+        control_error (Unauthorized ip)
       end else begin
-        let r = Reader.create fd in
-        let w = Writer.create ~syscall:`Per_cycle fd in
-        (* we need to force close, otherwise there is a fd leak *)
-        let close =
-          lazy (ignore_errors (fun () ->
-            Writer.close w ~force_close:(Clock.after (sec 5.))))
-        in
-        let kill = ref (fun () -> Lazy.force close) in
-        let die_error e =
-          Tail.extend t.tail (Control e);
-          !kill ()
-        in
-        Stream.iter (Monitor.detach_and_get_error_stream (Writer.monitor w))
-          (* We don't report the error to the tail here because this is before
-             protocol negotiation.  Once protocol negotiation happens,
-             [handle_incoming] will report any errors to the tail.
-          *)
-          ~f:(fun _ -> !kill ());
-        let res =
-          try_with_timeout negotiate_timeout (fun () ->
-            negotiate
-              ~my_name:(Server_name.to_string t.my_name)
-              ~credentials:t.credentials
-              ~reader:r ~writer:w
-              ~send:(module To_client_msg)
-              ~recv:(module To_server_msg)
-              ~auth_error:(fun h ->
-                if not (Mode.(=) h.mode (Mode.current ()))
-                then Some (Server_msg.Control.Wrong_mode (Client_name.of_string h.name))
-                else None))
-        in
-        upon res (function
-          | `Error _
-          | `Timeout
-          | `Ok `Eof
-          | `Ok `Version_error -> Lazy.force close
-          | `Ok (`Auth_error e) -> die_error e
-          | `Ok (`Ok (h, send_version, marshal_fun, unmarshal_fun)) ->
-            let name =
-              if t.enforce_unique_remote_name
-              then h.name
-              else sprintf "%s:%s:%d:%s"
+        try_with_timeout negotiate_timeout (fun () ->
+          negotiate
+            ~my_name:(Server_name.to_string t.my_name)
+            ~credentials:t.credentials
+            ~reader ~writer
+            ~send:(module To_client_msg)
+            ~recv:(module To_server_msg)
+            ?received_hello ()
+        )
+        >>= function
+        | `Error e -> protocol_error (Exn.to_string e)
+        | `Timeout -> protocol_error "Timeout"
+        | `Ok `Eof -> protocol_error "Connection dropped"
+        | `Ok `Version_error -> protocol_error "Couldn't negotiate version"
+        | `Ok (`Wrong_mode remote_name) ->
+          control_error
+            (Wrong_mode
+               (Client_name.of_string remote_name))
+        | `Ok (`Ok (h, send_version, marshal_fun, unmarshal_fun)) ->
+          let name =
+            if t.enforce_unique_remote_name
+            then h.name
+            else sprintf "%s:%s:%s"
                      h.name
-                     (Unix.Inet_addr.to_string addr)
-                     port
+                     (Socket.Address.Inet.to_string addr)
                      (Int63.to_string t.num_accepts)
-            in
-            match Result.try_with (fun () -> Client_name.of_string name) with
-            | Error exn ->
-              die_error
-                (Protocol_error
-                   (sprintf "error constructing name: %s, error: %s"
-                      name (Exn.to_string exn)))
-            | Ok client_name ->
-              if Connections.mem t.connections client_name
-              then die_error (Duplicate client_name)
-              else begin
-                let close =
-                  lazy
-                    (Lazy.force close;
-                     Connections.remove t.connections client_name)
-                in
-                kill := (fun () -> Lazy.force close);
-                let (conn : Connection.t) =
-                  { writer        = w
-                  ; reader        = r
-                  ; unmarshal_fun
-                  ; marshal_fun
-                  ; send_version
-                  ; my_name       = t.my_name
-                  ; remote_name   = client_name
-                  ; kill          = !kill
-                  }
-                in
-                Connections.add t.connections ~name:client_name ~conn;
-                Tail.extend t.tail
-                  (Control (Connect (client_name, `credentials h.credentials)));
-                let ip = Unix.Inet_addr.to_string addr in
-                match create_repeater_hook with
-                | Some create_repeater_hook ->
-                  upon (create_repeater_hook client_name ~repeater_to_client_conn:conn)
-                    (function
-                      | Error e -> die_error (Protocol_error (Error.to_string_hum e))
-                      | Ok (hook : (_,_) Repeater_hook.t) ->
-                        handle_incoming
-                          ~logfun:t.logfun ~remote_name:client_name
-                          ~ip ~con:conn
-                          ~extend_data_needs_raw:true
-                          ~extend_disconnect:
-                            (fun _ exn -> hook.on_error (Disconnect (Error.of_exn exn)))
-                          ~extend_parse_error:(fun _ msg -> hook.on_error (Parse_error msg))
-                          ~extend_data:(fun msg raw_msg ->
-                            hook.on_data ~msg ~raw_msg ~conn))
-                | None ->
-                  handle_incoming
-                    ~logfun:t.logfun ~remote_name:client_name
-                    ~ip ~con:conn
-                    ~extend_data_needs_raw:false
-                    ~extend_disconnect:(fun n e ->
-                      Tail.extend t.tail (Control (Disconnect (n, Exn.sexp_of_t e))))
-                    ~extend_parse_error:(fun n e ->
-                      Tail.extend t.tail (Control (Parse_error (n, e))))
-                    ~extend_data:(fun x _ -> Tail.extend t.tail (Data x))
-              end)
+          in
+          match Result.try_with (fun () -> Client_name.of_string name) with
+          | Error exn ->
+            protocol_error
+              (sprintf "error constructing name: %s, error: %s"
+                 name (Exn.to_string exn))
+          | Ok client_name ->
+            if Connections.mem t.connections client_name
+            then control_error (Duplicate client_name)
+            else begin
+              let close =
+                lazy
+                  (ignore_errors (fun () ->
+                     Writer.close writer ~force_close:(Clock.after (sec 5.)));
+                   Connections.remove t.connections client_name)
+              in
+              let kill = (fun () -> Lazy.force close) in
+              let (conn : Connection.t) =
+                { writer
+                ; reader
+                ; unmarshal_fun
+                ; marshal_fun
+                ; send_version
+                ; my_name       = t.my_name
+                ; remote_name   = client_name
+                ; kill
+                }
+              in
+              Connections.add t.connections ~name:client_name ~conn;
+              Tail.extend t.tail
+                (Control (Connect (conn.remote_name, `credentials h.credentials)));
+              return (Ok (conn, ip))
+            end
       end
     ;;
 
-    let listen' t ~create_repeater_hook =
-      if not t.am_listening then begin
-        let control e = Tail.extend t.tail (Control e) in
-        t.am_listening <- true;
-        let socket =
-          Socket.listen t.socket
-            ~max_pending_connections:(min 1_000 t.max_clients)
-        in
-        let warn_thres =
-          Int.max 1 (Float.iround_exn ~dir:`Zero
-                       (float t.max_clients *. t.warn_free_connections_pct))
-        in
-        let incr_free_connections () =
-          t.free_connections <- t.free_connections + 1;
-          Option.iter t.when_free ~f:(fun i ->
-            t.when_free <- None;
-            Ivar.fill i ());
-        in
-        let rec loop () =
-          match t.when_free with
-          | Some i -> upon (Ivar.read i) loop
-          | None ->
-            Monitor.try_with (fun () -> Socket.accept socket)
-            >>> function
-            | Error exn ->
-              Monitor.send_exn (Monitor.current ()) exn;
-              upon (Clock.after wait_after_exn) loop
-            | Ok `Socket_closed -> ()
-            | Ok (`Ok (sock, `Inet (addr, port))) ->
-              assert (Socket.getopt sock Socket.Opt.nodelay);
-              assert (t.free_connections > 0);
-              t.num_accepts <- Int63.succ t.num_accepts;
-              t.free_connections <- t.free_connections - 1;
-              if t.free_connections = 0
-              then begin
-                t.when_free <- Some (Ivar.create ());
+    let handle_incoming t (conn : Connection.t) ip =
+      handle_incoming
+        ~logfun:t.logfun
+        ~ip ~con:conn
+        ~extend_data_needs_raw:false
+        ~extend_disconnect:(fun n e ->
+          Tail.extend t.tail (Control (Disconnect (n, Exn.sexp_of_t e))))
+        ~extend_parse_error:(fun n e ->
+          Tail.extend t.tail (Control (Parse_error (n, e))))
+        ~extend_data:(fun x _ -> Tail.extend t.tail (Data x))
+    ;;
+
+    let listen' t ~handler =
+      begin match Set_once.get t.handler with
+      | Some _ -> ()
+      | None ->
+        let wrapped_handler =
+          let control e = Tail.extend t.tail (Control e) in
+          let warn_thres =
+            Int.max 1 (Float.iround_exn ~dir:`Zero
+                         (float t.max_clients *. t.warn_free_connections_pct))
+          in
+          fun addr reader writer ->
+            t.num_accepts <- Int63.succ t.num_accepts;
+            let num_connections = Tcp.Server.num_connections t.tcp_server in
+            let free_connections = t.max_clients - num_connections in
+            assert (free_connections >= 0);
+            begin if free_connections = 0 then
                 control (Too_many_clients "zero free connections")
-              end else if t.free_connections <= warn_thres then begin
-                control (Almost_full t.free_connections)
-              end;
-              let fd = Socket.fd sock in
-              upon (Fd.close_finished fd) incr_free_connections;
-              protect
-                ~f:(fun () -> handle_client t addr port fd ~create_repeater_hook)
-                ~finally:loop
+              else if free_connections <= warn_thres then
+                control (Almost_full free_connections);
+            end;
+            handler addr reader writer
         in
-        loop ()
+        Set_once.set_exn t.handler wrapped_handler;
       end;
       Tail.collect t.tail
     ;;
 
-    let listen t = listen' t ~create_repeater_hook:None
+    let listen t =
+      listen' t ~handler:(fun addr reader writer ->
+        maybe_accept_client t addr reader writer ()
+        >>= function
+        | Error e ->
+          Tail.extend t.tail (Control e);
+          (* This determines the handler in [Tcp.Server.create], which causes the
+             descriptors to be closed, as explained in [tcp.mli]. *)
+          Deferred.unit
+        | Ok (conn, ip) ->
+          Monitor.try_with (fun () -> handle_incoming t conn ip)
+          >>| fun res ->
+          Connection.kill conn; (* kill connection just in case *)
+          match res with
+          | Ok () -> ()
+          | Error exn ->
+            Tail.extend t.tail (Control (Disconnect (conn.remote_name, Exn.sexp_of_t exn)));
+      )
+    ;;
 
     let listen_ignore_errors ?(stop = Deferred.never ()) t =
       let s = Stream.take_until (listen t) stop in
@@ -838,37 +799,43 @@ module Make (Z : Arg) = struct
           my_name =
       if max_clients > 10_000 || max_clients < 1 then
         raise (Invalid_argument "max_clients must be between 1 and 10,000");
-      Deferred.create (fun result ->
-        let s = Socket.create Socket.Type.tcp in
-        upon (Socket.bind s (Socket.Address.Inet.create_bind_any ~port:listen_port))
-          (fun socket ->
-             let t =
-               { tail                       = Tail.create ()
-               ; socket
-               ; am_listening               = false
-               ; logfun
-               ; connections                = Connections.create ()
-               ; is_client_ip_authorized
-               ; my_name
-               ; enforce_unique_remote_name
-               ; warn_free_connections_pct  = warn_when_free_connections_lte_pct
-               ; max_clients
-               ; free_connections           = max_clients
-               ; when_free                  = None
-               ; now
-               ; credentials
-               ; num_accepts                = Int63.zero
-               }
-             in
-             Ivar.fill result t));
+      let handler = Set_once.create () in
+      Tcp.Server.create
+        ~max_connections:max_clients
+        ~max_pending_connections:(min 1_000 max_clients)
+        (Tcp.on_port listen_port)
+        (fun addr reader writer ->
+           match Set_once.get handler with
+           | None ->
+             (* This determines the handler in [Tcp.Server.create], which causes the
+                descriptors to be closed, as explained in [tcp.mli]. *)
+             Deferred.unit (* refuse connections until [listen] is called *)
+           | Some handler ->
+             handler addr reader writer)
+      >>| fun tcp_server ->
+      let t =
+        { tail = Tail.create ()
+        ; handler
+        ; logfun
+        ; connections = Connections.create ()
+        ; is_client_ip_authorized
+        ; my_name
+        ; enforce_unique_remote_name
+        ; warn_free_connections_pct = warn_when_free_connections_lte_pct
+        ; max_clients
+        ; now
+        ; credentials
+        ; num_accepts = Int63.zero
+        ; tcp_server
+        }
+      in
+      t
     ;;
 
     let create = create' ?credentials:None
-
-    let port t =
-      match Socket.getsockname t.socket with
-      | `Inet (_, port) -> port
     ;;
+
+    let port t = Tcp.Server.listening_on t.tcp_server
 
     let client_send_version t name =
       match Connections.find t.connections name with
@@ -890,6 +857,8 @@ module Make (Z : Arg) = struct
 
     module Connection = struct
       type t = dir Connection.t
+
+      let kill = Connection.kill
     end
 
     type t =
@@ -904,161 +873,119 @@ module Make (Z : Arg) = struct
       ; queue                      : (To_server_msg.t
                                       * [ `Sent of Time.t | `Dropped] Ivar.t
                                      ) Queue.t
-      ; mutable con                : [ `Disconnected
-                                     | `Connected of Connection.t
-                                     | `Connecting of unit -> unit
-                                     ]
-      ; mutable trying_to_connect  : [ `No | `Yes of unit Ivar.t ]
+      ; mutable con : [ `Disconnected
+                      | `Connected of Connection.t
+                      | `Connecting of unit Ivar.t
+                      ]
       ; mutable connect_complete   : unit Ivar.t
-      ; mutable ok_to_connect      : unit Ivar.t
       ; now                        : unit -> Time.t
       (* last connection error. None if it has succeeded*)
-      ; mutable last_connect_error : exn option
-      ; repeater_hook              : ((Server_name.t, To_client_msg.t) Read_result.t
-                                     , Connection.t
-                                     ) Repeater_hook.t option
+      ; mutable last_connect_error : Error.t option
       ; credentials                : string
       }
 
-    (* sweeks: [try_with_timeout] is used in two places.  We could inline it
-       here, and it would make the code clearer. *)
-    let raise_after_timeout span f =
-      try_with_timeout span f
-      >>| function
-      | `Ok a -> a
-      | `Error e -> raise e
-      | `Timeout -> failwith "timeout"
-    ;;
+    (* [connect_internal t] makes a single try to connect to the server, negotiate
+       connection and then run the handler on the result.
 
-    exception Hello_name_is_not_expected_remote_name of string * string with sexp
-
-    exception Disconnected with sexp
-
-    exception Write_error of exn with sexp
-
-    let connect_internal t =
-      assert
-        (match t.trying_to_connect with
-         | `Yes _ -> true
-         | `No    -> false);
-      let reset_ok_to_connect () =
-        (* Wait a while before trying again *)
-        t.ok_to_connect <- Ivar.create ();
-        upon
-          (Clock.after wait_after_connect_failure)
-          (fun () -> Ivar.fill t.ok_to_connect ());
+       Tcp.with_connection will throw an exception if it can't establish a connection.
+       We need to distinguish between that exception and handler's exceptions, hence the
+       result is a variant [ `Connect_error _ | `Handler_error _ | `Ok _ ]  *)
+    let connect_internal t ~handler =
+      let stop_connecting =
+        match t.con with
+        | `Connected _ | `Disconnected -> assert false
+        | `Connecting stop_connecting -> stop_connecting
       in
-      match Result.try_with (fun () -> Socket.create Socket.Type.tcp) with
-      | Error e ->
-        t.con <- `Disconnected;
-        reset_ok_to_connect ();
-        return (Error e)
-      | Ok s ->
-        let close_this = ref (`Unconnected_socket s) in
-        let close msg =
-          match !close_this with
-          | `Nothing_already_closed -> ()
-          | (`Writer _ | `Unconnected_socket _ | `Active_socket _) as socket_or_writer ->
-            close_this := `Nothing_already_closed;
-            t.con <- `Disconnected;
-            reset_ok_to_connect ();
-            Tail.extend t.messages
-              (Control (Disconnect (t.expected_remote_name, Exn.sexp_of_t msg)));
-            let close () =
-              match socket_or_writer with
-              | `Unconnected_socket s -> Unix.close (Socket.fd s)
-              | `Active_socket s -> Unix.close (Socket.fd s)
-              | `Writer w -> Writer.close w ~force_close:(Clock.after (sec 5.))
-            in
-            ignore_errors close
-        in
-        t.con <- `Connecting (fun () -> close Disconnected);
-        let address = Socket.Address.Inet.create t.remote_ip ~port:t.remote_port in
-        Tail.extend t.messages (Control Connecting);
-        Monitor.try_with (fun () ->
-          raise_after_timeout connect_timeout (fun () ->
-            Socket.connect s address))
-        >>= function
-        | Error e ->
-          close e;
-          return (Error e)
-        | Ok s ->
-          close_this := `Active_socket s;
-          Monitor.try_with (fun () ->
-            assert (Socket.getopt s Socket.Opt.nodelay);
-            let fd = Socket.fd s in
-            let reader = Reader.create fd in
-            let writer = Writer.create ~syscall:`Per_cycle fd in
-            close_this := `Writer writer;
-            Stream.iter (Monitor.detach_and_get_error_stream (Writer.monitor writer))
-              ~f:(fun e -> close (Write_error e));
-            let my_name = Client_name.to_string t.my_name in
-            raise_after_timeout negotiate_timeout (fun () ->
-              negotiate ~reader ~writer
-                ~send:(module To_server_msg)
-                ~recv:(module To_client_msg)
-                ~credentials:t.credentials
-                ~my_name ~auth_error:(fun _ -> None))
-            >>| (function
-              | `Eof -> failwith "eof"
-              | `Auth_error _ -> assert false
-              | `Version_error ->
-                failwith "cannot negotiate a common version"
-              | `Ok (h, send_version, marshal_fun, unmarshal_fun) ->
-                let expected_remote_name =
-                  Server_name.to_string t.expected_remote_name
-                in
-                if t.check_remote_name
-                && h.name <> expected_remote_name
-                then raise (Hello_name_is_not_expected_remote_name
-                              (h.name, expected_remote_name))
-                else begin
-                  let server_name = Server_name.of_string h.name in
-                  let (con : Connection.t) =
-                    { writer
-                    ; reader
-                    ; marshal_fun
-                    ; unmarshal_fun
-                    ; send_version
-                    ; remote_name   = server_name
-                    ; my_name       = t.my_name
-                    ; kill          = (fun () -> close (Failure "connection was killed"))
-                    }
-                  in
-                  t.con <- `Connected con;
-                  Tail.extend t.messages
-                    (Control (Connect (server_name, `credentials h.Hello.credentials)));
-                  let ip = Unix.Inet_addr.to_string t.remote_ip in
-                  match t.repeater_hook with
-                  | Some hook ->
-                    handle_incoming
-                      ~logfun:t.logfun
-                      ~remote_name:server_name
-                      ~ip ~con
-                      ~extend_data_needs_raw:true
-                      ~extend_disconnect:
-                        (fun _ exn -> hook.on_error (Disconnect (Error.of_exn exn)))
-                      ~extend_parse_error:(fun _ msg -> hook.on_error (Parse_error msg))
-                      ~extend_data:(fun msg raw_msg ->
-                        hook.on_data ~msg ~raw_msg ~conn:con);
-                  | None ->
-                    handle_incoming
-                      ~logfun:t.logfun ~remote_name:server_name
-                      ~ip ~con
-                      ~extend_data_needs_raw:false
-                      ~extend_disconnect:(fun n e ->
-                        Tail.extend t.messages
-                          (Control (Disconnect (n, Exn.sexp_of_t e))))
-                      ~extend_parse_error:(fun n e ->
-                        Tail.extend t.messages
-                          (Control (Parse_error (n, e))))
-                      ~extend_data:(fun x _ ->
-                        Tail.extend t.messages (Data x))
-                end))
-          >>| function
-          | Error e -> close e; Error e
-          | Ok x -> Ok x
+      Monitor.try_with (fun () ->
+        Tcp.with_connection
+          ~interrupt:(Ivar.read stop_connecting)
+          (Tcp.to_inet_address
+             (Socket.Address.Inet.create t.remote_ip ~port:t.remote_port))
+          (fun _socket reader writer ->
+             let my_name = Client_name.to_string t.my_name in
+             try_with_timeout negotiate_timeout (fun () ->
+               negotiate ~reader ~writer
+                 ~send:(module To_server_msg)
+                 ~recv:(module To_client_msg)
+                 ~credentials:t.credentials
+                 ~my_name ()
+             )
+             >>| (function
+               | `Error exn -> Or_error.of_exn exn
+               | `Timeout ->
+                 Or_error.error_string "Timeout while negotiating"
+               | `Ok `Eof ->
+                 Or_error.error_string "Disconnect while negotiating"
+               | `Ok (`Wrong_mode server_name) ->
+                 Or_error.error "Wrong mode" server_name String.sexp_of_t
+               | `Ok `Version_error ->
+                 Or_error.error_string "cannot negotiate a common version"
+               | `Ok (`Ok (h, send_version, marshal_fun, unmarshal_fun)) ->
+                 if Ivar.is_full stop_connecting then
+                   Or_error.error_string "stop connecting requested"
+                 else begin
+                   let expected_remote_name =
+                     Server_name.to_string t.expected_remote_name
+                   in
+                   if t.check_remote_name
+                      && h.name <> expected_remote_name
+                   then
+                     Or_error.error "Hello name is not expected remote name"
+                       (h.name, expected_remote_name)
+                       <:sexp_of<string * string>>
+                   else begin
+                     let server_name = Server_name.of_string h.name in
+                     let close =
+                       lazy
+                         (ignore_errors (fun () ->
+                            Writer.close writer ~force_close:(Clock.after (sec 5.))))
+                     in
+                     let kill = (fun () -> Lazy.force close) in
+                     let (conn : Connection.t) =
+                       { writer
+                       ; reader
+                       ; marshal_fun
+                       ; unmarshal_fun
+                       ; send_version
+                       ; remote_name   = server_name
+                       ; my_name       = t.my_name
+                       ; kill
+                       }
+                     in
+                     Ok (conn, h.credentials)
+                   end
+                 end)
+             >>= fun res ->
+             Monitor.try_with (fun () -> handler res)
+             >>| function
+             | Error e -> `Handler_error e
+             | Ok x    -> `Ok x))
+      >>| function
+      | Error e -> `Connect_error e
+      | Ok (`Handler_error _ as handler_error) -> handler_error
+      | Ok (`Ok _ as ok) -> ok
+
     ;;
+
+    let handle_incoming t =
+      match t.con with
+      | `Disconnected | `Connecting _ -> assert false
+      | `Connected con ->
+        handle_incoming
+          ~logfun:t.logfun
+          ~ip:(Unix.Inet_addr.to_string t.remote_ip)
+          ~con
+          ~extend_data_needs_raw:false
+          ~extend_disconnect:(fun n e ->
+            Tail.extend t.messages
+              (Control (Disconnect (n, Exn.sexp_of_t e))))
+          ~extend_parse_error:(fun n e ->
+            Tail.extend t.messages
+              (Control (Parse_error (n, e))))
+          ~extend_data:(fun x _ ->
+            Tail.extend t.messages (Data x))
+    ;;
+
 
     let flushed t =
       match t.con with
@@ -1101,42 +1028,63 @@ module Make (Z : Arg) = struct
     ;;
 
     let try_connect t =
-      assert (not (is_connected t));
-      match t.trying_to_connect with
-      | `Yes _ -> ()
-      | `No ->
-        let killed = Ivar.create () in
-        (* [killed] is private to this instance of the [try_connect] loop.  This is why
-           calling [try_connect] again immediately after [close_connection] will result in
-           exactly one instance of this loop surviving. *)
-        t.trying_to_connect <- `Yes killed;
-        t.connect_complete <- Ivar.create ();
-        let rec loop () =
-          (Deferred.any [Ivar.read t.ok_to_connect;
-                         Ivar.read killed])
-          >>> (fun () ->
-            (* In case when [killed] was filled, we do not do anything here.  The cleanup
-               ([purge_queue]) happened in the same async cycle as filling the [killed],
-               to avoid a possible (though unlikely) race when [send] immediately follows
-               [close_connection]--so that the old instance of this loop does not purge
-               the newly sent messages from the queue right before shutting down. *)
-            if Ivar.is_empty killed then begin
-              upon (connect_internal t) (function
-                | Error e ->
-                  t.last_connect_error <- Some e;
-                  (* the connect failed, toss everything *)
-                  purge_queue t;
-                  loop ()
-                | Ok () ->
-                  (* mstanojevic: note that we can be here even if [killed] is filled. but
-                     I think that just means that connection will drop very soon. *)
-                  t.last_connect_error <- None;
-                  t.trying_to_connect <- `No;
-                  Ivar.fill t.connect_complete ();
-                  send_q t)
+      assert (t.con = `Disconnected);
+      let disconnected () =
+        t.con <- `Disconnected;
+        purge_queue t;
+        return `Stop_connecting
+      in
+      let stop_connecting = Ivar.create () in
+      t.con <- `Connecting stop_connecting;
+      let retry_wait e =
+        t.last_connect_error <- Some e;
+        purge_queue t;
+        Clock.with_timeout wait_after_connect_failure (Ivar.read stop_connecting)
+        >>= function
+        | `Result () -> disconnected ()
+        | `Timeout -> return `Reconnect
+      in
+      let rec loop () =
+        connect_internal t ~handler:(fun res ->
+          match t.con with
+          | `Disconnected | `Connected _ -> assert false
+          | `Connecting stop_connecting' ->
+            assert (phys_equal stop_connecting' stop_connecting);
+            if Ivar.is_full stop_connecting then
+              disconnected ()
+            else begin
+              match res with
+              | Error e ->
+                retry_wait e
+              | Ok (con, credentials) ->
+                t.last_connect_error <- None;
+                t.con <- `Connected con;
+                Tail.extend t.messages
+                  (Control (Connect (con.remote_name, `credentials credentials)));
+                Ivar.fill t.connect_complete ();
+                t.connect_complete <- Ivar.create ();
+                send_q t;
+                handle_incoming t
+                >>= fun () ->
+                disconnected ()
             end)
-        in
-        loop ()
+        >>= function
+        | `Connect_error e ->
+          (* socket connect failed, try again *)
+          begin retry_wait (Error.of_exn e)
+            >>= function
+            | `Stop_connecting -> Deferred.unit
+            | `Reconnect -> loop ()
+          end
+        | `Handler_error e ->
+          (* handler threw an exception *)
+          t.con <- `Disconnected;
+          purge_queue t;
+          raise e
+        | `Ok `Reconnect -> loop ()
+        | `Ok `Stop_connecting -> Deferred.unit
+      in
+      don't_wait_for (loop ())
     ;;
 
 
@@ -1164,26 +1112,20 @@ module Make (Z : Arg) = struct
     ;;
 
     let close_connection t =
-      begin match t.trying_to_connect with
-      | `No -> ()
-      | `Yes kill ->
-        Ivar.fill kill ();
+      match t.con with
+      | `Disconnected -> ()
+      | `Connecting stop_connecting ->
         (* drop the messages now, do not wait until the next async cycle, because a
            [send] might follow *)
         purge_queue t;
-        (* Ok to call [try_connect] again on a subsequent [send] *)
-        t.trying_to_connect <- `No
-      end;
-      match t.con with
-      | `Disconnected -> ()
-      | `Connecting kill -> kill ()
-      | `Connected con -> con.kill ()
+        Ivar.fill_if_empty stop_connecting ();
+      | `Connected con -> Connection.kill con
     ;;
 
     let connect t =
       match t.con with
-      | `Connecting _
-      | `Connected _ ->
+      | `Connected _ -> Deferred.unit
+      | `Connecting _ ->
         Ivar.read t.connect_complete
       | `Disconnected ->
         try_connect t;
@@ -1203,7 +1145,6 @@ module Make (Z : Arg) = struct
           ?logfun
           ?(now = Scheduler.cycle_start)
           ?(check_remote_name = true)
-          ?repeater_hook
           ?(credentials = "")
           ~ip ~port ~expected_remote_name my_name =
       { remote_ip            = Unix.Inet_addr.of_string ip
@@ -1216,18 +1157,15 @@ module Make (Z : Arg) = struct
       ; messages             = Tail.create ()
       ; con                  = `Disconnected
       ; connect_complete     = Ivar.create ()
-      ; ok_to_connect        = (let i = Ivar.create () in Ivar.fill i (); i)
-      ; trying_to_connect    = `No
       ; now
       ; last_connect_error   = None
-      ; repeater_hook
       ; credentials
       }
     ;;
 
-    let create' = create0 ?repeater_hook:None
+    let create' = create0
 
-    let create = create0 ?repeater_hook:None ?credentials:None
+    let create = create0 ?credentials:None
 
     let last_connect_error t = t.last_connect_error
   end
@@ -1240,6 +1178,13 @@ module Repeater
          (Client_name : Name)
          (Mode : Mode) =
 struct
+
+  module Repeater_hook = struct
+    type 'msg t =
+      { on_error : Repeater_error.t -> unit
+      ; on_data  : msg:'msg -> raw_msg:Bigsubstring.t -> unit
+      }
+  end
 
   module Z = Make (struct
     module To_client_msg = To_client_msg
@@ -1258,9 +1203,23 @@ struct
     type t = C.t
     open C
     let is_connected = is_connected
-    let connect = connect
+
+    let connect t ~handler =
+      (* This is not exposed to clients.  It is only called in [start] function
+         below so it is called only once per [Client.t].  Hence the assertion below.
+      *)
+      assert (t.con = `Disconnected);
+      t.con <- `Connecting (Ivar.create ());
+      connect_internal t
+        ~handler:(fun res ->
+          begin match res with
+          | Error _     -> t.con <- `Disconnected
+          | Ok (conn,_) -> t.con <- `Connected conn
+          end;
+          handler res)
+    ;;
+
     let close_connection = close_connection
-    let last_connect_error = last_connect_error
     let create = create0
 
     let send_ignore_errors t msg =
@@ -1290,6 +1249,7 @@ struct
     ; server_name   : Server_name.t
     ; repeater_name : string
     ; clients       : Client.t Client_name.Table.t
+    ; is_client_allowed : Client_name.t -> bool
     }
 
   let active_clients t =
@@ -1302,6 +1262,7 @@ struct
 
   let create
         ?is_client_ip_authorized
+        ~is_client_allowed
         ~repeater_name
         ~listen_port
         ~server_ip
@@ -1336,6 +1297,7 @@ struct
     ; server_port
     ; server_name
     ; repeater_name
+    ; is_client_allowed
     }
   ;;
 
@@ -1383,14 +1345,11 @@ struct
   ;;
 
   (* create a [Repeater_hook.t] that is used to filter messages on one side of paired
-     connections. The side is indicated with [conn_side] argument. We don't pass in the
-     connection on that side, because it will be passed in the [on_data] callback by the
-     code in Server or Client modules (depending on the side) and also because we don't
-     have it always when the hook is created (as is the case of repeater->server side).
-     We do pass the opposite side connection, which we need to be able to efficiently pass
-     messages through. Assumption is that Pass_on is the most common result of the
-     application level filter. In that case, we just blit the bytes over to the other side
-     instead of invoking more complicated send functions in Server and Client.
+     connections. The side is indicated with [conn_side] argument. [make_hook] has a
+     reference to both connection and based on [on_data] it can send messages to both
+     sides. Assumption is that Pass_on is the most common result of the application level
+     filter. In that case, we just blit the bytes over to the other side instead of
+     invoking more complicated [send_msg] function.
 
      Type annotations hopefully reduce some confusion about which side of the paired
      connections we are dealing with and prevent sending messages over the wrong
@@ -1400,6 +1359,7 @@ struct
                     ; recv       : 'recv
                     ; my_name    : _
                     ;remote_name : _ > as 'side) Connection_side.t)
+        ~(conn:'side Connection.t)
         ~(paired_conn:'side flipped Connection.t)
         ~client_name
         ~server_name
@@ -1417,17 +1377,14 @@ struct
         ~conn:paired_conn
         ~on_send_error
     in
-    let send_back (conn : 'side Connection.t) msg =
+    let send_back msg =
       send_msg msg ~conn_side ~conn ~on_send_error
     in
     let forward_bytes (raw_msg:Bigsubstring.t) =
       if not (Writer.is_closed paired_conn.writer) then
         Writer.write_bigsubstring paired_conn.writer raw_msg
     in
-    let on_data
-          ~msg:{ Read_result. data; _ }
-          ~raw_msg
-          ~(conn:'a Connection.t) =
+    let on_data ~msg:{ Read_result. data; _ } ~raw_msg =
       match
         (app_msg_filter data ~state ~client_name ~server_name
          : (_,_) Repeater_hook_result.t)
@@ -1437,9 +1394,9 @@ struct
       | Pass_on -> forward_bytes raw_msg
       | Pass_on_and_send_back msgs ->
         forward_bytes raw_msg;
-        List.iter msgs ~f:(fun msg -> send_back conn msg);
+        List.iter msgs ~f:(fun msg -> send_back msg);
       | Send_back msgs ->
-        List.iter msgs ~f:(fun msg -> send_back conn msg);
+        List.iter msgs ~f:(fun msg -> send_back msg);
     in
     let on_error error = on_error' conn_side error in
     { Repeater_hook.
@@ -1448,30 +1405,23 @@ struct
     }
   ;;
 
-  (* [start ~on_connect ~to_server_msg_filter ~to_client_msg_filter ~on_error] uses hooks
-     available in Server and Client modules to establish an efficient way to filter
-     messages between a client and a server.
+  (* [start] establishes TCP server handler that will try to establish connection to the
+     server whenever a client connects to the repeater. We first call functions to get two
+     [Connection.t]s and only then we start processing data going over the
+     connections. This makes it easy to create two [Repeater_hook.t]s that have access to
+     both connections and that filter data based on provided application filters.
 
-     After a client establishes a connection to the repeater (acting in a Server.t role),
-     the server code will call [create_repeater_hook]. [create_repeater_hook] can return
-     [client<->repeater] side hook that will be then used by the Server code to filter
-     messages.
+     We avoid sending Hello to the client before the connection to the server is
+     established because that will cause client to think it connected. If establishing
+     connection to server then fails it would lead to noisy Connect/Disconnect on the
+     client side. Only when a connection to the server is established we negotiate with
+     the client.
 
-     We construct [create_repeater_hook] in such a way that as a side effect it creates a
-     connection from the repeater to the real server (for this connection, repeater is in
-     a Client.t role) and the [Repeater_hook.t] for that side. Both hooks that are created
-     know about the other side's connection, which we need to efficiently transfer
-     messages. (see comment in [make_hook] above)
+     We need to do a slightly hacky thing of reading the Hello from client in order to get
+     the client's name that we then send to the server.
 
-     This is a rather convoluted way of creating hooks but it is done in this way to
-     minimize changes to Server and Client code and because there is a inherent recursive
-     dependency between connections and their hooks.
-
-     Note that hooks can refer to connections that are closed. This fine because the code
-     doesn't allow a new pair of connections to be established until both connections are
-     cleaned up. Any message sent over closed connections is just dropped. As documented
-     in the mli, it is up to applications that use this module to handle disconnects and
-     close the other side.
+     After both connections are established we create hooks and run [handle_incoming] on
+     both sides.
   *)
   let start t
         ~(on_connect : Client_name.t -> 'state Or_error.t)
@@ -1480,83 +1430,101 @@ struct
         ~(on_error : client_name:Client_name.t -> server_name:Server_name.t ->
           state:'state ->
           [ `repeater_to_server | `repeater_to_client ] -> Repeater_error.t -> unit)
+        ~(on_connecting_error:
+            client_name:Client_name.t -> server_name:Server_name.t -> Error.t -> unit)
     =
-    let server_name = t.server_name in
-    let create_repeater_hook
-          client_name ~(repeater_to_client_conn : Server.Connection.t)
-      =
-      (* first allow the application to setup the connection state or to refuse the
-         client *)
-      match on_connect client_name with
-      | Error _ as e -> return e
-      | Ok state ->
-        (* This hook kicks in when the server sends a message to the client via the
-           repeater (but in response the hook might end up sending messages both to the
-           server and to the client). *)
-        let server_to_repeater_hook =
-          make_hook
-            ~conn_side:Repeater_to_server
-            ~paired_conn:repeater_to_client_conn
-            ~client_name
-            ~server_name
-            ~app_on_error:on_error
-            ~app_msg_filter:to_client_msg_filter
-            ~state
-        in
-        let new_client =
-          Client.create
-            ~ip:t.server_ip
-            ~port:t.server_port
-            ~expected_remote_name:server_name
-            ~repeater_hook:server_to_repeater_hook
-            ~credentials:t.repeater_name
-            client_name
-        in
-        (* connect repeater to the real server *)
-        Clock.with_timeout
-          Z.Constants.connect_timeout
-          (Client.connect new_client)
-        >>| fun conn_res ->
-        let res =
-          match conn_res with
-          | `Timeout ->
-            Client.close_connection new_client; (* so we stop retrying *)
-            Or_error.error "timed out trying to connect to server"
-              (server_name, `last_connect_error (Client.last_connect_error new_client))
-              <:sexp_of< Server_name.t * [`last_connect_error of Exn.t option] >>
-          | `Result () ->
-            match new_client.con with
-            | `Disconnected
-            | `Connecting _
-              ->
-              Or_error.error "connection was dropped very quickly after creation"
-                (client_name, server_name) <:sexp_of< Client_name.t * Server_name.t >>
-            | `Connected repeater_to_server_conn ->
-              Hashtbl.set t.clients ~key:client_name ~data:new_client;
-              (* This hook kicks in when the client sends a message to the server via the
-                 repeater (but in response the hook might end up sending messages both to
-                 the server and to the client). *)
-              let client_to_repeater_hook =
-                make_hook
-                  ~conn_side:Repeater_to_client
-                  ~paired_conn:repeater_to_server_conn
-                  ~client_name
-                  ~server_name
-                  ~app_on_error:on_error
-                  ~app_msg_filter:to_server_msg_filter
-                  ~state
-              in
-              Ok client_to_repeater_hook
-        in
-        begin match res with
-        | Ok _ -> ()
-        | Error e ->
-          on_error ~client_name ~server_name ~state `repeater_to_server (Disconnect e);
-        end;
-        res
-    in
     let (_ :  (Client_name.t, To_server_msg.t) Server_msg.t Stream.t) =
-      Server.listen' t.server ~create_repeater_hook:(Some create_repeater_hook)
+      Server.listen' t.server ~handler:(fun addr reader writer ->
+        (* we need to read Hello from the client to get the client name *)
+        Reader.read_bin_prot reader Z.Hello.bin_reader_t
+        >>= function
+        | `Eof -> Deferred.unit
+        | `Ok client_hello ->
+          let client_name = Client_name.of_string client_hello.name in
+          let server_name = t.server_name in
+          let error_connecting e =
+            on_connecting_error ~client_name ~server_name e;
+            Deferred.unit
+          in
+          if not (t.is_client_allowed client_name) then begin
+            let e =
+              Error.create "client not allowed on repeater"
+                client_name Client_name.sexp_of_t
+            in
+            error_connecting e
+          end else begin
+            let new_client =
+              Client.create
+                ~ip:t.server_ip
+                ~port:t.server_port
+                ~expected_remote_name:t.server_name
+                ~credentials:t.repeater_name
+                client_name
+            in
+            Client.connect new_client ~handler:(function
+              | Error e ->
+                error_connecting (Error.tag e "error connecting repeater to server")
+              | Ok (repeater_to_server_conn, _) ->
+                Server.maybe_accept_client t.server addr reader writer
+                  ~received_hello:client_hello ()
+                >>= function
+                | Error control_error ->
+                  let e =
+                    Error.create "error while accepting client connection"
+                      control_error <:sexp_of<Client_name.t Server_msg.Control.t>>
+                  in
+                  error_connecting e
+                | Ok (repeater_to_client_conn, client_ip) ->
+                  match on_connect client_name with
+                  | Error e -> error_connecting (Error.tag e "application on_connect error")
+                  | Ok state ->
+                    Hashtbl.set t.clients ~key:client_name ~data:new_client;
+                    let handle_incoming conn_side ~conn ~paired_conn filter ip =
+                      let hook =
+                        make_hook
+                          ~conn_side
+                          ~conn
+                          ~paired_conn
+                          ~client_name
+                          ~server_name
+                          ~app_on_error:on_error
+                          ~app_msg_filter:filter
+                          ~state
+                      in
+                      Z.handle_incoming
+                        ~logfun:None
+                        ~ip
+                        ~con:conn
+                        ~extend_data_needs_raw:true
+                        ~extend_parse_error:(fun _ msg -> hook.on_error (Parse_error msg))
+                        ~extend_data:(fun msg raw_msg ->  hook.on_data ~msg ~raw_msg)
+                        ~extend_disconnect:
+                          (fun _ exn -> hook.on_error (Disconnect (Error.of_exn exn)))
+                    in
+                    Deferred.all_unit
+                      [ handle_incoming
+                          Repeater_to_client
+                          ~conn:repeater_to_client_conn
+                          ~paired_conn:repeater_to_server_conn
+                          to_server_msg_filter
+                          client_ip
+
+                      ; handle_incoming
+                          Repeater_to_server
+                          ~conn:repeater_to_server_conn
+                          ~paired_conn:repeater_to_client_conn
+                          to_client_msg_filter
+                          t.server_ip
+                      ])
+            >>= function
+            | `Connect_error e ->
+              error_connecting
+                (Error.tag (Error.of_exn e) "error connecting repeater to server")
+            | `Handler_error e ->
+              (* exception raised by our handler. just reraise *)
+              raise e
+            | `Ok () -> Deferred.unit
+          end)
     in
     ()
   ;;

@@ -321,7 +321,7 @@ module type S = sig
 
     (** [last_connect_error t] returns the error (if any) that happened on the
         last connection attempt. *)
-    val last_connect_error : t -> exn option
+    val last_connect_error : t -> Error.t option
 
     val flushed : t -> [ `Flushed | `Pending of Time.t Deferred.t ]
   end

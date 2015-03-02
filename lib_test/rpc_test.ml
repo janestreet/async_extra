@@ -396,6 +396,98 @@ module Rpc_performance_measurements = struct
 
 end
 
+module Rpc_expert_test = struct
+  let rpc ~name =
+    Rpc.create ~name ~version:0
+      ~bin_query:bin_string ~bin_response:bin_string
+
+  (* names refer to how they're implemented *)
+  let raw_rpc = rpc ~name:"raw"
+  let normal_rpc = rpc ~name:"normal"
+
+  let the_query = "flimflam"
+  let the_response = String.rev the_query
+
+  let main debug () =
+    let level = if debug then `Debug else `Error in
+    let log = Log.create ~level ~output:[Log.Output.stdout ()] in
+    let implementations =
+      let handle_raw () ~rpc_tag ~version responder buf ~pos:init_pos ~len =
+        Log.debug log "query: %s v%d" rpc_tag version;
+        assert (rpc_tag = Rpc.name raw_rpc && version = Rpc.version raw_rpc);
+        try
+          let pos_ref = ref init_pos in
+          let query = String.bin_read_t buf ~pos_ref in
+          <:test_result< string >> query ~expect:the_query;
+          Log.debug log "query value = %s" query;
+          assert (!pos_ref - init_pos = len);
+          let new_buf =
+            Bin_prot.Utils.bin_dump String.bin_writer_t the_response
+          in
+          ignore (
+            Rpc.Expert.Responder.schedule responder new_buf ~pos:0
+              ~len:(Bigstring.length new_buf)
+            : [`Connection_closed | `Flushed of unit Deferred.t]
+          );
+          Deferred.unit
+        with
+          e ->
+          Log.debug log !"got exception: %{Exn#mach}" e;
+          Rpc.Expert.Responder.write_error responder (Error.of_exn e);
+          Deferred.unit
+      in
+      Implementations.Expert.create_exn
+        ~implementations:[Rpc.implement normal_rpc (fun () query ->
+          <:test_result< string >> query ~expect:the_query;
+          return the_response)]
+        ~on_unknown_rpc:(`Expert handle_raw)
+    in
+    Connection.serve () ~implementations
+      ~initial_connection_state:(fun _ _ -> ())
+      ~where_to_listen:Tcp.on_port_chosen_by_os
+    >>= fun server ->
+    let port = Tcp.Server.listening_on server in
+    Deferred.List.iter [raw_rpc; normal_rpc] ~f:(fun rpc ->
+      Connection.with_client ~host:"localhost" ~port (fun conn ->
+        Log.debug log "sending %s query normally" (Rpc.name rpc);
+        Rpc.dispatch_exn rpc conn the_query
+        >>= fun response ->
+        Log.debug log "got response";
+        <:test_result< string >> response ~expect:the_response;
+        let buf = Bin_prot.Utils.bin_dump String.bin_writer_t the_query in
+        Log.debug log "sending %s query via Expert interface" (Rpc.name rpc);
+        Deferred.create (fun i ->
+          ignore (
+            Rpc.Expert.schedule_dispatch conn ~rpc_tag:(Rpc.name rpc)
+              ~version:(Rpc.version rpc) buf ~pos:0 ~len:(Bigstring.length buf)
+              ~handle_error:(fun e -> Ivar.fill i (Error e))
+              ~handle_response:(fun buf ~pos ~len ->
+                let pos_ref = ref pos in
+                let response = String.bin_read_t buf ~pos_ref in
+                assert (!pos_ref - pos = len);
+                Ivar.fill i (Ok response);
+                Deferred.unit
+              )
+            : [`Connection_closed | `Flushed of unit Deferred.t]
+          ))
+        >>| fun response ->
+        Log.debug log "got response";
+        <:test_result< string Or_error.t >> response ~expect:(Ok the_response)
+      )
+      >>| fun result ->
+      Result.ok_exn result
+    )
+    >>= fun () ->
+    Tcp.Server.close server
+
+  let command =
+    Command.async ~summary:"connect basic and low-level clients"
+      Command.Spec.(
+        empty
+        +> flag "debug" no_arg ~doc:""
+      )
+      main
+end
 
 let () =
   Command.run
@@ -409,5 +501,9 @@ let () =
          (Command.group ~summary:"Pipe rpc"
             [ "simple", Pipe_simple_test.command;
               "performance", Pipe_rpc_performance_measurements.command
+            ]);
+         "expert",
+         (Command.group ~summary:"Testing Expert interface"
+            [ "test", Rpc_expert_test.command;
             ]);
        ])

@@ -142,7 +142,7 @@ end = struct
     { mutable max_num_samples : int
     (* [samples] has the most recent samples, up to [max_num_samples], ordered by sample
        time, with the most recent sample at the front and the least recent at the back. *)
-    ; samples                 : Percent.t Dequeue.t
+    ; samples                 : Percent.t Deque.t
     (* [subscribers] is kept sorted by increasing [num_samples] so that [update] can be
        more efficient. *)
     ; mutable subscribers     : Subscriber.t list
@@ -156,21 +156,21 @@ end = struct
         ~max_num_samples:(check (fun max_num_samples ->
           assert (max_num_samples = Subscriber.max_num_samples t.subscribers)))
         ~samples:(check (fun samples ->
-          assert (Dequeue.length samples <= t.max_num_samples)))
+          assert (Deque.length samples <= t.max_num_samples)))
         ~subscribers:(check (fun subscribers ->
           List.iter subscribers ~f:Subscriber.invariant;
           assert (List.is_sorted subscribers ~compare:Subscriber.compare_num_samples))))
   ;;
 
   let drop_old_samples_if_necessary t =
-    let num_samples = Dequeue.length t.samples in
+    let num_samples = Deque.length t.samples in
     if num_samples > t.max_num_samples
-    then Dequeue.drop_back t.samples ~n:(num_samples - t.max_num_samples);
+    then Deque.drop_back t.samples ~n:(num_samples - t.max_num_samples);
   ;;
 
   let add_sample t sample =
     if debug then invariant t;
-    Dequeue.enqueue_front t.samples sample;
+    Deque.enqueue_front t.samples sample;
     drop_old_samples_if_necessary t;
     (* use local refs to keep the fold code cleaner *)
     let sum         = ref Percent.zero in
@@ -198,7 +198,7 @@ end = struct
       end
     in
     let (unprocessed_subscribers, rev_processed_subscribers) =
-      Dequeue.fold' t.samples `front_to_back
+      Deque.fold' t.samples `front_to_back
         ~init:(t.subscribers, [])
         ~f:(fun ((subscribers, processed_subscribers) as res) sample ->
           match subscribers with
@@ -234,7 +234,7 @@ end = struct
   let create samples =
     let t =
       { max_num_samples = max_num_samples_when_no_subscribers
-      ; samples         = Dequeue.create ()
+      ; samples         = Deque.create ()
       ; subscribers     = []
       }
     in

@@ -83,16 +83,20 @@ module Menu : sig
   val request : Connection.t -> t Or_error.t Deferred.t
 
   (** find what rpcs are supported *)
-  val supported_rpcs : t -> Implementation.Description.t list
+  val supported_rpcs : t -> Description.t list
 
   (** find what versions of a particular rpc are supported *)
   val supported_versions : t -> rpc_name:string -> Int.Set.t
+
+  (** create a menu directly -- generally you should use [request] instead *)
+  val create : Description.t list -> t
 
 end
 
 module Connection_with_menu : sig
   type t (** an rpc connection paired with the menu of rpcs one may call on it *)
   val create : Connection.t -> t Deferred.Or_error.t
+  val create_directly : Connection.t -> Menu.t -> t
   val connection : t -> Connection.t
   val menu : t -> Menu.t
 end

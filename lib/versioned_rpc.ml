@@ -357,16 +357,23 @@ module Menu = struct
     >>= fun (name, versions) ->
     Int.Set.to_list versions
     >>| fun version ->
-    { Implementation.Description. name; version }
+    { Description. name; version }
 
   let supported_versions t ~rpc_name =
     Option.value ~default:Int.Set.empty (Hashtbl.find t rpc_name)
 
+  let of_entries entries =
+    Hashtbl.map ~f:Int.Set.of_list (String.Table.of_alist_multi entries)
+
   let request conn =
     Rpc.dispatch Current_version.rpc conn ()
     >>| fun result ->
-    Result.map result ~f:(fun entries ->
-      Hashtbl.map ~f:Int.Set.of_list (String.Table.of_alist_multi entries))
+    Result.map result ~f:of_entries
+
+  let create descriptions =
+    List.map descriptions ~f:(fun { Description. name; version } ->
+      (name, version))
+    |> of_entries
 
 end
 
@@ -383,6 +390,8 @@ module Connection_with_menu = struct
     Menu.request connection
     >>| fun menu ->
     { connection; menu }
+
+  let create_directly connection menu = {connection; menu}
 
 end
 

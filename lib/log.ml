@@ -7,7 +7,7 @@ module Level = struct
     | `Info
     | `Error
     ]
-  with bin_io, sexp
+  with bin_io, compare, sexp
 
   let to_string = function
     | `Debug -> "Debug"
@@ -488,7 +488,10 @@ end = struct
   let sexp_of_t _ = Sexp.Atom "<opaque>"
 
   let combine writers =
-    (fun msg -> Deferred.all_unit (List.map writers ~f:(fun write -> write msg)))
+    (* There is a crazy test that verifies that we combine things correctly when the same
+    rotate output is included 5 times in Log.create, so we must make this Sequential to
+    enforce the rotate invariants and behavior. *)
+    (fun msg -> Deferred.List.iter ~how:`Sequential writers ~f:(fun write -> write msg))
   ;;
 
   let basic_write format w msg =
@@ -616,7 +619,7 @@ end = struct
         {         basename      : string
         ;         dirname       : string
         ;         rotation      : Rotation.t
-        ;         sequencer     : unit Sequencer.t sexp_opaque
+        ;         format        : format
         ; mutable filename      : string
         ; mutable last_messages : int
         ; mutable last_size     : int
@@ -641,54 +644,58 @@ end = struct
           make_filename ~dirname ~basename (Id.create (Rotation.zone t.rotation))
       ;;
 
+      let write t msgs =
+        let current_time = Time.now () in
+        Deferred.Or_error.try_with (fun () ->
+          if Rotation.should_rotate
+               t.rotation
+               ~last_messages:t.last_messages
+               ~last_size:(Byte_units.create `Bytes (Float.of_int t.last_size))
+               ~last_time:t.last_time ~current_time
+          then rotate t
+          else Deferred.unit)
+        (* rotation errors are not worth potentially crashing the process. *)
+        >>= fun (_ : unit Or_error.t) ->
+        File.write' t.format ~filename:t.filename msgs
+        >>= fun size ->
+        t.last_messages <- t.last_messages + Queue.length msgs;
+        t.last_size     <- t.last_size + Int63.to_int_exn size;
+        t.last_time     <- current_time;
+        Deferred.unit
+      ;;
+
       let create format ~basename rotation =
         let basename, dirname =
-          (* Fix dirname, because cwd may change *)
+          (* make dirname absolute, because cwd may change *)
           match Filename.is_absolute basename with
           | true  -> Filename.basename basename, return (Filename.dirname basename)
           | false -> basename, Sys.getcwd ()
         in
         let t_deferred =
           dirname
-          >>= fun dirname ->
-          let sequencer = Sequencer.create () in
-          let t =
-            { basename
-            ; dirname
-            ; rotation
-            ; sequencer
-            ; filename      = make_filename ~dirname ~basename
-                                (Id.create (Rotation.zone rotation))
-            ; last_size     = 0
-            ; last_messages = 0
-            ; last_time     = Time.now ()
-            }
-          in
-          Throttle.enqueue t.sequencer (fun () -> rotate t)
-          >>| fun () -> t
+          >>| fun dirname ->
+          { basename
+          ; dirname
+          ; rotation
+          ; format
+          ; filename      = make_filename ~dirname ~basename
+                              (Id.create (Rotation.zone rotation))
+          ; last_size     = 0
+          ; last_messages = 0
+          ; last_time     = Time.now ()
+          }
         in
+        let first_rotate_scheduled = ref false in
         fun msgs ->
           t_deferred
           >>= fun t ->
-          Throttle.enqueue t.sequencer (fun () ->
-            let current_time = Time.now () in
-            Deferred.Or_error.try_with (fun () ->
-              if Rotation.should_rotate
-                   rotation
-                   ~last_messages:t.last_messages
-                   ~last_size:(Byte_units.create `Bytes (Float.of_int t.last_size))
-                   ~last_time:t.last_time ~current_time
-              then rotate t
-              else Deferred.unit)
-            (* rotation errors are not worth potentially crashing the process. *)
-            >>= fun (_ : unit Or_error.t) ->
-            File.write' format ~filename:t.filename msgs
-            >>= fun size ->
-            t.last_messages <- t.last_messages + Queue.length msgs;
-            t.last_size     <- t.last_size + Int63.to_int_exn size;
-            t.last_time     <- current_time;
-            Deferred.unit
-          )
+          if not !first_rotate_scheduled then begin
+            first_rotate_scheduled := true;
+            rotate t
+            >>= fun () ->
+            write t msgs
+          end else
+            write t msgs
       ;;
     end
 

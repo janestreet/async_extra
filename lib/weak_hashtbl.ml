@@ -21,8 +21,8 @@ let create ?growth_allowed ?size hashable =
       reclaim_will_happen := true;
       let module Scheduler = Async_kernel.Scheduler in
       let scheduler = Scheduler.t () in
-      Scheduler.thread_safe_enqueue_external_action scheduler (fun () ->
-        Scheduler.enqueue scheduler Scheduler.main_execution_context reclaim ());
+      Scheduler.thread_safe_enqueue_external_job scheduler
+        Scheduler.main_execution_context reclaim ();
     end);
   t
 ;;

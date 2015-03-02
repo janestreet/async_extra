@@ -193,6 +193,36 @@ let defer_result : 'a 'b. ('a Deferred.t,'b) Result.t -> ('a,'b) Result.t Deferr
 
 open Protocol
 
+(* Header-writing function for some of the low-level bits that don't use the normal
+   bin-prot writers. *)
+let write_header_with_length =
+  (* Headers can be arbitrarily long, since RPC names can be arbitrarily long, but
+     50 should be long enough for most cases. *)
+  let buf_ref = lazy (ref (Bigstring.create 50)) in
+  fun w ~header ~followup_len ->
+    if Writer.is_closed w then
+      `Closed
+    else begin
+      let basic_header_len = Message.bin_size_nat0_t header in
+      let full_header_len = basic_header_len + Bin_prot.Utils.size_header_length in
+      let buf_ref = Lazy.force buf_ref in
+      let orig_len = Bigstring.length !buf_ref in
+      if orig_len < full_header_len then begin
+        Bigstring.unsafe_destroy !buf_ref;
+        buf_ref := Bigstring.create (Int.max (2 * orig_len) full_header_len);
+      end;
+      let buf = !buf_ref in
+      let pos =
+        Bin_prot.Utils.bin_write_size_header buf ~pos:0 (basic_header_len + followup_len)
+      in
+      let pos = Message.bin_write_nat0_t buf ~pos header in
+      assert (pos = full_header_len);
+      (* This copies the bytes into [w]'s buffer, so [bin_prot_buf] can be reused
+         immediately. *)
+      Writer.write_bigstring w buf ~pos:0 ~len:full_header_len;
+      `Ok
+    end
+
 module Rpc_error = struct
   include Rpc_error
   include Sexpable.To_stringable (Rpc_error)
@@ -205,6 +235,8 @@ module Rpc_result : sig
   type 'a t = 'a Rpc_result.t
 
   type 'a try_with = location:string -> (unit -> 'a) -> 'a
+
+  val uncaught_exn : location:string -> exn -> 'a t
 
   val try_with : ?run:[ `Now | `Schedule ] -> 'a t Deferred.t try_with
 
@@ -220,6 +252,10 @@ end = struct
     ; exn : Exn.t
     }
   with sexp_of
+
+  let uncaught_exn ~location exn =
+    Error (Rpc_error.Uncaught_exn (sexp_of_located_error { location; exn }))
+  ;;
 
   let make_try_with try_with (>>|) constructor ~location f =
     try_with f >>| function
@@ -280,6 +316,22 @@ end = struct
     Set.max_elt (Set.inter (Int.Set.of_list t1) (Int.Set.of_list t2))
 end
 
+module Description = struct
+  module Stable = struct
+    module V1 = struct
+      type t =
+        { name    : string
+        ; version : int
+        }
+      with compare, sexp, bin_io
+      let hash = Hashtbl.hash
+    end
+  end
+  include Stable.V1
+  include Comparable.Make (Stable.V1)
+  include Hashable.Make (Stable.V1)
+end
+
 module Implementation = struct
   module F = struct
     type 'connection_state t =
@@ -304,35 +356,27 @@ module Implementation = struct
              -> ('init * 'update Pipe.Reader.t, 'init) Result.t Deferred.t
             )
         -> 'connection_state t
+
+    let lift t ~f =
+      match t with
+      | Blocking_rpc (bin_query, bin_response, impl) ->
+        Blocking_rpc (bin_query, bin_response, fun state str -> impl (f state) str)
+      | Rpc (bin_query, bin_response, impl) ->
+        Rpc (bin_query, bin_response, fun state str -> impl (f state) str)
+      | Pipe_rpc (bin_q, bin_i, bin_u, impl) ->
+        Pipe_rpc
+          (bin_q, bin_i, bin_u, fun state str ~aborted -> impl (f state) str ~aborted)
   end
+
   type 'connection_state t =
     { tag     : Rpc_tag.t
     ; version : int
     ; f       : 'connection_state F.t
     }
 
-  module Description = struct
-    type t =
-      { name    : string
-      ; version : int
-      }
-    with compare, sexp
-  end
-
   let description t = { Description. name = Rpc_tag.to_string t.tag; version = t.version }
 
-  let lift t ~f =
-    { t with
-      f =
-        match t.f with
-        | F.Blocking_rpc (bin_query, bin_response, impl) ->
-          Blocking_rpc (bin_query, bin_response, fun state str -> impl (f state) str)
-        | F.Rpc (bin_query, bin_response, impl) ->
-          Rpc (bin_query, bin_response, fun state str -> impl (f state) str)
-        | F.Pipe_rpc (bin_q, bin_i, bin_u, impl) ->
-          Pipe_rpc
-            (bin_q, bin_i, bin_u, fun state str ~aborted -> impl (f state) str ~aborted)
-    }
+  let lift t ~f = { t with f = F.lift ~f t.f }
 end
 
 module Implementations : sig
@@ -340,54 +384,112 @@ module Implementations : sig
 
   val create
     :  implementations : 'connection_state Implementation.t list
-    -> on_unknown_rpc  : [ `Raise
-                         | `Continue
-                         | `Close_connection
-                         | `Call of (rpc_tag    : string
-                                     -> version : int
-                                     -> [ `Close_connection
-                                        | `Continue ])
-                         ]
+    -> on_unknown_rpc :
+      [ `Raise
+      | `Continue
+      | `Close_connection
+      | `Call of (rpc_tag : string -> version : int -> [ `Close_connection | `Continue ])
+      ]
     -> ( 'connection_state t
-       , [ `Duplicate_implementations of Implementation.Description.t list ]
+       , [ `Duplicate_implementations of Description.t list ]
        ) Result.t
 
   val null : unit -> 'a t
 
+  val lift : 'a t -> f:('b -> 'a) -> 'b t
+
   val query_handler
     :  'a t
-    -> (unit
-        -> connection_state    : 'a
-        -> query               : Nat0.t Query.t
-        -> writer              : Writer.t
-        -> aborted             : unit Deferred.t
-        -> read_buffer         : Bigstring.t
+    -> connection_state : 'a
+    -> writer : Writer.t
+    -> (query : Nat0.t Query.t
+        -> aborted : unit Deferred.t
+        -> read_buffer : Bigstring.t
         -> read_buffer_pos_ref : int ref
-        -> [ `Continue | `Stop ])
+        -> [ `Continue | `Stop | `Wait of unit Deferred.t ]
+       ) Staged.t
 
   val create_exn
     :  implementations : 'connection_state Implementation.t list
-    -> on_unknown_rpc  : [ `Raise
-                         | `Continue
-                         | `Close_connection
-                         | `Call of (rpc_tag    : string
-                                     -> version : int
-                                     -> [ `Close_connection
-                                        | `Continue ])
-                         ]
+    -> on_unknown_rpc :
+      [ `Raise
+      | `Continue
+      | `Close_connection
+      | `Call of (rpc_tag : string -> version : int -> [ `Close_connection | `Continue ])
+      ]
     -> 'connection_state t
+
+  val add
+    : 'connection_state t
+    -> 'connection_state Implementation.t
+    -> 'connection_state t Or_error.t
+
+  val add_exn
+    : 'connection_state t
+    -> 'connection_state Implementation.t
+    -> 'connection_state t
+
+  val descriptions : _ t -> Description.t list
+
+  module Expert : sig
+    module Responder : sig
+      type t
+    end
+
+    module Rpc_responder : sig
+      type t = Responder.t
+
+      val schedule
+        :  t -> Bigstring.t -> pos:int -> len:int
+        -> [`Connection_closed | `Flushed of unit Deferred.t]
+
+      val write_bin_prot : t -> 'a Bin_prot.Type_class.writer -> 'a -> unit
+
+      val write_error : t -> Error.t -> unit
+    end
+
+    val create_exn
+      :  implementations : 'connection_state Implementation.t list
+      -> on_unknown_rpc :
+        [ `Raise
+        | `Continue
+        | `Close_connection
+        | `Call of
+            (rpc_tag : string -> version : int -> [ `Close_connection | `Continue ])
+        | `Expert of
+            ('connection_state -> rpc_tag : string -> version : int -> Responder.t
+             -> Bigstring.t -> pos : int -> len : int -> unit Deferred.t)
+        ]
+      -> 'connection_state t
+  end
 end = struct
-  type 'a t =
-    { query_handler :
-        unit
-        -> connection_state    : 'a
-        -> query               : Nat0.t Query.t
-        -> writer              : Writer.t
-        -> aborted             : unit Deferred.t
-        -> read_buffer         : Bigstring.t
-        -> read_buffer_pos_ref : int ref
-        -> [ `Continue | `Stop ]
+
+  module Responder = struct
+    type t = Query_id.t * Writer.t
+  end
+
+  type 'connection_state on_unknown_rpc =
+    [ `Raise
+    | `Continue
+    | `Close_connection
+    | `Call of (rpc_tag : string -> version : int -> [ `Close_connection | `Continue ])
+    | `Expert of
+        ('connection_state
+         -> rpc_tag : string
+         -> version : int
+         -> Responder.t
+         -> Bigstring.t
+         -> pos : int
+         -> len : int
+         -> unit Deferred.t)
+    ]
+
+  type 'connection_state t =
+    { implementations : 'connection_state Implementation.F.t Description.Table.t
+    ; on_unknown_rpc : 'connection_state on_unknown_rpc
     }
+
+  let descriptions t = Hashtbl.keys t.implementations
 
   let apply_implementation
         implementation
@@ -411,7 +513,13 @@ end = struct
           ~len:query.data
           ~location:"server-side rpc query un-bin-io'ing"
       in
-      let data = query >>|~ f connection_state in
+      let data =
+        try query >>|~ f connection_state with
+        | exn ->
+          Rpc_result.uncaught_exn
+            ~location:"server-side blocking rpc computation"
+            exn
+      in
       write_response bin_response_writer data
     | Implementation.F.Rpc (bin_query_reader, bin_response_writer, f) ->
       let query =
@@ -491,59 +599,75 @@ end = struct
 
   let create ~implementations:i's ~on_unknown_rpc =
     (* Make sure the tags are unique. *)
-    let _, dups =
-      List.fold i's ~init:(Set.Poly.empty, Set.Poly.empty)
-        ~f:(fun (s, dups) (i : _ Implementation.t) ->
-          let tag =
-            { Implementation.Description.
-              name    = Rpc_tag.to_string i.tag
-            ; version = i.version
-            }
-          in
-          let dups = if Set.mem s tag then Set.add dups tag else dups in
-          let s = Set.add s tag in
-          (s, dups))
-    in
-    if not (Set.is_empty dups)
-    then Error (`Duplicate_implementations (Set.to_list dups))
+    let implementations = Description.Table.create ~size:10 () in
+    let dups = Description.Hash_set.create ~size:10 () in
+    List.iter i's ~f:(fun (i : _ Implementation.t) ->
+      let description =
+        { Description.
+          name    = Rpc_tag.to_string i.tag
+        ; version = i.version
+        }
+      in
+      match Hashtbl.add implementations ~key:description ~data:i.f with
+      | `Ok -> ()
+      | `Duplicate -> Hash_set.add dups description
+    );
+    if not (Hash_set.is_empty dups) then
+      Error (`Duplicate_implementations (Hash_set.to_list dups))
     else
-      let implementations =
-        Hashtbl.Poly.of_alist_exn (List.map i's ~f:(fun i ->
-          ((i.tag, i.version), i.f))
-        )
-      in
-      let shared_handler ~connection_state ~(query : _ Query.t) ~writer ~aborted
-            ~read_buffer ~read_buffer_pos_ref ~open_streaming_responses () =
-        match Hashtbl.find implementations (query.tag, query.version) with
-        | Some implementation ->
-          apply_implementation implementation ~connection_state
-            ~query ~read_buffer ~read_buffer_pos_ref ~writer ~open_streaming_responses
-            ~aborted;
-          `Continue
-        | None ->
-          let error = Rpc_error.Unimplemented_rpc (query.tag, `Version query.version) in
-          Writer.write_bin_prot writer Message.bin_writer_nat0_t
-            (Response
-               { id   = query.id
-               ; data = Error error
-               });
-          begin
-            match on_unknown_rpc with
-            | `Continue         -> `Continue
-            | `Raise            -> Rpc_error.raise error
-            | `Close_connection -> `Stop
-            | `Call f ->
-              match f ~rpc_tag:(Rpc_tag.to_string query.tag) ~version:query.version with
-              | `Close_connection -> `Stop
-              | `Continue         -> `Continue
-          end;
-      in
-      let query_handler () =
-        shared_handler ~open_streaming_responses:(Hashtbl.Poly.create ~size:10 ()) ()
-      in
-      Ok { query_handler }
+      Ok { implementations; on_unknown_rpc = (on_unknown_rpc :> _ on_unknown_rpc) }
 
-  exception Duplicate_implementations of Implementation.Description.t list with sexp
+
+  let shared_handler implementations on_unknown_rpc
+        ~open_streaming_responses
+        ~connection_state ~(query : Nat0.t Query.t) ~writer ~aborted
+        ~read_buffer ~read_buffer_pos_ref =
+    match
+      Hashtbl.find implementations
+        { Description.name = Rpc_tag.to_string query.tag
+        ; version = query.version}
+    with
+    | Some implementation ->
+      apply_implementation implementation ~connection_state ~query ~read_buffer
+        ~read_buffer_pos_ref ~writer ~open_streaming_responses ~aborted;
+      `Continue
+    | None ->
+      match on_unknown_rpc with
+      | `Expert impl ->
+        let {Query.tag; version; id; data = len} = query in
+        let d =
+          impl connection_state ~rpc_tag:(Rpc_tag.to_string tag) ~version (id, writer)
+            read_buffer ~pos:!read_buffer_pos_ref ~len:(len :> int)
+        in
+        if Deferred.is_determined d
+        then `Continue
+        else `Wait d
+      | (`Continue | `Raise | `Close_connection | `Call _) as on_unknown_rpc ->
+        let error = Rpc_error.Unimplemented_rpc (query.tag, `Version query.version) in
+        Writer.write_bin_prot writer Message.bin_writer_nat0_t
+          (Response
+             { id   = query.id
+             ; data = Error error
+             });
+        begin
+          match on_unknown_rpc with
+          | `Continue         -> `Continue
+          | `Raise            -> Rpc_error.raise error
+          | `Close_connection -> `Stop
+          | `Call f ->
+            match f ~rpc_tag:(Rpc_tag.to_string query.tag) ~version:query.version with
+            | `Close_connection -> `Stop
+            | `Continue         -> `Continue
+        end
+
+  let query_handler {implementations; on_unknown_rpc} ~connection_state ~writer =
+    let open_streaming_responses = Hashtbl.Poly.create ~size:10 () in
+    Staged.stage (
+      shared_handler implementations on_unknown_rpc ~open_streaming_responses
+        ~connection_state ~writer
+    )
+
+  exception Duplicate_implementations of Description.t list with sexp
 
   let create_exn ~implementations ~on_unknown_rpc =
     match create ~implementations ~on_unknown_rpc with
@@ -552,7 +676,63 @@ end = struct
 
   let null () = create_exn ~implementations:[] ~on_unknown_rpc:`Raise
 
-  let query_handler t = t.query_handler
+  let add_exn t (implementation : _ Implementation.t) =
+    let desc : Description.t =
+      { name = Rpc_tag.to_string implementation.tag
+      ; version = implementation.version
+      }
+    in
+    let implementations = Hashtbl.copy t.implementations in
+    match Hashtbl.add implementations ~key:desc ~data:implementation.f with
+    | `Duplicate -> raise (Duplicate_implementations [desc])
+    | `Ok -> { t with implementations }
+
+  let add t implementation =
+    Or_error.try_with (fun () -> add_exn t implementation)
+
+
+  let lift {implementations;on_unknown_rpc; _} ~f =
+    let implementations =
+      Hashtbl.map implementations ~f:(Implementation.F.lift ~f)
+    in
+    let on_unknown_rpc =
+      match on_unknown_rpc with
+      | `Raise | `Continue | `Close_connection | `Call _ as x -> x
+      | `Expert expert -> `Expert (fun state -> expert (f state))
+    in
+    { implementations ; on_unknown_rpc }
+
+  module Expert = struct
+    module Responder = Responder
+
+    module Rpc_responder = struct
+      type t = Responder.t
+
+      let schedule (id, w) buf ~pos ~len =
+        let header : Nat0.t Message.t = Response {id; data = Ok (Nat0.of_int_exn len)} in
+        match write_header_with_length w ~header ~followup_len:len with
+        | `Closed -> `Connection_closed
+        | `Ok ->
+          Writer.schedule_bigstring w buf ~pos ~len;
+          `Flushed (Writer.flushed w)
+
+      let write_error (id, w) error =
+        if not (Writer.is_closed w) then
+          let data =
+            Rpc_result.uncaught_exn ~location:"server-side raw rpc computation"
+              (Error.to_exn error)
+          in
+          Writer.write_bin_prot w Message.bin_writer_nat0_t (Response {id; data})
+
+      let write_bin_prot (id, w) bin_writer_a a =
+        if not (Writer.is_closed w) then
+          Writer.write_bin_prot w
+            (Message.bin_writer_needs_length (Writer_with_length.of_writer bin_writer_a))
+            (Response {id; data = Ok a})
+    end
+
+    let create_exn = create_exn
+  end
 end
 
 module Handshake_error = struct
@@ -581,85 +761,49 @@ module type Connection = Connection with module Implementations := Implementatio
 module type Connection_internal = sig
   include Connection
 
-  module Response_handler : sig
-    type t
-
-    val create
-      : (Nat0.t Response.t
-         -> read_buffer         : Bigstring.t
-         -> read_buffer_pos_ref : int ref
-         -> [ `keep | `wait of unit Deferred.t | `remove of unit Rpc_result.t ])
-      -> t
-  end
+  type response_handler
+    =  Nat0.t Response.t
+    -> read_buffer : Bigstring.t
+    -> read_buffer_pos_ref : int ref
+    -> [ `keep
+       | `wait of unit Deferred.t
+       | `remove of unit Rpc_result.t
+       | `remove_and_wait of unit Deferred.t
+       ]
 
   val dispatch
     :  t
-    -> response_handler : Response_handler.t option
+    -> response_handler : response_handler option
     -> bin_writer_query : 'a Bin_prot.Type_class.writer
     -> query            : 'a Query.t
     -> (unit, [`Closed]) Result.t
+
+  val schedule_dispatch
+    :  t
+    -> tag : Rpc_tag.t
+    -> version : int
+    -> Bigstring.t
+    -> pos : int
+    -> len : int
+    -> response_handler : response_handler
+    -> [`Connection_closed | `Flushed of unit Deferred.t]
 end
 
 module Connection : Connection_internal = struct
-  module Implementations = Implementations
-
-  module Response_handler : sig
-    type t with sexp_of
-
-    val create
-      :  (Nat0.t Response.t
-          -> read_buffer         : Bigstring.t
-          -> read_buffer_pos_ref : int ref
-          -> [ `keep | `wait of unit Deferred.t | `remove of unit Rpc_result.t ])
-      -> t
-
-    val update
-      :  t
-      -> Nat0.t Response.t
-      -> read_buffer         : Bigstring.t
-      -> read_buffer_pos_ref : int ref
-      -> [ `already_removed
-         | `keep
-         | `wait   of unit Deferred.t
-         | `remove of unit Rpc_result.t
-         ]
-  end = struct
-    type t =
-      { f                        : (Nat0.t Response.t
-                                    -> read_buffer         : Bigstring.t
-                                    -> read_buffer_pos_ref : int ref
-                                    -> [ `keep
-                                       | `wait of unit Deferred.t
-                                       | `remove of unit Rpc_result.t
-                                       ]) sexp_opaque
-      ; mutable has_been_removed : bool
-      }
-    with sexp_of
-
-    let create f =
-      { f; has_been_removed = false }
-
-    let update t response ~read_buffer ~read_buffer_pos_ref =
-      if t.has_been_removed
-      then `already_removed
-      else begin
-        let decision = t.f response ~read_buffer ~read_buffer_pos_ref in
-        begin match decision with
-        | `remove _ -> t.has_been_removed <- true
-        | `wait _
-        | `keep -> ()
-        end;
-        (decision :> [ `already_removed
-                     | `keep
-                     | `wait of unit Deferred.t
-                     | `remove of unit Rpc_result.t ])
-      end
-  end
+  type response_handler
+    =  Nat0.t Response.t
+    -> read_buffer : Bigstring.t
+    -> read_buffer_pos_ref : int ref
+    -> [ `keep
+       | `wait of unit Deferred.t
+       | `remove of unit Rpc_result.t
+       | `remove_and_wait of unit Deferred.t
+       ]
 
   type t =
-    { reader         : Reader.t
-    ; writer         : Writer.t
-    ; open_queries   : (Query_id.t, Response_handler.t) Hashtbl.t
+    { reader : Reader.t
+    ; writer : Writer.t
+    ; open_queries : (Query_id.t, response_handler sexp_opaque) Hashtbl.t
     ; close_started  : unit Ivar.t
     ; close_finished : unit Ivar.t
     }
@@ -682,26 +826,28 @@ module Connection : Connection_internal = struct
         Hashtbl.set t.open_queries ~key:query.id ~data:response_handler);
       Ok ()
 
-  let handle_query_aux t ~handle_query ~query ~read_buffer ~read_buffer_pos_ref =
-    handle_query
-      ~query
-      ~writer:t.writer
-      ~aborted:(Ivar.read t.close_started)
-      ~read_buffer
-      ~read_buffer_pos_ref
+  let schedule_dispatch t ~tag ~version buf ~pos ~len ~response_handler =
+    let id = Query_id.create () in
+    let header : Nat0.t Message.t =
+      Query {tag; version; id; data = Nat0.of_int_exn len}
+    in
+    match write_header_with_length t.writer ~header ~followup_len:len with
+    | `Closed -> `Connection_closed
+    | `Ok ->
+      Writer.schedule_bigstring t.writer buf ~pos ~len;
+      Hashtbl.set t.open_queries ~key:id ~data:response_handler;
+      `Flushed (Writer.flushed t.writer)
 
   let handle_response t (response : _ Response.t) ~read_buffer ~read_buffer_pos_ref =
-    let unknown_query_id () = `Stop (Error (Rpc_error.Unknown_query_id response.id)) in
     match Hashtbl.find t.open_queries response.id with
-    | None -> unknown_query_id ()
+    | None -> `Stop (Error (Rpc_error.Unknown_query_id response.id))
     | Some response_handler ->
-      match
-        Response_handler.update response_handler response ~read_buffer
-          ~read_buffer_pos_ref
-      with
+      match response_handler response ~read_buffer ~read_buffer_pos_ref with
       | `keep -> `Continue
       | `wait wait -> `Wait wait
-      | `already_removed -> unknown_query_id ()
+      | `remove_and_wait wait ->
+        Hashtbl.remove t.open_queries response.id;
+        `Wait wait
       | `remove removal_circumstances ->
         Hashtbl.remove t.open_queries response.id;
         begin match removal_circumstances with
@@ -713,7 +859,7 @@ module Connection : Connection_internal = struct
           | Connection_closed
           | Write_error _
           | Uncaught_exn _
-          | Unknown_query_id _  -> `Stop (Error e)
+          | Unknown_query_id _ -> `Stop (Error e)
         end
 
   let handle_msg t (msg : _ Message.t) ~handle_query ~read_buffer ~read_buffer_pos_ref =
@@ -722,8 +868,12 @@ module Connection : Connection_internal = struct
     | Response response ->
       handle_response t response ~read_buffer ~read_buffer_pos_ref
     | Query query ->
-      match handle_query_aux t ~handle_query ~query ~read_buffer ~read_buffer_pos_ref with
+      match
+        handle_query ~query ~aborted:(Ivar.read t.close_started)
+          ~read_buffer ~read_buffer_pos_ref
+      with
       | `Continue -> `Continue
+      | `Wait d -> `Wait d
       (* This [`Stop] does indicate an error, but [handle_query] handled it already. *)
       | `Stop -> `Stop (Ok ())
 
@@ -792,7 +942,10 @@ module Connection : Connection_internal = struct
         | None -> Error Negotiation_failed
         | Some 1 ->
           let handle_query =
-            Implementations.query_handler implementations ~connection_state:(connection_state t) ()
+            Staged.unstage (
+              Implementations.query_handler implementations ~writer
+                ~connection_state:(connection_state t)
+            )
           in
           let last_heartbeat = ref (Time.now ()) in
           let heartbeat () =
@@ -808,42 +961,48 @@ module Connection : Connection_internal = struct
           let handle_chunk buf ~pos:init_pos ~len =
             let end_pos = init_pos + len in
             let pos_ref = ref init_pos in
-            let rec loop () =
-              if end_pos - !pos_ref < 8
-              then return (`Consumed (!pos_ref - init_pos, `Need 8))
+            let finish_loop ~consumed ~need ~wait_before_reading =
+              let ret_val = `Consumed (consumed, `Need need) in
+              match wait_before_reading with
+              | [] -> return ret_val (* extremely common case *)
+              | l -> Deferred.all_unit l >>| fun () -> ret_val
+            in
+            let rec loop wait_before_reading =
+              if end_pos - !pos_ref < 8 then
+                finish_loop ~consumed:(!pos_ref - init_pos) ~need:8 ~wait_before_reading
               else
                 let header_start = !pos_ref in
                 let msg_length = Bin_prot.Read.bin_read_int_64bit buf ~pos_ref in
                 if msg_length > max_len then
                   failwithf "max read length exceeded: %d > %d" msg_length max_len ();
-                if end_pos - !pos_ref < msg_length
-                then
+                if end_pos - !pos_ref < msg_length then
                   (* We don't consume the header so we can read it again the next time
                      [handle_chunk] is called. *)
-                  return (`Consumed (header_start - init_pos, `Need (8 + msg_length)))
+                  finish_loop ~consumed:(header_start - init_pos) ~need:(8 + msg_length)
+                    ~wait_before_reading
                 else
                   let end_of_msg = !pos_ref + msg_length in
                   let nat0_msg = Message.bin_read_nat0_t buf ~pos_ref in
                   last_heartbeat := Time.now ();
                   match
-                    handle_msg t nat0_msg ~handle_query ~read_buffer:buf ~read_buffer_pos_ref:pos_ref
+                    handle_msg t nat0_msg ~handle_query ~read_buffer:buf
+                      ~read_buffer_pos_ref:pos_ref
                   with
                   | `Continue ->
                     (* assume everything we needed to be read has been read or will be
                        discarded (e.g. there was a query for an unknown RPC) *)
                     pos_ref := end_of_msg;
-                    loop ()
+                    loop wait_before_reading
                   | `Wait wait ->
                     pos_ref := end_of_msg;
-                    wait
-                    >>= loop
+                    loop (wait :: wait_before_reading)
                   | `Stop result ->
                     don't_wait_for (close t);
                     match result with
                     | Ok () -> return (`Stop_consumed ((), !pos_ref - init_pos))
                     | Error e -> Rpc_error.raise e
             in
-            loop ()
+            loop []
           in
           begin
             let cleanup ~raise_ exn =
@@ -860,8 +1019,7 @@ module Connection : Connection_internal = struct
               Hashtbl.iter t.open_queries
                 ~f:(fun ~key:query_id ~data:response_handler ->
                   ignore (
-                    Response_handler.update
-                      response_handler
+                    response_handler
                       ~read_buffer:dummy_buffer
                       ~read_buffer_pos_ref:dummy_ref
                       { id   = query_id
@@ -952,8 +1110,8 @@ module Connection : Connection_internal = struct
       ?buffer_age_limit where_to_listen
       ~on_handler_error:`Ignore
       (fun inet r w ->
-         if not (auth inet)
-         then Deferred.unit
+         if not (auth inet) then
+           Deferred.unit
          else begin
            let connection_state = initial_connection_state inet in
            create ?max_message_size ?handshake_timeout ~implementations ~connection_state
@@ -1072,6 +1230,12 @@ module Rpc = struct
   let name t = Rpc_tag.to_string t.tag
   let version t = t.version
 
+  let description t =
+    { Description.
+      name    = name t
+    ; version = version t
+    }
+
   let bin_query t = t.bin_query
   let bin_response t = t.bin_response
 
@@ -1091,16 +1255,15 @@ module Rpc = struct
 
   let dispatch t conn query =
     let response_handler ivar =
-      Connection.Response_handler.create
-        (fun response ~read_buffer ~read_buffer_pos_ref ->
-           let response =
-             response.Response.data >>=~ fun len ->
-             of_bigstring t.bin_response.reader
-               read_buffer ~pos_ref:read_buffer_pos_ref ~len
-               ~location:"client-side rpc response un-bin-io'ing"
-           in
-           Ivar.fill ivar response;
-           `remove (Ok ()))
+      fun response ~read_buffer ~read_buffer_pos_ref ->
+        let response =
+          response.Response.data >>=~ fun len ->
+          of_bigstring t.bin_response.reader
+            read_buffer ~pos_ref:read_buffer_pos_ref ~len
+            ~location:"client-side rpc response un-bin-io'ing"
+        in
+        Ivar.fill ivar response;
+        `remove (Ok ())
     in
     let query_id = Query_id.create () in
     Rpc_common.dispatch_raw conn ~tag:t.tag ~version:t.version
@@ -1151,6 +1314,28 @@ module Rpc = struct
       client ~port
       >>= fun () -> Tcp.Server.close server)
 
+  module Expert = struct
+    module Responder = Implementations.Expert.Rpc_responder
+
+    let schedule_dispatch conn ~rpc_tag ~version buf ~pos ~len ~handle_response
+          ~handle_error =
+      let response_handler : Connection.response_handler =
+        fun response ~read_buffer ~read_buffer_pos_ref ->
+          match response.data with
+          | Error e ->
+            handle_error (Error.t_of_sexp (Rpc_error.sexp_of_t e));
+            `remove (Ok ())
+          | Ok len ->
+            let len = (len : Nat0.t :> int) in
+            let d = handle_response read_buffer ~pos:!read_buffer_pos_ref ~len in
+            read_buffer_pos_ref := !read_buffer_pos_ref + len;
+            if Deferred.is_determined d
+            then `remove (Ok ())
+            else `remove_and_wait d
+      in
+      Connection.schedule_dispatch conn ~tag:(Rpc_tag.of_string rpc_tag) ~version
+        buf ~pos ~len ~response_handler
+  end
 end
 
 (* the basis of the implementations of Pipe_rpc and State_rpc *)
@@ -1247,90 +1432,90 @@ module Streaming_rpc = struct
     let state =
       { state = Waiting_for_initial_response }
     in
-    let response_handler ivar =
-      Connection.Response_handler.create
-        (fun response ~read_buffer ~read_buffer_pos_ref ->
-           match state.state with
-           | Writing_updates_to_pipe pipe_w ->
-             begin match response.data with
-             | Error err ->
-               Pipe.close pipe_w;
-               `remove (Error err)
-             | Ok len ->
-               let data =
-                 of_bigstring Stream_response_data.bin_reader_nat0_t
-                   read_buffer ~pos_ref:read_buffer_pos_ref ~len
-                   ~location:"client-side streaming_rpc response un-bin-io'ing"
-                   ~add_len:(function `Eof -> 0 | `Ok (len : Nat0.t) -> (len :> int))
-               in
-               match data with
-               | Error err ->
-                 server_closed_pipe := true;
-                 Pipe.close pipe_w;
-                 `remove (Error err)
-               | Ok `Eof ->
-                 server_closed_pipe := true;
-                 Pipe.close pipe_w;
-                 `remove (Ok ())
-               | Ok (`Ok len) ->
-                 let data =
-                   of_bigstring t.bin_update_response.reader
-                     read_buffer ~pos_ref:read_buffer_pos_ref ~len
-                     ~location:"client-side streaming_rpc response un-bin-io'ing"
-                 in
-                 match data with
-                 | Error err ->
-                   Pipe.close pipe_w;
-                   `remove (Error err)
-                 | Ok data ->
-                   if not (Pipe.is_closed pipe_w) then begin
-                     Pipe.write_without_pushback pipe_w data;
-                     if t.client_pushes_back
-                     && (Pipe.length pipe_w) = (Pipe.size_budget pipe_w)
-                     then `wait (Pipe.downstream_flushed pipe_w
-                                 >>| function
-                                 | `Ok
-                                 | `Reader_closed -> ())
-                     else `keep
-                   end else
-                     `keep
-             end
-           | Waiting_for_initial_response ->
-             begin match response.data with
-             | Error err ->
-               Ivar.fill ivar (Error err);
-               `remove (Error err)
-             | Ok len ->
-               let initial = of_bigstring
-                               (Initial_message.bin_reader_t
-                                  t.bin_initial_response.reader
-                                  t.bin_error_response.reader)
-                               read_buffer ~pos_ref:read_buffer_pos_ref ~len
-                               ~location:"client-side streaming_rpc initial_response un-bin-io'ing"
-               in
-               begin match initial with
-               | Error err ->
-                 `remove (Error err)
-               | Ok initial_msg ->
-                 begin match initial_msg.initial with
-                 | Error err ->
-                   Ivar.fill ivar (Ok (Error err));
-                   `remove (Ok ())
-                 | Ok initial ->
-                   let pipe_r, pipe_w = Pipe.create () in
-                   (* Set a small buffer to reduce the number of pushback events *)
-                   Pipe.set_size_budget pipe_w 100;
-                   Ivar.fill ivar (Ok (Ok (query_id, initial, pipe_r)));
-                   (Pipe.closed pipe_r >>> fun () ->
-                    if not !server_closed_pipe then abort t conn query_id);
-                   Connection.close_finished conn >>> (fun () ->
-                     server_closed_pipe := true;
-                     Pipe.close pipe_w);
-                   state.state <- Writing_updates_to_pipe pipe_w;
-                   `keep
-                 end
-               end
-             end)
+    let response_handler ivar : Connection.response_handler =
+      fun response ~read_buffer ~read_buffer_pos_ref ->
+        match state.state with
+        | Writing_updates_to_pipe pipe_w ->
+          begin match response.data with
+          | Error err ->
+            Pipe.close pipe_w;
+            `remove (Error err)
+          | Ok len ->
+            let data =
+              of_bigstring Stream_response_data.bin_reader_nat0_t
+                read_buffer ~pos_ref:read_buffer_pos_ref ~len
+                ~location:"client-side streaming_rpc response un-bin-io'ing"
+                ~add_len:(function `Eof -> 0 | `Ok (len : Nat0.t) -> (len :> int))
+            in
+            match data with
+            | Error err ->
+              server_closed_pipe := true;
+              Pipe.close pipe_w;
+              `remove (Error err)
+            | Ok `Eof ->
+              server_closed_pipe := true;
+              Pipe.close pipe_w;
+              `remove (Ok ())
+            | Ok (`Ok len) ->
+              let data =
+                of_bigstring t.bin_update_response.reader
+                  read_buffer ~pos_ref:read_buffer_pos_ref ~len
+                  ~location:"client-side streaming_rpc response un-bin-io'ing"
+              in
+              match data with
+              | Error err ->
+                Pipe.close pipe_w;
+                `remove (Error err)
+              | Ok data ->
+                if not (Pipe.is_closed pipe_w) then begin
+                  Pipe.write_without_pushback pipe_w data;
+                  if t.client_pushes_back
+                  && (Pipe.length pipe_w) = (Pipe.size_budget pipe_w)
+                  then `wait (Pipe.downstream_flushed pipe_w
+                              >>| function
+                              | `Ok
+                              | `Reader_closed -> ())
+                  else `keep
+                end else
+                  `keep
+          end
+        | Waiting_for_initial_response ->
+          begin match response.data with
+          | Error err ->
+            Ivar.fill ivar (Error err);
+            `remove (Error err)
+          | Ok len ->
+            let initial =
+              of_bigstring
+                (Initial_message.bin_reader_t
+                   t.bin_initial_response.reader
+                   t.bin_error_response.reader)
+                read_buffer ~pos_ref:read_buffer_pos_ref ~len
+                ~location:"client-side streaming_rpc initial_response un-bin-io'ing"
+            in
+            begin match initial with
+            | Error err ->
+              `remove (Error err)
+            | Ok initial_msg ->
+              begin match initial_msg.initial with
+              | Error err ->
+                Ivar.fill ivar (Ok (Error err));
+                `remove (Ok ())
+              | Ok initial ->
+                let pipe_r, pipe_w = Pipe.create () in
+                (* Set a small buffer to reduce the number of pushback events *)
+                Pipe.set_size_budget pipe_w 100;
+                Ivar.fill ivar (Ok (Ok (query_id, initial, pipe_r)));
+                (Pipe.closed pipe_r >>> fun () ->
+                 if not !server_closed_pipe then abort t conn query_id);
+                Connection.close_finished conn >>> (fun () ->
+                  server_closed_pipe := true;
+                  Pipe.close pipe_w);
+                state.state <- Writing_updates_to_pipe pipe_w;
+                `keep
+              end
+            end
+          end
     in
     Rpc_common.dispatch_raw conn ~query_id ~tag:t.tag ~version:t.version
       ~bin_writer_query ~query ~f:response_handler
@@ -1384,6 +1569,12 @@ module Pipe_rpc = struct
 
   let name t = Rpc_tag.to_string t.Streaming_rpc.tag
   let version t = t.Streaming_rpc.version
+
+  let description t =
+    { Description.
+      name    = name t
+    ; version = version t
+    }
 end
 
 module State_rpc = struct
@@ -1437,6 +1628,12 @@ module State_rpc = struct
 
   let name t = Rpc_tag.to_string t.Streaming_rpc.tag
   let version t = t.Streaming_rpc.version
+
+  let description t =
+    { Description.
+      name = name t
+    ; version = version t
+    }
 end
 
 module Any = struct

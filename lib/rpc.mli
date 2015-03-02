@@ -21,6 +21,20 @@ open Rpc_intf
     (name, version) pair.  RPCs with the same name but different versions should implement
     similar functionality. *)
 
+module Description : sig
+  type t =
+    { name    : string
+    ; version : int
+    }
+  with compare, sexp_of
+
+  module Stable : sig
+    module V1 : sig
+      type nonrec t = t with compare, sexp, bin_io
+    end
+  end
+end
+
 module Implementation : sig
   (** A ['connection_state t] is something that knows how to respond to one query, given
       a ['connection_state].  That is, you can create a ['connection_state t] by providing
@@ -29,15 +43,7 @@ module Implementation : sig
       The reason for this is that rpcs often do something like look something up in a
       master structure.  This way, [Implementation.t]'s can be created without having the
       master structure in your hands. *)
- type 'connection_state t
-
-  module Description : sig
-    type t =
-      { name    : string
-      ; version : int
-      }
-    with compare, sexp
-  end
+  type 'connection_state t
 
   val description : _ t -> Description.t
 
@@ -56,39 +62,79 @@ module Implementations : sig
   (** a server that can handle no queries *)
   val null : unit -> 'connection_state t
 
+  val lift : 'a t -> f:('b -> 'a) -> 'b t
+
   (** [create ~implementations ~on_unknown_rpc] creates a server capable of responding to
       the rpc's implemented in the implementation list.  Be careful about setting
       [on_unknown_rpc] to [`Raise] because other programs may mistakenly connect to this
       one causing it to crash. *)
   val create
     :  implementations : 'connection_state Implementation.t list
-    -> on_unknown_rpc  : [ `Raise
-                         | `Continue
-                         | `Close_connection  (** used to be the behavior of [`Ignore] *)
-                         (** [rpc_tag] and [version] are the name and version of the
-                             unknown rpc *)
-                         | `Call of (rpc_tag    : string
-                                     -> version : int
-                                     -> [ `Close_connection
-                                        | `Continue
-                                        ])
-                         ]
+    -> on_unknown_rpc :
+      [ `Raise
+      | `Continue
+      | `Close_connection  (** used to be the behavior of [`Ignore] *)
+      (** [rpc_tag] and [version] are the name and version of the unknown rpc *)
+      | `Call of (rpc_tag : string -> version : int -> [ `Close_connection | `Continue ])
+      ]
     -> ( 'connection_state t
-       , [`Duplicate_implementations of Implementation.Description.t list]
+       , [`Duplicate_implementations of Description.t list]
        ) Result.t
 
   val create_exn
     :  implementations : 'connection_state Implementation.t list
-    -> on_unknown_rpc  : [ `Raise
-                         | `Continue
-                         | `Close_connection  (** used to be the behavior of [`Ignore] *)
-                         | `Call of (rpc_tag    : string
-                                     -> version : int
-                                     -> [ `Close_connection
-                                        | `Continue
-                                        ])
-                         ]
+    -> on_unknown_rpc :
+      [ `Raise
+      | `Continue
+      | `Close_connection  (** used to be the behavior of [`Ignore] *)
+      | `Call of (rpc_tag : string -> version : int -> [ `Close_connection | `Continue ])
+      ]
     -> 'connection_state t
+
+  val add
+    :  'connection_state t
+    -> 'connection_state Implementation.t
+    -> 'connection_state t Or_error.t
+
+  val add_exn
+    :  'connection_state t
+    -> 'connection_state Implementation.t
+    -> 'connection_state t
+
+  val descriptions : _ t -> Description.t list
+
+  (** Low-level, untyped access to queries.  Regular users should ignore this. *)
+  module Expert : sig
+    (** See [Rpc.Expert.Responder] for how to use this. *)
+    module Responder : sig
+      type t
+    end
+
+    (** Same as [create_exn], except for the additional [`Expert] variant. *)
+    val create_exn
+      :  implementations : 'connection_state Implementation.t list
+      -> on_unknown_rpc :
+        [ `Raise
+        | `Continue
+        | `Close_connection  (** used to be the behavior of [`Ignore] *)
+        | `Call of (rpc_tag : string -> version : int -> [ `Close_connection | `Continue ])
+        | `Expert of
+            (** The [Deferred.t] the function returns is only used to determine when it is
+                safe to overwrite the supplied [Bigstring.t], so it is *not* necessary to
+                completely finish handling the query before it is filled in. In
+                particular, if you don't intend to read from the [Bigstring.t] after the
+                function returns, you can return [Deferred.unit]. *)
+            ('connection_state
+             -> rpc_tag : string
+             -> version : int
+             -> Responder.t
+             -> Bigstring.t
+             -> pos : int
+             -> len : int
+             -> unit Deferred.t)
+        ]
+      -> 'connection_state t
+  end
 end
 
 module type Connection = Connection with module Implementations := Implementations
@@ -109,6 +155,8 @@ module Rpc : sig
   val name    : (_, _) t -> string
   val version : (_, _) t -> int
 
+  val description : (_, _) t -> Description.t
+
   val bin_query    : ('query, _)    t -> 'query    Bin_prot.Type_class.t
   val bin_response : (_, 'response) t -> 'response Bin_prot.Type_class.t
 
@@ -119,6 +167,16 @@ module Rpc : sig
         -> 'response Deferred.t)
     -> 'connection_state Implementation.t
 
+  (** [implement'] is different from [implement] in that:
+
+      1. ['response] is immediately serialized and scheduled for delivery to the RPC
+         dispatcher.
+
+      2. Less allocation happens, as none of the Async-related machinery is necessary.
+
+      [implement] also tries to do 1 when possible, but it is guaranteed to happen with
+      [implement'].
+  *)
   val implement'
     :  ('query, 'response) t
     -> ('connection_state
@@ -137,6 +195,42 @@ module Rpc : sig
     -> Connection.t
     -> 'query
     -> 'response Deferred.t
+
+  module Expert : sig
+    module Responder : sig
+      type t = Implementations.Expert.Responder.t
+
+      (** As in [Writer], after calling [schedule], you should not overwrite the
+          [Bigstring.t] passed in until the responder is flushed. *)
+      val schedule
+        :  t
+        -> Bigstring.t
+        -> pos : int
+        -> len : int
+        -> [`Connection_closed | `Flushed of unit Deferred.t]
+
+      (** On the other hand, these are written immediately. *)
+      val write_bin_prot : t -> 'a Bin_prot.Type_class.writer -> 'a -> unit
+      val write_error : t -> Error.t -> unit
+    end
+
+    (** This just schedules a write, so the [Bigstring.t] should not be overwritten until
+        the flushed [Deferred.t] is determined.
+
+        The return value of [handle_response] has the same meaning as in the function
+        argument of [Implementations.Expert.create].
+    *)
+    val schedule_dispatch
+      :  Connection.t
+      -> rpc_tag : string
+      -> version : int
+      -> Bigstring.t
+      -> pos : int
+      -> len : int
+      -> handle_response : (Bigstring.t -> pos:int -> len:int -> unit Deferred.t)
+      -> handle_error : (Error.t -> unit)
+      -> [`Connection_closed | `Flushed of unit Deferred.t]
+  end
 end
 
 module Pipe_rpc : sig
@@ -163,11 +257,11 @@ module Pipe_rpc : sig
         meaning a slow client can make the server run out of memory.
     *)
     :  ?client_pushes_back : unit
-    -> name                : string
-    -> version             : int
-    -> bin_query           : 'query    Bin_prot.Type_class.t
-    -> bin_response        : 'response Bin_prot.Type_class.t
-    -> bin_error           : 'error    Bin_prot.Type_class.t
+    -> name : string
+    -> version : int
+    -> bin_query    : 'query    Bin_prot.Type_class.t
+    -> bin_response : 'response Bin_prot.Type_class.t
+    -> bin_error    : 'error    Bin_prot.Type_class.t
     -> unit
     -> ('query, 'response, 'error) t
 
@@ -210,6 +304,10 @@ module Pipe_rpc : sig
 
   val name    : (_, _, _) t -> string
   val version : (_, _, _) t -> int
+
+  val description : (_, _, _) t -> Description.t
+
+
 end
 
 (** A state rpc is an easy way for two processes to synchronize a data structure by
@@ -223,12 +321,12 @@ module State_rpc : sig
 
   val create
     :  ?client_pushes_back : unit
-    -> name                : string
-    -> version             : int
-    -> bin_query           : 'query  Bin_prot.Type_class.t
-    -> bin_state           : 'state  Bin_prot.Type_class.t
-    -> bin_update          : 'update Bin_prot.Type_class.t
-    -> bin_error           : 'error  Bin_prot.Type_class.t
+    -> name : string
+    -> version : int
+    -> bin_query  : 'query  Bin_prot.Type_class.t
+    -> bin_state  : 'state  Bin_prot.Type_class.t
+    -> bin_update : 'update Bin_prot.Type_class.t
+    -> bin_error  : 'error  Bin_prot.Type_class.t
     -> unit
     -> ('query, 'state, 'update, 'error) t
 
@@ -258,6 +356,8 @@ module State_rpc : sig
 
   val name    : (_, _, _, _) t -> string
   val version : (_, _, _, _) t -> int
+
+  val description : (_, _, _, _) t -> Description.t
 end
 
 module Any : sig

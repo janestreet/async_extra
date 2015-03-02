@@ -46,6 +46,7 @@ sig
 
   val create
     :  ?is_client_ip_authorized : (string -> bool)
+    -> is_client_allowed        : (Client_name.t -> bool)
     -> repeater_name            : string
     -> listen_port              : int  (* repeater will listen on this port *)
     -> server_ip                : string (* the real server's ip, port and name *)
@@ -96,6 +97,10 @@ sig
                                -> [ `repeater_to_client | `repeater_to_server ]
                                -> Repeater_error.t
                                -> unit)
+    -> on_connecting_error  : (client_name    : Client_name.t
+                               -> server_name : Server_name.t
+                               -> Error.t -> unit)
+
     -> unit
 
   val send_to_all_clients : t -> To_client_msg.t -> unit

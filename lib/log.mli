@@ -19,7 +19,7 @@ module Level : sig
     | `Info  (** default level *)
     | `Error
     ]
-  with sexp
+  with compare, sexp
 
   include Stringable with type t := t
 
@@ -79,7 +79,7 @@ module Rotation : sig
       - Symlinks encourage tailing, which is a bad way to communicate information.
       - They complicate archiving processes (the symlink must be skipped).
   *)
-  type t with sexp
+  type t with sexp_of
 
   val create
     :  ?messages     : int

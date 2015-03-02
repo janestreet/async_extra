@@ -10,8 +10,6 @@ module type Connection = sig
 
   type t
 
-
-
   (** Initiate an Rpc connection on the given reader/writer pair.  [server] should be the
       bag of implementations that the calling side implements; it defaults to
       [Implementations.null] (i.e., "I implement no RPCs").
