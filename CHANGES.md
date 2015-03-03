@@ -1,3 +1,88 @@
+## 112.24.00
+
+- Changed `Log` to not eagerly run the rotation loop when an
+  `Output.Rotating_file` is created.
+- Changed `Log.Output.combine` to write log outputs in sequence rather than
+  parallel, to give the correct semantics when the same output is included
+  multiple times in `Log.create`.
+
+  This fixed a test that was failing in `lib_test/log_test.ml`.
+
+- Remove `Log.Rotation.t_of_sexp`.
+- Made `Command.async*` functions flush `stdout` and `stderr` before calling
+  shutdown, to avoid timeouts causing data to be dropped.
+
+  For now, we're making this change in `Command` rather than `Writer`.
+  `Writer` already has `at_shutdown` handlers.  We've observed that they
+  don't behave well for command-line programs w.r.t. stderr.  So, the
+  thinking of this feature is to try out a different `at_shutdown`
+  behavior, just for `Command` executables and just for `stdout` and
+  `stderr`.  If it works out, maybe we move it into `Writer` proper.
+  Putting the change in `Command` for now reduces the scope of what is
+  affected by the experiment, and hopefully correlates well with where
+  the change is likely to help.
+
+- In `Rpc`, catch exceptions raised by blocking-RPC implementations.
+
+- Added functionality to `Versioned_typed_tcp.Repeater`.
+
+  Added to `create` an argument `is_client_allowed : Client_name.t -> bool`.
+
+  Added to `start` an argument:
+
+      on_connecting_error  : (client_name    : Client_name.t
+                              -> server_name : Server_name.t
+                              -> Error.t -> unit)
+
+- Fixed a race in `Versioned_typed_tcp` in which a message can be dropped
+  between `Server.create` and `Server.listen`
+
+- Simplified the implementation of `Rpc`.
+
+  Rpc has an internal Response_handler module, which is just a record containing
+  a response-handling function and an `already_removed` boolean field.  It turns
+  out that this is unnecessary:  `already_removed` is set to true when the
+  function returns ``remove`, but if it returns ``remove` then it will also be
+  removed from a hash table, and we only call the function immediately after
+  looking it up in that hash table.
+
+  This wasn't always pointless:  this function used to return deferred values and
+  run inside a throttle.  The simplification is only possible because we made it
+  synchronous a while ago.
+
+- Added `Tcp.Server.num_connections` function.
+
+- Added creation functions for `Versioned_rpc` menus, for use in clients of an
+  RPC proxy.
+
+  In `Menu`:
+
+      val create : Implementation.Description.t list -> t
+
+  In `Connection_with_menu`:
+      val create_directly : Connection.t -> Menu.t -> t
+
+  These are for use in clients of an RPC proxy, which can't use the
+  regular menu mechanism since they each need to have many menus (one
+  for each potential target) but should only need to have one connection
+  (to the proxy).
+
+- Added to `Rpc` expert submodules, `Implementations.Expert` and `Rpc.Expert`,
+  with low-level access for implementing a proxy that can handle queries without
+  knowing their names, types, etc. in advance.
+
+- Renamed `Rpc.Implementation.Description` as `Rpc.Description`.
+
+- Added `Rpc.{Rpc,Pipe_rpc,State_rpc}.description` accessor functions.
+
+- Added `Rpc.Implementation.descriptions`, which returns all RPCs in an
+  `Rpc.Implementations.t`.
+  This was needed for the `rpc_discovery` library: given an `Implementations.t` we want to advertise at
+
+      prefix/<rpc_name>/<rpc_version>/host_and_port = <host_and_port>
+
+- Added combinators to `Rpc.Implementations`: `lift`, `add`, `add_exn`.
+
 ## 112.17.00
 
 - Modernized code style in `Async_extra`.
