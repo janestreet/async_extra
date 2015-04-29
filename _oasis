@@ -22,7 +22,7 @@ Description:
   largest industrial user of OCaml.
 
 Library async_extra
-  Path:               lib
+  Path:               src
   FindlibName:        async_extra
   Pack:               true
   Modules:            Bus,
