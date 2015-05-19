@@ -1,368 +1,159 @@
+(** This module just re-exports lots of modules from [Async_rpc_kernel] and adds some
+    Unix-specific wrappers in [Connection] (for using [Reader], [Writer], and [Tcp]).
+    For documentation, see [Rpc] and [Connection_intf] in the [Async_rpc_kernel] library.
+*)
+
 open Core.Std
 open Import
-open Rpc_intf
 
-(** A library for building asynchronous RPC-style protocols.
+module Transport = Rpc_transport
 
-    The approach here is to have a separate representation of the server-side
-    implementation of an RPC (An [Implementation.t]) and the interface that it exports
-    (either an [Rpc.t], a [State_rpc.t] or a [Pipe_rpc.t], but we'll refer to them
-    generically as RPC interfaces).  A server builds the [Implementation.t] out of an RPC
-    interface and a function for implementing the RPC, while the client dispatches a
-    request using the same RPC interface.
+module Any             = Rpc_kernel.Any
+module Description     = Rpc_kernel.Description
+module Implementation  = Rpc_kernel.Implementation
+module Implementations = Rpc_kernel.Implementations
+module One_way         = Rpc_kernel.One_way
+module Pipe_rpc        = Rpc_kernel.Pipe_rpc
+module Rpc             = Rpc_kernel.Rpc
+module State_rpc       = Rpc_kernel.State_rpc
 
-    The [Implementation.t] hides the type of the query and the response, whereas the
-    [Rpc.t] is polymorphic in the query and response type.  This allows you to build a
-    [Implementations.t] out of a list of [Implementation.t]s.
+module Connection : sig
+  module Heartbeat_config : sig
+    type t =
+      { timeout    : Time.Span.t
+      ; send_every : Time.Span.t
+      } with sexp, bin_io
 
-    Each RPC also comes with a version number.  This is meant to allow support of multiple
-    different versions of what is essentially the same RPC.  You can think of it as an
-    extension to the name of the RPC, and in fact, each RPC is uniquely identified by its
-    (name, version) pair.  RPCs with the same name but different versions should implement
-    similar functionality. *)
-
-module Description : sig
-  type t =
-    { name    : string
-    ; version : int
-    }
-  with compare, sexp_of
-
-  module Stable : sig
-    module V1 : sig
-      type nonrec t = t with compare, sexp, bin_io
+    module Stable : sig
+      module V1 : sig
+        type nonrec t = t with sexp, bin_io
+      end
     end
   end
-end
 
-module Implementation : sig
-  (** A ['connection_state t] is something that knows how to respond to one query, given
-      a ['connection_state].  That is, you can create a ['connection_state t] by providing
-      a function which takes a query *and* a ['connection_state] and provides a response.
+  include (module type of struct include Rpc_kernel.Connection end
+            with module Heartbeat_config := Rpc_kernel.Connection.Heartbeat_config)
 
-      The reason for this is that rpcs often do something like look something up in a
-      master structure.  This way, [Implementation.t]'s can be created without having the
-      master structure in your hands. *)
-  type 'connection_state t
+  (** These functions are mostly the same as the ones with the same names in
+      [Async_rpc_kernel.Std.Rpc.Connection]; see [Connection_intf] in that library for
+      documentation. The differences are that:
 
-  val description : _ t -> Description.t
-
-  (** We may want to use an ['a t] implementation (perhaps provided by someone else) in a
-      ['b t] context.  We can do this as long as we can map our state into the state
-      expected by the original implementer. *)
-  val lift : 'a t -> f:('b -> 'a) -> 'b t
-end
-
-module Implementations : sig
-  (** A ['connection_state Implementations.t] is something that knows how to respond to
-      many different queries.  It is conceptually a package of ['connection_state
-      Implementation.t]'s. *)
-  type 'connection_state t
-
-  (** a server that can handle no queries *)
-  val null : unit -> 'connection_state t
-
-  val lift : 'a t -> f:('b -> 'a) -> 'b t
-
-  (** [create ~implementations ~on_unknown_rpc] creates a server capable of responding to
-      the rpc's implemented in the implementation list.  Be careful about setting
-      [on_unknown_rpc] to [`Raise] because other programs may mistakenly connect to this
-      one causing it to crash. *)
+      - they take an [Async_unix.Std.Reader.t], [Async_unix.Std.Writer.t] and
+        [max_message_size] instead of a [Transport.t]
+      - they use [Time] instead of [Time_ns] *)
   val create
-    :  implementations : 'connection_state Implementation.t list
-    -> on_unknown_rpc :
-      [ `Raise
-      | `Continue
-      | `Close_connection  (** used to be the behavior of [`Ignore] *)
-      (** [rpc_tag] and [version] are the name and version of the unknown rpc *)
-      | `Call of (rpc_tag : string -> version : int -> [ `Close_connection | `Continue ])
-      ]
-    -> ( 'connection_state t
-       , [`Duplicate_implementations of Description.t list]
-       ) Result.t
+    :  ?implementations   : 's Implementations.t
+    -> connection_state   : (t -> 's)
+    -> ?max_message_size : int
+    -> ?handshake_timeout : Time.Span.t
+    -> ?heartbeat_config  : Heartbeat_config.t
+    -> ?description       : Info.t
+    -> Reader.t
+    -> Writer.t
+    -> (t, Exn.t) Result.t Deferred.t
 
-  val create_exn
-    :  implementations : 'connection_state Implementation.t list
-    -> on_unknown_rpc :
-      [ `Raise
-      | `Continue
-      | `Close_connection  (** used to be the behavior of [`Ignore] *)
-      | `Call of (rpc_tag : string -> version : int -> [ `Close_connection | `Continue ])
-      ]
-    -> 'connection_state t
+  val with_close
+    :  ?implementations : 's Implementations.t
+    -> ?max_message_size : int
+    -> ?handshake_timeout : Time.Span.t
+    -> ?heartbeat_config : Heartbeat_config.t
+    -> connection_state : (t -> 's)
+    -> Reader.t
+    -> Writer.t
+    -> dispatch_queries : (t -> 'a Deferred.t)
+    -> on_handshake_error : [ `Raise | `Call of (Exn.t -> 'a Deferred.t) ]
+    -> 'a Deferred.t
 
-  val add
-    :  'connection_state t
-    -> 'connection_state Implementation.t
-    -> 'connection_state t Or_error.t
+  val server_with_close
+    :  ?max_message_size : int
+    -> ?handshake_timeout : Time.Span.t
+    -> ?heartbeat_config : Heartbeat_config.t
+    -> Reader.t
+    -> Writer.t
+    -> implementations : 's Implementations.t
+    -> connection_state : (t -> 's)
+    -> on_handshake_error : [ `Raise | `Ignore | `Call of (Exn.t -> unit Deferred.t) ]
+    -> unit Deferred.t
 
-  val add_exn
-    :  'connection_state t
-    -> 'connection_state Implementation.t
-    -> 'connection_state t
+  (** A function creating a transport from a file descriptor. It is responsible for
+      setting the low-level parameters of the underlying transport.
 
-  val descriptions : _ t -> Description.t list
+      For instance to setup a transport using [Async.Std.{Reader,Writer}] and set a buffer
+      age limit on the writer, you can pass this to the functions of this module:
 
-  (** Low-level, untyped access to queries.  Regular users should ignore this. *)
-  module Expert : sig
-    (** See [Rpc.Expert.Responder] for how to use this. *)
-    module Responder : sig
-      type t
-    end
-
-    (** Same as [create_exn], except for the additional [`Expert] variant. *)
-    val create_exn
-      :  implementations : 'connection_state Implementation.t list
-      -> on_unknown_rpc :
-        [ `Raise
-        | `Continue
-        | `Close_connection  (** used to be the behavior of [`Ignore] *)
-        | `Call of (rpc_tag : string -> version : int -> [ `Close_connection | `Continue ])
-        | `Expert of
-            (** The [Deferred.t] the function returns is only used to determine when it is
-                safe to overwrite the supplied [Bigstring.t], so it is *not* necessary to
-                completely finish handling the query before it is filled in. In
-                particular, if you don't intend to read from the [Bigstring.t] after the
-                function returns, you can return [Deferred.unit]. *)
-            ('connection_state
-             -> rpc_tag : string
-             -> version : int
-             -> Responder.t
-             -> Bigstring.t
-             -> pos : int
-             -> len : int
-             -> unit Deferred.t)
-        ]
-      -> 'connection_state t
-  end
-end
-
-module type Connection = Connection with module Implementations := Implementations
-
-module Connection : Connection
-
-module Rpc : sig
-  type ('query, 'response) t
-
-  val create
-    :  name         : string
-    -> version      : int
-    -> bin_query    : 'query    Bin_prot.Type_class.t
-    -> bin_response : 'response Bin_prot.Type_class.t
-    -> ('query, 'response) t
-
-  (** the same values as were passed to create. *)
-  val name    : (_, _) t -> string
-  val version : (_, _) t -> int
-
-  val description : (_, _) t -> Description.t
-
-  val bin_query    : ('query, _)    t -> 'query    Bin_prot.Type_class.t
-  val bin_response : (_, 'response) t -> 'response Bin_prot.Type_class.t
-
-  val implement
-    :  ('query, 'response) t
-    -> ('connection_state
-        -> 'query
-        -> 'response Deferred.t)
-    -> 'connection_state Implementation.t
-
-  (** [implement'] is different from [implement] in that:
-
-      1. ['response] is immediately serialized and scheduled for delivery to the RPC
-         dispatcher.
-
-      2. Less allocation happens, as none of the Async-related machinery is necessary.
-
-      [implement] also tries to do 1 when possible, but it is guaranteed to happen with
-      [implement'].
+      {[
+        ~make_transport:(Rpc.Transport.of_fd' ~buffer_age_limit:`Unlimited ())
+      ]}
   *)
-  val implement'
-    :  ('query, 'response) t
-    -> ('connection_state
-        -> 'query
-        -> 'response)
-    -> 'connection_state Implementation.t
+  type transport_maker = ?max_message_size:int -> Fd.t -> Transport.t
 
-  val dispatch
-    :  ('query, 'response) t
-    -> Connection.t
-    -> 'query
-    -> 'response Or_error.t Deferred.t
-
-  val dispatch_exn
-    :  ('query, 'response) t
-    -> Connection.t
-    -> 'query
-    -> 'response Deferred.t
-
-  module Expert : sig
-    module Responder : sig
-      type t = Implementations.Expert.Responder.t
-
-      (** As in [Writer], after calling [schedule], you should not overwrite the
-          [Bigstring.t] passed in until the responder is flushed. *)
-      val schedule
-        :  t
-        -> Bigstring.t
-        -> pos : int
-        -> len : int
-        -> [`Connection_closed | `Flushed of unit Deferred.t]
-
-      (** On the other hand, these are written immediately. *)
-      val write_bin_prot : t -> 'a Bin_prot.Type_class.writer -> 'a -> unit
-      val write_error : t -> Error.t -> unit
-    end
-
-    (** This just schedules a write, so the [Bigstring.t] should not be overwritten until
-        the flushed [Deferred.t] is determined.
-
-        The return value of [handle_response] has the same meaning as in the function
-        argument of [Implementations.Expert.create].
-    *)
-    val schedule_dispatch
-      :  Connection.t
-      -> rpc_tag : string
-      -> version : int
-      -> Bigstring.t
-      -> pos : int
-      -> len : int
-      -> handle_response : (Bigstring.t -> pos:int -> len:int -> unit Deferred.t)
-      -> handle_error : (Error.t -> unit)
-      -> [`Connection_closed | `Flushed of unit Deferred.t]
-  end
-end
-
-module Pipe_rpc : sig
-  type ('query, 'response, 'error) t
-
-  module Id : sig type t end
-
-  val create
-    (** If [client_pushes_back] is set, the client side of the connection will stop
-        reading elements from the underlying file descriptor when the client's pipe has
-        a sufficient number of elements enqueued, rather than reading elements eagerly.
-        This will eventually cause writes on the server's side to stop working, which
-        gives the server an indication when a client is backed up.
-
-        Setting this allows a careful server to notice when its clients are unable to keep
-        up and slow down its work accordingly.  However, it has some drawbacks:
-
-        - RPC multiplexing doesn't work as well.  The client will stop reading *all*
-        messages on the connection if any pipe gets saturated, not just ones relating
-        to that pipe.
-
-        - A server that doesn't pay attention to pushback on its end will accumulate
-        elements on its side of the connection, rather than on the client's side,
-        meaning a slow client can make the server run out of memory.
-    *)
-    :  ?client_pushes_back : unit
-    -> name : string
-    -> version : int
-    -> bin_query    : 'query    Bin_prot.Type_class.t
-    -> bin_response : 'response Bin_prot.Type_class.t
-    -> bin_error    : 'error    Bin_prot.Type_class.t
-    -> unit
-    -> ('query, 'response, 'error) t
-
-  val bin_query    : ('query, _, _) t    -> 'query    Bin_prot.Type_class.t
-  val bin_response : (_, 'response, _) t -> 'response Bin_prot.Type_class.t
-  val bin_error    : (_, _, 'error) t    -> 'error    Bin_prot.Type_class.t
-
-  val implement
-    :  ('query, 'response, 'error) t
-    -> ('connection_state
-        -> 'query
-        -> aborted : unit Deferred.t
-        -> ('response Pipe.Reader.t, 'error) Result.t Deferred.t)
-    -> 'connection_state Implementation.t
-
-  (** This has [(..., 'error) Result.t] as its return type to represent the possibility of
-      the call itself being somehow erroneous (but understood - the outer [Or_error.t]
-      encompasses failures of that nature).  Note that this cannot be done simply by
-      making ['response] a result type, since [('response Pipe.Reader.t, 'error) Result.t]
-      is distinct from [('response, 'error) Result.t Pipe.Reader.t].
-
-      Closing the pipe has the effect of calling [abort].
+  (** [serve implementations ~port ?on_handshake_error ()] starts a server with the given
+      implementation on [port].  The optional auth function will be called on all incoming
+      connections with the address info of the client and will disconnect the client
+      immediately if it returns false.  This auth mechanism is generic and does nothing
+      other than disconnect the client - any logging or record of the reasons is the
+      responsibility of the auth function itself.
   *)
-  val dispatch
-    :  ('query, 'response, 'error) t
-    -> Connection.t
-    -> 'query
-    -> ('response Pipe.Reader.t * Id.t, 'error) Result.t Or_error.t Deferred.t
-
-  val dispatch_exn
-    :  ('query, 'response, 'error) t
-    -> Connection.t
-    -> 'query
-    -> ('response Pipe.Reader.t * Id.t) Deferred.t
-
-  (** [abort rpc connection id] given an RPC and the id returned as part of a call to
-      dispatch, abort requests that the other side of the connection stop sending
-      updates. *)
-  val abort : (_, _, _) t -> Connection.t -> Id.t -> unit
-
-  val name    : (_, _, _) t -> string
-  val version : (_, _, _) t -> int
-
-  val description : (_, _, _) t -> Description.t
-
-
-end
-
-(** A state rpc is an easy way for two processes to synchronize a data structure by
-    sending updates over the wire.  It's basically a pipe rpc that sends/receives an
-    initial state of the data structure, and then updates, and applies the updates under
-    the covers. *)
-module State_rpc : sig
-  type ('query, 'state, 'update, 'error) t
-
-  module Id : sig type t end
-
-  val create
-    :  ?client_pushes_back : unit
-    -> name : string
-    -> version : int
-    -> bin_query  : 'query  Bin_prot.Type_class.t
-    -> bin_state  : 'state  Bin_prot.Type_class.t
-    -> bin_update : 'update Bin_prot.Type_class.t
-    -> bin_error  : 'error  Bin_prot.Type_class.t
+  val serve
+    :  implementations : 's Implementations.t
+    -> initial_connection_state : ('address -> t -> 's)
+    -> where_to_listen          : ('address, 'listening_on) Tcp.Where_to_listen.t
+    -> ?max_connections         : int
+    -> ?max_pending_connections : int
+    -> ?max_message_size        : int
+    -> ?make_transport          : transport_maker
+    -> ?handshake_timeout       : Time.Span.t
+    -> ?heartbeat_config        : Heartbeat_config.t
+    -> ?auth                    : ('address -> bool)
+    (** default is [`Ignore] *)
+    -> ?on_handshake_error : [ `Raise | `Ignore | `Call of (Exn.t -> unit) ]
     -> unit
-    -> ('query, 'state, 'update, 'error) t
+    -> ('address, 'listening_on) Tcp.Server.t Deferred.t
 
-  val bin_query  : ('query, _, _, _)  t -> 'query  Bin_prot.Type_class.t
-  val bin_state  : (_, 'state, _, _)  t -> 'state  Bin_prot.Type_class.t
-  val bin_update : (_, _, 'update, _) t -> 'update Bin_prot.Type_class.t
-  val bin_error  : (_, _, _, 'error)  t -> 'error  Bin_prot.Type_class.t
+  module Client_implementations : sig
+    type nonrec 's t =
+      { connection_state : t -> 's
+      ; implementations  : 's Implementations.t
+      }
 
-  val implement
-    :  ('query, 'state, 'update, 'error) t
-    -> ('connection_state
-        -> 'query
-        -> aborted : unit Deferred.t
-        -> (('state * 'update Pipe.Reader.t), 'error) Result.t Deferred.t)
-    -> 'connection_state Implementation.t
+    val null : unit -> unit t
+  end
 
-  val dispatch
-    :  ('query, 'state, 'update, 'error) t
-    -> Connection.t
-    -> 'query
-    -> update : ('state -> 'update -> 'state)
-    -> ( 'state * ('state * 'update) Pipe.Reader.t * Id.t
-       , 'error
-       ) Result.t Or_error.t Deferred.t
+  (** [client ~host ~port ()] connects to the server at ([host],[port]) and returns the
+      connection or an Error if a connection could not be made.  It is the responsibility
+      of the caller to eventually call close.
 
-  val abort : (_, _, _, _) t -> Connection.t -> Id.t -> unit
+      In [client] and [with_client], the [handshake_timeout] encompasses both the TCP
+      connection timeout and the timeout for this module's own handshake.
+  *)
+  val client
+    :  host : string
+    -> port : int
+    -> ?via_local_interface : Unix.Inet_addr.t  (** default is chosen by OS *)
+    -> ?implementations     : _ Client_implementations.t
+    -> ?max_message_size    : int
+    -> ?make_transport      : transport_maker
+    -> ?handshake_timeout   : Time.Span.t
+    -> ?heartbeat_config    : Heartbeat_config.t
+    -> ?description         : Info.t
+    -> unit
+    -> (t, Exn.t) Result.t Deferred.t
 
-  val name    : (_, _, _, _) t -> string
-  val version : (_, _, _, _) t -> int
+  (** [with_client ~host ~port f] connects to the server at ([host],[port]) and runs f
+      until an exception is thrown or until the returned Deferred is fulfilled.
 
-  val description : (_, _, _, _) t -> Description.t
-end
-
-module Any : sig
-  type t =
-    | Rpc   : ('q, 'r) Rpc.t -> t
-    | Pipe  : ('q, 'r, 'e) Pipe_rpc.t -> t
-    | State : ('q, 's, 'u, 'e) State_rpc.t -> t
+      NOTE:  As with [with_close], you should be careful when using this with [Pipe_rpc].
+      See [with_close] for more information.
+  *)
+  val with_client
+    :  host : string
+    -> port : int
+    -> ?via_local_interface : Unix.Inet_addr.t (** default is chosen by OS *)
+    -> ?implementations     : _ Client_implementations.t
+    -> ?max_message_size    : int
+    -> ?make_transport      : transport_maker
+    -> ?handshake_timeout   : Time.Span.t
+    -> ?heartbeat_config    : Heartbeat_config.t
+    -> (t -> 'a Deferred.t)
+    -> ('a, Exn.t) Result.t Deferred.t
 end

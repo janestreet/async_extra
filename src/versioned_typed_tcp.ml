@@ -873,7 +873,7 @@ module Make (Z : Arg) = struct
       ; queue                      : (To_server_msg.t
                                       * [ `Sent of Time.t | `Dropped] Ivar.t
                                      ) Queue.t
-      ; mutable con : [ `Disconnected
+      ; mutable con : [ `Disconnected of Time.t (* last disconnect time *)
                       | `Connected of Connection.t
                       | `Connecting of unit Ivar.t
                       ]
@@ -893,7 +893,7 @@ module Make (Z : Arg) = struct
     let connect_internal t ~handler =
       let stop_connecting =
         match t.con with
-        | `Connected _ | `Disconnected -> assert false
+        | `Connected _ | `Disconnected _ -> assert false
         | `Connecting stop_connecting -> stop_connecting
       in
       Monitor.try_with (fun () ->
@@ -969,7 +969,7 @@ module Make (Z : Arg) = struct
 
     let handle_incoming t =
       match t.con with
-      | `Disconnected | `Connecting _ -> assert false
+      | `Disconnected _ | `Connecting _ -> assert false
       | `Connected con ->
         handle_incoming
           ~logfun:t.logfun
@@ -989,7 +989,7 @@ module Make (Z : Arg) = struct
 
     let flushed t =
       match t.con with
-      | `Disconnected
+      | `Disconnected _
       | `Connecting _  -> `Flushed
       | `Connected con ->
         if 0 = Writer.bytes_to_write con.writer
@@ -1007,7 +1007,7 @@ module Make (Z : Arg) = struct
 
     let internal_send t msg =
       match t.con with
-      | `Disconnected | `Connecting _ -> return `Dropped
+      | `Disconnected _ | `Connecting _ -> return `Dropped
       | `Connected con ->
         send ~logfun:t.logfun ~name:t.expected_remote_name ~now:t.now con msg
 
@@ -1018,7 +1018,7 @@ module Make (Z : Arg) = struct
 
     let is_connected t =
       match t.con with
-      | `Disconnected
+      | `Disconnected _
       | `Connecting _ -> false
       | `Connected _ -> true
 
@@ -1028,9 +1028,15 @@ module Make (Z : Arg) = struct
     ;;
 
     let try_connect t =
-      assert (t.con = `Disconnected);
+      let earliest_connect_time =
+        match t.con with
+        | `Connected _ | `Connecting _ -> assert false
+        | `Disconnected last_disconnect ->
+          Time.max (t.now ())
+            (Time.add last_disconnect wait_after_connect_failure)
+      in
       let disconnected () =
-        t.con <- `Disconnected;
+        t.con <- `Disconnected (t.now ());
         purge_queue t;
         return `Stop_connecting
       in
@@ -1047,7 +1053,7 @@ module Make (Z : Arg) = struct
       let rec loop () =
         connect_internal t ~handler:(fun res ->
           match t.con with
-          | `Disconnected | `Connected _ -> assert false
+          | `Disconnected _ | `Connected _ -> assert false
           | `Connecting stop_connecting' ->
             assert (phys_equal stop_connecting' stop_connecting);
             if Ivar.is_full stop_connecting then
@@ -1078,13 +1084,13 @@ module Make (Z : Arg) = struct
           end
         | `Handler_error e ->
           (* handler threw an exception *)
-          t.con <- `Disconnected;
+          t.con <- `Disconnected (t.now ());
           purge_queue t;
           raise e
         | `Ok `Reconnect -> loop ()
         | `Ok `Stop_connecting -> Deferred.unit
       in
-      don't_wait_for (loop ())
+      don't_wait_for (Clock.at earliest_connect_time >>= loop)
     ;;
 
 
@@ -1097,7 +1103,7 @@ module Make (Z : Arg) = struct
       fun t d ->
         match t.con with
         | `Connecting _ -> push t d
-        | `Disconnected ->
+        | `Disconnected _ ->
           let flush = push t d in
           try_connect t;
           flush
@@ -1113,7 +1119,7 @@ module Make (Z : Arg) = struct
 
     let close_connection t =
       match t.con with
-      | `Disconnected -> ()
+      | `Disconnected _ -> ()
       | `Connecting stop_connecting ->
         (* drop the messages now, do not wait until the next async cycle, because a
            [send] might follow *)
@@ -1127,7 +1133,7 @@ module Make (Z : Arg) = struct
       | `Connected _ -> Deferred.unit
       | `Connecting _ ->
         Ivar.read t.connect_complete
-      | `Disconnected ->
+      | `Disconnected _ ->
         try_connect t;
         Ivar.read t.connect_complete
     ;;
@@ -1136,7 +1142,7 @@ module Make (Z : Arg) = struct
 
     let state t =
       match t.con with
-      | `Disconnected -> `Disconnected
+      | `Disconnected _ -> `Disconnected
       | `Connecting _ -> `Connecting
       | `Connected _ -> `Connected
     ;;
@@ -1155,7 +1161,7 @@ module Make (Z : Arg) = struct
       ; my_name
       ; queue                = Queue.create ()
       ; messages             = Tail.create ()
-      ; con                  = `Disconnected
+      ; con                  = `Disconnected Time.epoch
       ; connect_complete     = Ivar.create ()
       ; now
       ; last_connect_error   = None
@@ -1208,12 +1214,12 @@ struct
       (* This is not exposed to clients.  It is only called in [start] function
          below so it is called only once per [Client.t].  Hence the assertion below.
       *)
-      assert (t.con = `Disconnected);
+      assert (not (C.is_connected t));
       t.con <- `Connecting (Ivar.create ());
       connect_internal t
         ~handler:(fun res ->
           begin match res with
-          | Error _     -> t.con <- `Disconnected
+          | Error _     -> t.con <- `Disconnected (t.now ())
           | Ok (conn,_) -> t.con <- `Connected conn
           end;
           handler res)

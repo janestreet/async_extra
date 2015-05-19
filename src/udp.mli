@@ -44,7 +44,8 @@ val default_capacity : int
     [stop] terminates a typical loop as soon as possible, when it becomes determined.
 
     [max_ready] limits the number of receive loop iterations within an [Fd.every_ready_to]
-    iteration, to prevent starvation of other Async jobs. *)
+    iteration, to prevent starvation of other Async jobs and to allow bounded
+    busy-waiting, as on busy network sockets. *)
 module Config : sig
   type t =
     { capacity  : int
@@ -68,21 +69,28 @@ module Config : sig
 end
 
 (** [sendto_sync sock buf addr] does not try again if [sock] is not ready to write.
-    Instead, it returns [`Not_ready] immediately.
+    Instead, it returns [EWOULDBLOCK] immediately.
 
     Short writes are distinguished by [buf] not being empty afterward.
 
-    @raise Unix_error in the case of output errors.  See also
+    See also
     {!Iobuf.sendto_nonblocking_no_sigpipe} and
-    {!Bigstring.sendto_nonblocking_no_sigpipe}. *)
+    {!Bigstring.sendto_nonblocking_no_sigpipe}.
+
+    @raise [Failure] on internal errors but return [Unix.error] via
+    [Unix.Syscall_result.Unit.t] rather than raising [Unix_error]. *)
 val sendto_sync
   :  unit
   -> (Fd.t
       -> ([> read ], Iobuf.seek) Iobuf.t
       -> Socket.Address.Inet.t
-      -> [ `Not_ready | `Ok ]
+      -> Unix.Syscall_result.Unit.t
      ) Or_error.t
-(** [sendto sock buf addr] retries if [sock] is not ready to write. *)
+
+(** [sendto sock buf addr] retries if [sock] is not ready to write.
+
+    @raise [Unix_error] in the case of Unix output errors and [Failure] on internal
+    errors. *)
 val sendto
   :  unit
   -> (Fd.t

@@ -1,39 +1,63 @@
-(** [Unpack_sequence] implements a way to take an [unpack_one] function that can unpack a
-    value from a character buffer, and use it to unpack a sequence of packed values
-    coming via a string pipe into a pipe of upacked values. *)
+(** [Unpack_sequence] uses an [Unpack_buffer.t] to unpack a sequence of packed values
+    coming from a [string Pipe.Reader.t] or a [Reader.t].  It can produce a pipe of
+    upacked values or iterate a user-supplied function over the unpacked values.
+*)
+
 open Core.Std
 open Import
 
-module Result : sig
+module Unpack_iter_result : sig
   type ('a, 'b) t =
     | Input_closed
     | Input_closed_in_the_middle_of_data of ('a, 'b) Unpack_buffer.t
-    | Output_closed                      of 'a Queue.t * ('a, 'b) Unpack_buffer.t
     | Unpack_error                       of Error.t
   with sexp_of
 
   val to_error : (_, _) t -> Error.t
 end
 
-(** [unpack_from_string_pipe unpack_buffer input] returns [(output, result)], and uses
-    [unpack_buffer] to unpack values from [input] until [input] is closed.  It puts the
-    unpacked values into [output], which is closed once unpacking finishes, normally
-    or due to an error.  [result] indicates why unpacking finished.
+module Unpack_result : sig
+  type ('a, 'b) t =
+    | Input_closed
+    | Input_closed_in_the_middle_of_data of ('a, 'b) Unpack_buffer.t
+    | Output_closed
+    | Unpack_error                       of Error.t
+  with sexp_of
 
-    [unpack_from_reader] and [unpack_bin_prot_from_reader] are similar.  They are more
-    efficient in that they blit bytes directly from the reader buffer to the unpack
-    buffer, without any intervening allocation. *)
-val unpack_from_string_pipe
-  :  ('a, 'b) Unpack_buffer.t
-  -> string Pipe.Reader.t
-  -> 'a Pipe.Reader.t * ('a, 'b) Result.t Deferred.t
+  val to_error : (_, _) t -> Error.t
+end
 
-val unpack_from_reader
-  :  ('a, 'b) Unpack_buffer.t
-  -> Reader.t
-  -> 'a Pipe.Reader.t * ('a, 'b) Result.t Deferred.t
+(** [Unpack_from] specifies the source of the sequence of bytes to unpack from. *)
+module Unpack_from : sig
+  type t =
+  | Pipe   of string Pipe.Reader.t
+  | Reader of Reader.t
+end
 
-val unpack_bin_prot_from_reader
-  : 'a Bin_prot.Type_class.reader
-  -> Reader.t
-  -> 'a Pipe.Reader.t * ('a, unit) Result.t Deferred.t
+(** [unpack_into_pipe ~from:input ~using:unpack_buffer] returns [(output, result)], and
+    uses [unpack_buffer] to unpack values from [input] until [input] is closed.  It puts
+    the unpacked values into [output], which is closed once unpacking finishes, be it
+    normally or due to an error.  [result] indicates why unpacking finished.
+
+    To unpack from a [bin_reader], use:
+
+    {[
+      unpack_into_pipe ~from ~using:(Unpack_buffer.create_bin_prot bin_reader)
+    ]}
+
+    Using [~from:(Reader reader)] is more efficient than [~from:(Pipe (Reader.pipe
+    reader))] because it blits bytes directly from the reader buffer to the unpack buffer,
+    without any intervening allocation. *)
+val unpack_into_pipe
+  :  from  : Unpack_from.t
+  -> using : ('a, 'b) Unpack_buffer.t
+  -> 'a Pipe.Reader.t * ('a, 'b) Unpack_result.t Deferred.t
+
+(* [unpack_iter] is a more efficient version of [unpack_into_pipe] that calls [f] on each
+   value as it is unpacked, rather than putting the value into a pipe.  If [f] raises,
+   then the result will be [Unpack_error]. *)
+val unpack_iter
+  :  from  : Unpack_from.t
+  -> using : ('a, 'b) Unpack_buffer.t
+  -> f     : ('a -> unit)
+  -> ('a, 'b) Unpack_iter_result.t Deferred.t

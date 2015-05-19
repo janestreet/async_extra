@@ -81,13 +81,27 @@ module Rotation : sig
   *)
   type t with sexp_of
 
+  module type Id_intf = sig
+    type t
+
+    val create : Time.Zone.t -> t
+
+    (* For any rotation scheme that renames logs on rotation, this defines how to do
+       the renaming. *)
+    val rotate_one : t -> t
+
+    val to_string_opt    : t -> string option
+    val of_string_opt    : string option -> t option
+    val cmp_newest_first : t -> t -> int
+  end
+
   val create
     :  ?messages     : int
     -> ?size         : Byte_units.t
     -> ?time         : Time.Ofday.t
     -> ?zone         : Time.Zone.t
     -> keep          : [ `All | `Newer_than of Time.Span.t | `At_least of int ]
-    -> naming_scheme : [ `Numbered | `Timestamped | `Dated ]
+    -> naming_scheme : [ `Numbered | `Timestamped | `Dated | `User_defined of (module Id_intf)]
     -> unit
     -> t
 
@@ -190,9 +204,11 @@ type t with sexp_of
 module type Global_intf = sig
   val log : t Lazy.t
 
-  val level : unit -> Level.t
-  val set_level : Level.t -> unit
-  val set_output : Output.t list -> unit
+  val level        : unit -> Level.t
+  val set_level    : Level.t -> unit
+  val set_output   : Output.t list -> unit
+  val get_output   : unit -> Output.t list
+  val set_on_error : [ `Raise | `Call of (Error.t -> unit) ] -> unit
 
   (** logging functions as the functions that operate on a given log.  In this case they
       operate on a single log global to the module *)
@@ -252,27 +268,41 @@ module Make_global () : Global_intf
     type. *)
 module Global : Global_intf
 
-(** [set_level] sets the level of the given log.  Messages sent at a level less than the
-    current level will not be output. *)
+(** messages sent at a level less than the current level will not be output. *)
 val set_level : t -> Level.t -> unit
 
-(** [level] returns the last level passed to [set_level], which will be the log level
+(** returns the last level passed to [set_level], which will be the log level
     checked as a threshold against the level of the next message sent. *)
 val level : t -> Level.t
 
-(** [set_output] changes the output type of the log, which can be useful when daemonizing.
+(** changes the output type of the log, which can be useful when daemonizing.
     The new output type will be applied to all subsequent messages. *)
 val set_output : t -> Output.t list -> unit
 
-(** [close] closes a log so that further write attempts will raise an error. *)
+val get_output : t -> Output.t list
+
+(** if [`Raise] is given then background errors raised by logging will be raised to the
+    monitor that was in scope when [create] was called.  Errors can be redirected anywhere
+    by providing [`Call f]. *)
+val set_on_error : t -> [ `Raise | `Call of (Error.t -> unit) ] -> unit
+
+(** any call that writes to a log after [close] is called will raise. *)
 val close : t -> unit
 
-(** [flushed] returns a Deferred.t that is fulfilled when the last message delivered to t
-    before the call to flushed is out the door. *)
+(** returns true if [close] has been called *)
+val is_closed : t -> bool
+
+(** returns a Deferred.t that is fulfilled when the last message delivered to t before the
+    call to flushed is out the door. *)
 val flushed : t -> unit Deferred.t
 
-(** [create] create a new log *)
-val create : level:Level.t -> output:Output.t list -> t
+(** create a new log.  See [set_level], [set_on_error] and [set_output] for
+    more. *)
+val create
+  :  level:Level.t
+  -> output:Output.t list
+  -> on_error:[ `Raise | `Call of (Error.t -> unit) ]
+  -> t
 
 (** [raw] printf like logging for raw (no level) messages.  Raw messages are still
     output with a timestamp. *)
@@ -345,4 +375,3 @@ module Reader : sig
     -> string
     -> Message.t Pipe.Reader.t
 end
-

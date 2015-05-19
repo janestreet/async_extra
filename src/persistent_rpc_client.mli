@@ -33,15 +33,28 @@ end
     they are distinct from the most recent event of the same type that has taken place
     since the most recent [`Attempting_to_connect] event.
 
-    The [implementations], [max_message_size], and [handshake_timeout] arguments are just
-    as for [Rpc.Connection.create]. *)
+    The [via_local_interface], [implementations], [max_message_size], [make_transport],
+    [handshake_timeout], and [heartbeat_config] arguments are just as for
+    [Rpc.Connection.create]. *)
 val create
-  :  server_name        : string
-  -> ?log               : Log.t
-  -> ?on_event          : (Event.t -> unit)
-  -> ?implementations   : _ Rpc.Connection.Client_implementations.t
-  -> ?max_message_size  : int
-  -> ?handshake_timeout : Time.Span.t
+  :  server_name          : string
+  -> ?log                 : Log.t
+  -> ?on_event            : (Event.t -> unit)
+  -> ?via_local_interface : Unix.Inet_addr.t
+  -> ?implementations     : _ Rpc.Connection.Client_implementations.t
+  -> ?max_message_size    : int
+  -> ?make_transport      : Rpc.Connection.transport_maker
+  -> ?handshake_timeout   : Time.Span.t
+  -> ?heartbeat_config    : Rpc.Connection.Heartbeat_config.t
+  -> (unit -> Host_and_port.t Or_error.t Deferred.t)
+  -> t
+
+(** like [create], but generic in the function used to connect *)
+val create_generic
+  :  server_name : string
+  -> ?log        : Log.t
+  -> ?on_event   : (Event.t -> unit)
+  -> connect     : (Host_and_port.t -> Rpc.Connection.t Or_error.t Deferred.t)
   -> (unit -> Host_and_port.t Or_error.t Deferred.t)
   -> t
 

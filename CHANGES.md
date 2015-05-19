@@ -1,3 +1,105 @@
+## 112.35.00
+
+- Added to `Log` a better mechanism for catching and handling background
+  errors, via `set_on_error` and an `on_error` argument to `create`.
+- Added `Log.get_output : t -> Output.t list`.
+- Changed `Monitor.try_with` so that errors after the initial return are
+  written to the global error log, rather than ignored.
+- Added `Monitor.try_with_or_error` and `try_with_join_or_error`.
+
+    `try_with_or_error` is intended to someday be renamed as `try_with`.
+    It also omits some of `try_with`'s optional arguments: `run` and
+    `rest`. Different from `try_with`, `try_with_or_error` uses
+    ``~run:`Now``, which we now believe is a more sensible behavior.
+
+- Fixed a bug in `Versioned_typed_tcp` that causes spurious and repeated
+  reconnects when user-level code disconnects.
+- Added `Tcp.Server.create_sock`, to create TCP servers that don't use
+  `Reader` and `Writer`.
+- Changed `Log.Level.arg` to accept lowercase, uppercase, and
+  capitalized words.
+- Replaced `Unpack_sequence.unpack*` functions with `unpack_into_pipe`
+  and `unpack_iter`, for reduced allocation.
+
+        module Unpack_from : sig
+          type t =
+          | Pipe   of string Pipe.Reader.t
+          | Reader of Reader.t
+        end
+
+        val unpack_into_pipe
+          :  from  : Unpack_from.t
+          -> using : ('a, 'b) Unpack_buffer.t
+          -> 'a Pipe.Reader.t * ('a, 'b) Unpack_result.t Deferred.t
+
+        val unpack_iter
+          :  from  : Unpack_from.t
+          -> using : ('a, 'b) Unpack_buffer.t
+          -> f     : ('a -> unit)
+          -> ('a, 'b) Unpack_iter_result.t Deferred.t
+
+- Added to `Log` support for user-defined rotation schemes.
+- Added `Log.is_closed`.
+- Moved `Async_extra.Rpc` to its own library, `Async_kernel_rpc`, and
+  abstracted its transport layer.
+
+    `Async_kernel_rpc` depends only on `Async_kernel`.  This allows
+    `Async_rpc` to be used in javascript or to try transports tuned for
+    different use cases.  `Versioned_rpc` was moved to
+    `Async_rpc_kernel` as well.
+
+    `Async_extra` still provides an `Rpc` module with the Unix-dependent
+    part:
+
+    - the `Rpc.Transport` module is augmented with
+    `Async_unix.{Reader,Writer}` based transports
+
+    - the `Rpc.Connection` module is augmented with helpers for TCP
+    based connections
+
+- In sexp-formatted `Log` messages, output the sexp on a single line
+  rather than in multi-line "hum"an format.
+
+    This makes it possible to, among other things, easily grep
+    such logs.
+
+- Fixed a (very small) space leak in `Persistent_rpc_client`.
+
+    The fix was to use `Deferred.choose` and `Deferred.choice` instead
+    of `Deferred.any` and `>>|`.  The old implementation added
+    a callback to the `t.close_started` ivar every time the connection
+    transitioned from connected to disconnected.
+
+- Added `Persistent_rpc_client.create_generic`, which is like `create`,
+  but generic in the function used to connect.
+
+- Fixed a race condition in the `Versioned_typed_tcp` interface that
+  caused a worker to miss a `Connect` message if the box is under high
+  load.
+
+    `Query_client.create` is called from `Worker_impl.create` in
+    a different async cycle than the following call to
+    `Query_client.listen` (really, `Tail.collect` under the hood) which
+    is made from `Worker_impl.run`.
+
+    When the load on the box is heavy (many workers starting and
+    connecting at the same time), the OS might take away the CPU from
+    the worker process between the two async cycles.  The TCP socket
+    gets connected while the process is still waiting for its turn, and
+    eventually, when it's the worker's turn to grab the CPU, Async
+    scheduler might process the TCP event earlier than
+    `Worker_impl.run`.
+
+- Improved `Udp.ready_iter` to avoid intermediate exceptions by using
+  `Syscall_result`.
+
+    UDP loops use that, so will benefit.
+
+    Adjust the implementation slightly as well: made the inner loop
+    always exit on `EAGAIN`/`EWOULDBLOCK` to wait until ready, and give
+    other Async jobs a chance to run after `EAGAIN`/`EWOULDBLOCK` in the
+    outer loop.
+
 ## 112.24.00
 
 - Changed `Log` to not eagerly run the rotation loop when an

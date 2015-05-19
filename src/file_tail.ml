@@ -190,7 +190,7 @@ let am_alive t = not (Pipe.is_closed t.pipe_w)
 
 let write t updates =
   if am_alive t
-  then Pipe.write' t.pipe_w updates
+  then Pipe.transfer_in t.pipe_w ~from:updates
   else Deferred.unit
 ;;
 

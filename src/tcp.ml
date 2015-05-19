@@ -122,7 +122,7 @@ let collect_errors writer f =
   ]
 ;;
 
-let close_connection r w =
+let close_connection_via_reader_and_writer r w =
   Writer.close w ~force_close:(Clock.after (sec 30.))
   >>= fun () ->
   Reader.close r
@@ -141,15 +141,12 @@ let with_connection
     Writer.close_finished w;
   ]
   >>= fun () ->
-  close_connection r w
+  close_connection_via_reader_and_writer r w
   >>= fun () ->
   res >>| function
   | Ok v -> v
   | Error e -> raise e
 ;;
-
-(* We redefine [connect_sock] to cut out optional arguments. *)
-let connect_sock where_to_connect = connect_sock where_to_connect
 
 module Where_to_listen = struct
 
@@ -158,7 +155,7 @@ module Where_to_listen = struct
     ; address      : 'address
     ; listening_on : ('address -> 'listening_on) sexp_opaque
     }
-  with sexp_of
+  with sexp_of, fields
 
   type inet = (Socket.Address.Inet.t, int   ) t with sexp_of
   type unix = (Socket.Address.Unix.t, string) t with sexp_of
@@ -192,17 +189,29 @@ module Server = struct
   type ('address, 'listening_on)  t =
     { socket                    : ([ `Passive ], 'address) Socket.t
     ; listening_on              : 'listening_on
-    ; buffer_age_limit          : Writer.buffer_age_limit option
     ; on_handler_error          : [ `Raise
                                   | `Ignore
                                   | `Call of ('address -> exn -> unit)
                                   ]
-    ; handle_client             : 'address -> Reader.t -> Writer.t -> unit Deferred.t
+    ; handle_client             :  'address
+                                -> ([ `Active ], 'address) Socket.t
+                                -> (unit, exn) Result.t Deferred.t
     ; max_connections           : int
     ; mutable num_connections   : int
     ; mutable accept_is_pending : bool
     }
   with fields, sexp_of
+
+  type ('address, 'listening_on, 'callback) create_options
+    =  ?max_connections         : int
+    -> ?max_pending_connections : int
+    -> ?on_handler_error        : [ `Raise
+                                  | `Ignore
+                                  | `Call of ('address -> exn -> unit)
+                                  ]
+    -> ('address, 'listening_on) Where_to_listen.t
+    -> 'callback
+    -> ('address, 'listening_on) t Deferred.t
 
   let listening_socket = socket
 
@@ -215,7 +224,6 @@ module Server = struct
       Fields.iter
         ~socket:ignore
         ~listening_on:ignore
-        ~buffer_age_limit:ignore
         ~on_handler_error:ignore
         ~handle_client:ignore
         ~max_connections:(check (fun max_connections ->
@@ -237,9 +245,9 @@ module Server = struct
   (* [maybe_accept] is a bit tricky, but the idea is to avoid calling [accept] until we
      have an available slot (determined by [num_connections < max_connections]). *)
   let rec maybe_accept t =
-    if   not (is_closed t)
-      && t.num_connections < t.max_connections
-      && not t.accept_is_pending
+    if not (is_closed t)
+       && t.num_connections < t.max_connections
+       && not t.accept_is_pending
     then begin
       t.accept_is_pending <- true;
       Socket.accept t.socket
@@ -257,27 +265,22 @@ module Server = struct
           (* immediately recurse to try to accept another client *)
           maybe_accept t;
           (* in parallel, handle this client *)
-          let r, w =
-            reader_writer_of_sock ?buffer_age_limit:t.buffer_age_limit client_socket
-          in
-          collect_errors w (fun () -> t.handle_client client_address r w)
+          t.handle_client client_address client_socket
           >>> fun res ->
-          close_connection r w
+          Fd.close (Socket.fd client_socket)
           >>> fun () ->
           begin match res with
           | Ok ()   -> ()
           | Error e ->
-            begin try
-              begin match t.on_handler_error with
+            try
+              match t.on_handler_error with
               | `Ignore -> ()
               | `Raise  -> raise e
               | `Call f -> f client_address e
-              end
             with
             | e ->
               don't_wait_for (close t);
               raise e
-            end
           end;
           t.num_connections <- t.num_connections - 1;
           maybe_accept t;
@@ -285,10 +288,9 @@ module Server = struct
     end
   ;;
 
-  let create
+  let create_sock_internal
         ?(max_connections = 10_000)
         ?max_pending_connections
-        ?buffer_age_limit
         ?(on_handler_error = `Raise)
         (where_to_listen : _ Where_to_listen.t)
         handle_client =
@@ -304,7 +306,6 @@ module Server = struct
     let t =
       { socket
       ; listening_on      = where_to_listen.listening_on (Socket.getsockname socket)
-      ; buffer_age_limit
       ; on_handler_error
       ; handle_client
       ; max_connections
@@ -314,6 +315,43 @@ module Server = struct
     in
     maybe_accept t;
     t
+  ;;
+
+  let create_sock
+        ?max_connections
+        ?max_pending_connections
+        ?on_handler_error
+        where_to_listen
+        handle_client =
+    create_sock_internal
+      ?max_connections
+      ?max_pending_connections
+      ?on_handler_error
+      where_to_listen
+      (fun client_address client_socket ->
+         try_with ~name:"Tcp.Server.create_sock"
+           (fun () -> handle_client client_address client_socket))
+  ;;
+
+  let create
+        ?buffer_age_limit
+        ?max_connections
+        ?max_pending_connections
+        ?on_handler_error
+        where_to_listen
+        handle_client =
+    create_sock_internal
+      ?max_connections
+      ?max_pending_connections
+      ?on_handler_error
+      where_to_listen
+      (fun client_address client_socket ->
+         let r, w = reader_writer_of_sock ?buffer_age_limit client_socket in
+         collect_errors w (fun () -> handle_client client_address r w)
+         >>= fun res ->
+         close_connection_via_reader_and_writer r w
+         >>| fun () ->
+         res)
   ;;
 
   TEST_UNIT "multiclose" =

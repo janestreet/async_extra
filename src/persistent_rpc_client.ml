@@ -35,7 +35,7 @@ end
 
 type t =
   { get_address    : unit -> Host_and_port.t Or_error.t Deferred.t
-  ; connect        : host:string -> port:int -> (Rpc.Connection.t, exn) Result.t Deferred.t
+  ; connect        : Host_and_port.t -> Rpc.Connection.t Or_error.t Deferred.t
   ; mutable conn   : Rpc.Connection.t option Ivar.t (* None iff [close] has been called *)
   ; event_handler  : Event.Handler.t
   ; close_started  : unit Ivar.t
@@ -55,7 +55,7 @@ let retry_delay () = Time.Span.randomize ~percent:0.3 (sec 10.)
    If we don't do this, we sometimes end up with noisy logs which report the same error
    again and again, differing only as to what monitor caught them. *)
 let same_error e1 e2 =
-  let to_sexp e = Exn.sexp_of_t (Monitor.extract_exn e) in
+  let to_sexp e = Exn.sexp_of_t (Monitor.extract_exn (Error.to_exn e)) in
   Sexp.equal (to_sexp e1) (to_sexp e2)
 
 let try_connecting_until_successful t =
@@ -66,7 +66,7 @@ let try_connecting_until_successful t =
   let connect () =
     t.get_address ()
     >>= function
-    | Error e -> return (Error (Error.to_exn e))
+    | Error e -> return (Error e)
     | Ok addr ->
       let same_as_previous_address =
         match !previous_address with
@@ -75,9 +75,7 @@ let try_connecting_until_successful t =
       in
       previous_address := Some addr;
       if not same_as_previous_address then handle_event t (Obtained_address addr);
-      t.connect
-        ~host:(Host_and_port.host addr)
-        ~port:(Host_and_port.port addr)
+      t.connect addr
   in
   let rec loop () =
     if Ivar.is_full t.close_started then
@@ -93,8 +91,7 @@ let try_connecting_until_successful t =
           | Some previous_err -> same_error err previous_err
         in
         previous_error := Some err;
-        if not same_as_previous_error then
-          handle_event t (Failed_to_connect (Error.of_exn err));
+        if not same_as_previous_error then handle_event t (Failed_to_connect err);
         after (retry_delay ())
         >>= fun () ->
         loop ()
@@ -102,15 +99,8 @@ let try_connecting_until_successful t =
   in
   loop ()
 
-let create ~server_name ?log ?(on_event = ignore) ?implementations
-      ?max_message_size ?handshake_timeout get_address =
+let create_generic ~server_name ?log ?(on_event = ignore) ~connect get_address =
   let event_handler = { Event.Handler. server_name; log; on_event } in
-  (* package up the call to [Rpc.Connection.client] so that the polymorphism over
-     [implementations] is hidden away *)
-  let connect ~host ~port =
-    Rpc.Connection.client ~host ~port
-      ?implementations ?max_message_size ?handshake_timeout ()
-  in
   let t =
     { event_handler
     ; get_address
@@ -137,12 +127,23 @@ let create ~server_name ?log ?(on_event = ignore) ?implementations
       (* waits until [retry_delay ()] time has passed since the time just before we last
          tried to connect rather than the time we noticed being disconnected, so that if a
          long-lived connection dies, we will attempt to reconnect immediately. *)
-      Deferred.any [
-        (ready_to_retry_connecting >>| fun () -> `Repeat ());
-        (Ivar.read t.close_started >>| fun () -> `Finished ())
+      Deferred.choose [
+        Deferred.choice ready_to_retry_connecting   (fun () -> `Repeat ());
+        Deferred.choice (Ivar.read t.close_started) (fun () -> `Finished ());
       ]
   );
   t
+
+let create ~server_name ?log ?on_event ?via_local_interface ?implementations
+      ?max_message_size ?make_transport ?handshake_timeout ?heartbeat_config get_address =
+  let connect host_and_port =
+    let (host, port) = Host_and_port.tuple host_and_port in
+    Rpc.Connection.client ~host ~port ?via_local_interface ?implementations
+      ?max_message_size ?make_transport ?handshake_timeout ?heartbeat_config
+      ~description:(Info.of_string ("persistent connection to " ^ server_name)) ()
+    >>| Or_error.of_exn_result
+  in
+  create_generic ~server_name ?log ?on_event ~connect get_address
 
 let connected t =
   (* Take care not to return a connection that is known to be closed at the time

@@ -104,12 +104,13 @@ let with_send_fsts expected sexp_of receiver () =
   with_fsts (sendto ()) expected sexp_of receiver
   >>= fun () ->
   with_fsts
-    (sendto_sync ()
-     |> Or_error.map ~f:(fun sendto_sync ->
-       (fun fd buf addr ->
-          match sendto_sync fd buf addr with
-          | `Not_ready -> assert false
-          | `Ok -> Deferred.unit)))
+    (Or_error.map (sendto_sync ())
+       ~f:(fun sendto_sync ->
+         fun fd buf addr ->
+           match Unix.Syscall_result.Unit.to_result (sendto_sync fd buf addr) with
+           | Ok () -> Deferred.unit
+           | Error (EWOULDBLOCK | EAGAIN | EINTR) -> assert false
+           | Error e -> raise (Unix.Unix_error (e, "sendto", ""))))
     expected
     sexp_of
     receiver

@@ -27,6 +27,7 @@ type 'a with_connect_options
   -> ?timeout            : Time.Span.t
   -> 'a
 
+
 (** [with_connection ~host ~port f] looks up host from a string (using DNS as needed),
     connects, then calls [f], passing the connected socket and a reader and writer for it.
     When the deferred returned by [f] is determined, or any exception is thrown, the
@@ -49,7 +50,11 @@ val with_connection
 
     Any errors in the connection will be reported to the monitor that was current
     when connect was called. *)
-val connect_sock : 'addr where_to_connect -> ([ `Active ], 'addr) Socket.t Deferred.t
+val connect_sock
+  :  ?interrupt : unit Deferred.t
+  -> ?timeout   : Time.Span.t
+  -> 'addr where_to_connect
+  -> ([ `Active ], 'addr) Socket.t Deferred.t
 
 
 (** [connect ~host ~port] is a convenience wrapper around [connect_sock] that returns the
@@ -81,6 +86,8 @@ module Where_to_listen : sig
     -> address      : 'address
     -> listening_on : ('address -> 'listening_on)
     -> ('address, 'listening_on) t
+
+  val address : ('address, _) t -> 'address
 end
 
 val on_port              : int ->    Where_to_listen.inet
@@ -114,11 +121,7 @@ module Server : sig
   val close_finished : (_, _) t -> unit Deferred.t
   val is_closed      : (_, _) t -> bool
 
-  (** [create where_to_listen handler] starts a server listening to a socket as specified
-      by [where_to_listen].  It returns a server once the socket is ready to accept
-      connections.  The server calls [handler (address, reader, writer)] for each client
-      that connects.  If the deferred returned by [handler] is ever determined, or
-      [handler] raises an exception, then [reader] and [writer] are closed.
+  (** Options for server creation:
 
       [max_pending_connections] is the maximum number of clients that can have a
       connection pending, as with [Unix.Socket.listen].  Additional connections will be
@@ -129,27 +132,48 @@ module Server : sig
       less than [max_connections], although of course potential clients can have a
       connection pending.
 
-      [buffer_age_limit] passes on to the underlying writer option of the same name.
-
       [on_handler_error] determines what happens if the handler throws an exception.  The
       default is [`Raise].  If an exception is raised by on_handler_error (either
-      explicitely via `Raise, or in the closure passed to `Call) no further connections
-      will be accepted.
-
-      The server will stop accepting and close the listening socket when an error handler
-      raises (either via [`Raise] or [`Call f] where [f] raises), or if [close] is
-      called. *)
-  val create
-    :  ?max_connections         : int
+      explicitely via [`Raise], or in the closure passed to [`Call]) no further
+      connections will be accepted.  *)
+  type ('address, 'listening_on, 'callback) create_options
+    =  ?max_connections         : int
     -> ?max_pending_connections : int
-    -> ?buffer_age_limit        : Writer.buffer_age_limit
     -> ?on_handler_error        : [ `Raise
                                   | `Ignore
                                   | `Call of ('address -> exn -> unit)
                                   ]
     -> ('address, 'listening_on) Where_to_listen.t
-    -> ('address -> Reader.t -> Writer.t -> unit Deferred.t)
+    -> 'callback
     -> ('address, 'listening_on) t Deferred.t
+
+  (** [create where_to_listen handler] starts a server listening to a socket as specified
+      by [where_to_listen].  It returns a server once the socket is ready to accept
+      connections.  The server calls [handler address socket] for each client that
+      connects.  If the deferred returned by [handler] is ever determined, or [handler]
+      raises an exception, then [socket] is closed.
+
+      The server will stop accepting and close the listening socket when an error handler
+      raises (either via [`Raise] or [`Call f] where [f] raises), or if [close] is
+      called. *)
+  val create_sock
+    : ('address,
+       'listening_on,
+       'address -> ([ `Active ], 'address) Socket.t -> unit Deferred.t
+      ) create_options
+
+  (** [create where_to_listen handler] is a convenience wrapper around [create_sock] that
+      pass a reader and writer for the client socket to the callback.  If the deferred
+      returned by [handler] is ever determined, or [handler] raises an exception, then the
+      reader and writer are closed.
+
+      [buffer_age_limit] passes on to the underlying writer option of the same name. *)
+  val create
+    :  ?buffer_age_limit : Writer.buffer_age_limit
+    -> ('address,
+        'listening_on,
+        'address -> Reader.t -> Writer.t -> unit Deferred.t
+       ) create_options
 
   (** [listening_socket t] accesses the listening socket, which should be used with care.
       An anticipated use is with {!Udp.bind_to_interface_exn}.  Accepting connections on

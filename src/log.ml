@@ -25,7 +25,11 @@ module Level = struct
 
   let arg =
     Command.Spec.Arg_type.of_alist_exn
-      (List.map all ~f:(fun t -> (String.lowercase (to_string t), t)))
+      (List.concat_map all ~f:(fun t ->
+         let s = to_string t in
+         [ String.lowercase  s, t
+         ; String.capitalize s, t
+         ; String.uppercase  s, t ]))
   ;;
 
   (* Ordering of log levels in terms of verbosity. *)
@@ -71,6 +75,61 @@ module Rotation = struct
       ; zone          : Time.Zone.t with default(Time.Zone.local)
       }
     with fields, sexp
+  end
+
+  module type Id_intf = sig
+    type t
+    val create : Time.Zone.t -> t
+    (* For any rotation scheme that renames logs on rotation, this defines how to do
+       the renaming. *)
+    val rotate_one : t -> t
+
+    val to_string_opt : t -> string option
+    val of_string_opt : string option -> t option
+    val cmp_newest_first : t -> t -> int
+  end
+
+  module V3 = struct
+
+    type naming_scheme = [ `Numbered | `Timestamped | `Dated | `User_defined of (module Id_intf) ]
+
+    type t =
+      { messages      : int sexp_option
+      ; size          : Byte_units.t sexp_option
+      ; time          : Time.Ofday.t sexp_option
+      ; keep          : [ `All | `Newer_than of Time.Span.t | `At_least of int ]
+      ; naming_scheme : naming_scheme
+      ; zone          : Time.Zone.t with default(Time.Zone.local)
+      }
+    with fields
+
+    let sexp_of_t t =
+      let a x = Sexp.Atom x and l x = Sexp.List x in
+      let o x name sexp_of =
+        Option.map x ~f:(fun x -> (l [a name; sexp_of x]))
+      in
+      let messages = o t.messages "messages" Int.sexp_of_t in
+      let size = o t.size "size" Byte_units.sexp_of_t in
+      let time = o t.time "time" Time.Ofday.sexp_of_t in
+      let keep =
+        l [a "keep";
+           match t.keep with
+           | `All -> a "All"
+           | `Newer_than span -> l [a "Newer_than"; Time.Span.sexp_of_t span]
+           | `At_least n -> l [a "At_least"; Int.sexp_of_t n]]
+      in
+      let naming_scheme =
+        l [a "naming_scheme";
+           match t.naming_scheme with
+           | `Numbered -> a "Numbered"
+           | `Timestamped -> a "Timestamped"
+           | `Dated -> a "Dated"
+           | `User_defined _ -> a "User_defined"]
+      in
+      let zone = l [a "zone"; Time.Zone.sexp_of_t t.zone] in
+      let all = List.filter_map ~f:Fn.id [messages; size; time; Some keep; Some naming_scheme; Some zone] in
+      l all
+
 
     let of_v1 { V1. messages; size; time; keep; naming_scheme } =
       let time, zone =
@@ -78,11 +137,17 @@ module Rotation = struct
         | None -> None, Time.Zone.local
         | Some (ofday, zone) -> Some ofday, zone
       in
-      let naming_scheme = (naming_scheme :> [ `Numbered | `Timestamped | `Dated ]) in
+      let naming_scheme = (naming_scheme :> naming_scheme)
+      in
+      { messages; size; time; keep; naming_scheme; zone }
+
+    let of_v2 { V2. messages; size; time; keep; naming_scheme; zone } =
+      let naming_scheme = (naming_scheme :> naming_scheme)
+      in
       { messages; size; time; keep; naming_scheme; zone }
   end
 
-  include V2
+  include V3
 
   let create ?messages ?size ?time ?zone ~keep ~naming_scheme () =
     { messages
@@ -94,16 +159,16 @@ module Rotation = struct
     }
 
   let t_of_sexp sexp =
-    try V2.t_of_sexp sexp
+    try V3.of_v2 (V2.t_of_sexp sexp)
     with v2_exn ->
-      try V2.of_v1 (V1.t_of_sexp sexp)
+      try V3.of_v1 (V1.t_of_sexp sexp)
       with v1_exn ->
         Error.raise
           (Error.tag
              (Error.of_list [Error.of_exn v2_exn; Error.of_exn v1_exn])
              "Couldn't parse V1 and V2 log rotation sexp")
 
-  let sexp_of_t = V2.sexp_of_t
+  let sexp_of_t = V3.sexp_of_t
 
   let first_occurrence_after time ~ofday ~zone =
     let first_at_or_after time = Time.occurrence `First_after_or_at time ~ofday ~zone in
@@ -155,7 +220,7 @@ module Sexp_or_string = struct
   with bin_io, sexp
 
   let to_string = function
-    | `Sexp sexp  -> Sexp.to_string_hum sexp
+    | `Sexp sexp  -> Sexp.to_string sexp
     | `String str -> str
   ;;
 end
@@ -274,16 +339,14 @@ end = struct
         t_of_versioned_serializable versioned_t
       ;;
 
-      include Bin_prot.Utils.Make_binable (struct
-        type t = T.t
-
-        module Binable = struct
-          type t = versioned_serializable with bin_io
-        end
-
-        let to_binable t           = (T.version, t)
-        let of_binable versioned_t = t_of_versioned_serializable versioned_t
-      end)
+      include
+        Binable.Of_binable
+          (struct type t = versioned_serializable with bin_io end)
+          (struct
+            type t = T.t
+            let to_binable t           = (T.version, t)
+            let of_binable versioned_t = t_of_versioned_serializable versioned_t
+          end)
     end
 
     module V2 = Make_versioned_serializable (struct
@@ -311,17 +374,13 @@ end = struct
         ; tags    = v2_t.tags
         }
 
-      include Bin_prot.Utils.Make_binable (struct
-
-        module Binable = struct
-          type t = v0_t with bin_io
-        end
-
-        let to_binable = v2_to_v0
-        let of_binable = v0_to_v2
-
-        type t = Sexp_or_string.t T.t
-      end)
+      include Binable.Of_binable
+          (struct type t = v0_t with bin_io end)
+          (struct
+            let to_binable = v2_to_v0
+            let of_binable = v0_to_v2
+            type t = Sexp_or_string.t T.t
+          end)
 
       let sexp_of_t t    = sexp_of_v0_t (v2_to_v0 t)
       let t_of_sexp sexp = v0_to_v2 (v0_t_of_sexp sexp)
@@ -547,19 +606,7 @@ end = struct
       -> Rotation.t
       -> t
   end = struct
-    module type Id_intf = sig
-      type t
-      val create : Time.Zone.t -> t
-      (* For any rotation scheme that renames logs on rotation, this defines how to do
-         the renaming. *)
-      val rotate_one : t -> t
-
-      val to_string_opt : t -> string option
-      val of_string_opt : string option -> t option
-      val cmp_newest_first : t -> t -> int
-    end
-
-    module Make (Id:Id_intf) = struct
+    module Make (Id:Rotation.Id_intf) = struct
       let make_filename ~dirname ~basename id =
         match Id.to_string_opt id with
         | None   -> dirname ^/ sprintf "%s.log" basename
@@ -742,6 +789,10 @@ end = struct
       | `Numbered    -> Numbered.create format ~basename rotation
       | `Timestamped -> Timestamped.create format ~basename rotation
       | `Dated       -> Dated.create format ~basename rotation
+      | `User_defined id ->
+        let module Id = (val id : Rotation.Id_intf) in
+        let module User_defined = Make (Id) in
+        User_defined.create format ~basename rotation
     ;;
   end
 
@@ -778,8 +829,10 @@ end
 
 type t =
   { updates                    : Update.t Pipe.Writer.t
+  ; mutable on_error           : [ `Raise | `Call of (Error.t -> unit) ]
   ; mutable current_level      : Level.t
   ; mutable output_is_disabled : bool
+  ; mutable current_output     : Output.t list
   }
 
 let equal t1 t2 = Pipe.equal t1.updates t2.updates
@@ -796,7 +849,7 @@ let push_update t update =
 
 let flushed t = Deferred.create (fun i -> push_update t (Flush i))
 
-let closed t = Pipe.is_closed t.updates
+let is_closed t = Pipe.is_closed t.updates
 
 module Flush_at_exit_or_gc : sig
   val add_log : t -> unit
@@ -817,7 +870,7 @@ end = struct
 
   (* [flush] adds a flush deferred to the flush_bag *)
   let flush t =
-    if not (closed t) then begin
+    if not (is_closed t) then begin
       let flush_bag = Lazy.force flush_bag in
       let flushed   = flushed t in
       let tag       = Bag.add flush_bag flushed in
@@ -826,7 +879,7 @@ end = struct
   ;;
 
   let close t =
-    if not (closed t) then begin
+    if not (is_closed t) then begin
       flush t;
       Pipe.close t.updates
     end
@@ -900,24 +953,43 @@ let create_log_processor ~output =
      loop batch_size)
 ;;
 
-let create ~level ~output : t =
-  let r,w         = Pipe.create () in
-  let process_log = create_log_processor ~output in
-  don't_wait_for (Pipe.iter' r ~f:process_log);
+let process_log_redirecting_all_errors t r output =
+  Monitor.try_with (fun () ->
+    let process_log = create_log_processor ~output in
+    Pipe.iter' r ~f:process_log)
+  >>| function
+  | Ok ()   -> ()
+  | Error e ->
+    begin match t.on_error with
+    | `Raise  -> raise e
+    | `Call f -> f (Error.of_exn e)
+    end
+;;
+
+let create ~level ~output ~on_error : t =
+  let r,w = Pipe.create () in
   let t =
     { updates            = w
+    ; on_error
     ; current_level      = level
     ; output_is_disabled = List.is_empty output
+    ; current_output     = output
     }
   in
   Flush_at_exit_or_gc.add_log t;
+  don't_wait_for (process_log_redirecting_all_errors t r output);
   t
 ;;
 
 let set_output t outputs =
   t.output_is_disabled <- List.is_empty outputs;
+  t.current_output <- outputs;
   push_update t (New_output (Output.combine outputs))
 ;;
+
+let get_output t = t.current_output
+
+let set_on_error t handler = t.on_error <- handler
 
 let level t = t.current_level
 
@@ -939,7 +1011,7 @@ TEST_UNIT "Level setting" =
     let open Or_error.Monad_infix in
     let initial_level = `Debug in
     let output = [Output.create (fun _ -> Deferred.unit)] in
-    let log = create ~level:initial_level ~output in
+    let log = create ~level:initial_level ~output ~on_error:`Raise in
     assert_log_level log initial_level
     >>= fun () ->
     set_level log `Info;
@@ -993,14 +1065,16 @@ let error ?time ?tags t k = printf ~level:`Error ?time ?tags t k
 module type Global_intf = sig
   val log : t Lazy.t
 
-  val level      : unit -> Level.t
-  val set_level  : Level.t -> unit
-  val set_output : Output.t list -> unit
-  val raw        : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
-  val info       : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
-  val error      : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
-  val debug      : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
-  val flushed    : unit -> unit Deferred.t
+  val level        : unit -> Level.t
+  val set_level    : Level.t -> unit
+  val set_output   : Output.t list -> unit
+  val get_output : unit -> Output.t list
+  val set_on_error : [ `Raise | `Call of (Error.t -> unit) ] -> unit
+  val raw          : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val info         : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val error        : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val debug        : ?time:Time.t -> ?tags:(string * string) list -> ('a, unit, string, unit) format4 -> 'a
+  val flushed      : unit -> unit Deferred.t
 
   val printf
     :  ?level:Level.t
@@ -1028,10 +1102,24 @@ module type Global_intf = sig
 end
 
 module Make_global() : Global_intf = struct
-  let log               = lazy (create ~level:`Info ~output:[Output.stderr ()])
-  let level ()          = level (Lazy.force log)
-  let set_level level   = set_level (Lazy.force log) level
-  let set_output output = set_output (Lazy.force log) output
+
+  let send_errors_to_top_level_monitor e =
+    let e = try Error.raise e with e -> e in
+    Monitor.send_exn Monitor.main ~backtrace:`Get e
+  ;;
+
+  let log =
+    lazy (create
+            ~level:`Info
+            ~output:[Output.stderr ()]
+            ~on_error:(`Call send_errors_to_top_level_monitor))
+  ;;
+
+  let level ()             = level (Lazy.force log)
+  let set_level level      = set_level (Lazy.force log) level
+  let set_output output    = set_output (Lazy.force log) output
+  let get_output ()        = get_output (Lazy.force log)
+  let set_on_error handler = set_on_error (Lazy.force log) handler
 
   let raw   ?time ?tags k = raw   ?time ?tags (Lazy.force log) k
   let info  ?time ?tags k = info  ?time ?tags (Lazy.force log) k
@@ -1130,3 +1218,31 @@ module Reader = struct
     pipe_r
   ;;
 end
+
+(* We want to get a log of errors sent to [Monitor.try_with] after the initial return, so
+   on initialization we redirect them to [Log.Global.error].  However, logging errors
+   isn't cheap and there are issues with thread fairness when outputting to stderr (which
+   is the default in many cases for [Global.error]), so, to prevent the [Log] [Writer.t]
+   buffer from growing without bound, we limit the number of currently unflushed error
+   messages created by this handler. *)
+let () =
+  let max_unflushed_errors     = 10 in
+  let current_unflushed_errors = ref 0 in
+  let handler exn =
+    if !current_unflushed_errors < max_unflushed_errors
+    then begin
+      incr current_unflushed_errors;
+      Global.error !"\
+Exception raised to Monitor.try_with that already returned
+  (this error was captured by a default handler in Async.Log):
+  %{Exn}"
+        exn;
+      if !current_unflushed_errors = max_unflushed_errors
+      then Global.error "\
+Stopped logging exceptions raised to Monitor.try_with that already returned
+  until error log can be flushed.";
+      upon (Global.flushed ()) (fun () -> decr current_unflushed_errors);
+    end
+  in
+  Monitor.try_with_ignored_exn_handling := `Run handler
+;;
