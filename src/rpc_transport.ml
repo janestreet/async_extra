@@ -161,22 +161,19 @@ module Unix_writer = struct
   ;;
 end
 
-(* unfortunately, copied from reader0.ml *)
-let default_max_message_size = 100 * 1024 * 1024
-
 module Reader = struct
   include Kernel_transport.Reader
 
-  let of_reader ?(max_message_size=default_max_message_size) reader =
-    create (module Unix_reader) (Unix_reader.create ~reader ~max_message_size)
+  let of_reader ~max_message_size reader =
+    pack (module Unix_reader) (Unix_reader.create ~reader ~max_message_size)
   ;;
 end
 
 module Writer = struct
   include Kernel_transport.Writer
 
-  let of_writer ?(max_message_size=default_max_message_size) writer =
-    create (module Unix_writer) (Unix_writer.create ~writer ~max_message_size)
+  let of_writer ~max_message_size writer =
+    pack (module Unix_writer) (Unix_writer.create ~writer ~max_message_size)
   ;;
 end
 
@@ -188,17 +185,13 @@ with sexp_of
 
 let close = Kernel_transport.close
 
-let of_reader_writer ?(max_message_size=default_max_message_size) reader writer =
+let of_reader_writer ~max_message_size reader writer =
   { reader = Reader.of_reader reader ~max_message_size
   ; writer = Writer.of_writer writer ~max_message_size }
 ;;
 
-let of_fd ?buffer_age_limit ?reader_buffer_size ?max_message_size fd =
-  of_reader_writer ?max_message_size
+let of_fd ?buffer_age_limit ?reader_buffer_size ~max_message_size fd =
+  of_reader_writer ~max_message_size
     (Async_unix.Reader.create ?buf_len:reader_buffer_size fd)
     (Async_unix.Writer.create ?buffer_age_limit fd)
-;;
-
-let of_fd' ?buffer_age_limit ?reader_buffer_size () ?max_message_size fd =
-  of_fd ?buffer_age_limit ?reader_buffer_size ?max_message_size fd
 ;;

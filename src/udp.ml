@@ -45,7 +45,6 @@ let sendto_sync () =
     )
 ;;
 
-
 (** [ready_iter fd ~stop ~max_ready ~f] iterates [f] over [fd], handling [EINTR] by
     retrying immediately (at most [max_ready] times in a row) and [EWOULDBLOCK]/[EAGAIN]
     by retrying when ready.  Iteration is terminated when [fd] closes, [stop] fills, or
@@ -91,6 +90,7 @@ module Ready_iter = struct
   let poll_again   = create_ok Poll_again
   let user_stopped = create_ok User_stopped
 end
+
 let ready_iter fd ~stop ~max_ready ~f read_or_write ~syscall_name =
   let rec inner_loop i file_descr : Ready_iter.Ok.t =
     if i < max_ready && Ivar.is_empty stop && Fd.is_open fd
@@ -154,6 +154,8 @@ let bind ?ifname addr =
   in
   if is_multicast addr
   then
+    (* We do not treat [mcast_join] as a blocking operation because it only instructs the
+       kernel to send an IGMP message, which the kernel then handles asynchronously. *)
     Core.Std.Unix.mcast_join ?ifname (Fd.file_descr_exn (Socket.fd socket))
       (Socket.Address.to_sockaddr addr);
   Socket.bind socket addr
@@ -220,6 +222,7 @@ let read_loop_with_buffer_replacement ?(config = Config.create ()) fd f =
       <:sexp_of< [ `Bad_fd | `Unsupported ] * Fd.t >>
   | `Closed | `Interrupted -> !buf
 ;;
+
 let read_loop ?config fd f =
   read_loop_with_buffer_replacement ?config fd (fun b -> f b; b)
   >>| (ignore : (_, _) Iobuf.t -> unit)

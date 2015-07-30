@@ -96,7 +96,9 @@ module Make (Arg : Arg) () = struct
       | Error exn ->
         Monitor.send_exn (Monitor.current ()) exn;
         Clock.after (sec 0.5) >>> loop
-      | Ok `Socket_closed -> ()
+      | Ok `Socket_closed ->
+        (* stop looping when socket is closed *)
+        ()
       | Ok (`Ok (sock, `Inet (addr, port))) ->
         (* Go ahead and accept more connections. *)
         loop ();
@@ -262,6 +264,13 @@ module Make (Arg : Arg) () = struct
     match Hashtbl.find t.clients id with
     | None -> ()
     | Some client -> client.close Closed_by_server
+  ;;
+
+  let close_server t =
+    Hashtbl.iter t.clients ~f:(fun ~key:_ ~data:client ->
+      client.close Closed_by_server
+    );
+    Unix.close (Socket.fd t.socket)
   ;;
 
   let flushed_time t id =

@@ -68,8 +68,6 @@ module Make (Z : Arg) = struct
     -> unit
     constraint 'a = < send : 'send; recv : 'recv; remote_name : 'remote_name >
 
-  (* mstanojevic: note that Hello.t contains Mode, which means that we
-     can't ever change the Mode type! *)
   module Hello = struct
     type t =
       { name         : string

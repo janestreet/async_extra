@@ -2,6 +2,7 @@ open Core.Std
 open Import
 
 module Transport = Rpc_transport
+module Low_latency_transport = Rpc_transport_low_latency
 
 module Any             = Rpc_kernel.Any
 module Description     = Rpc_kernel.Description
@@ -41,10 +42,13 @@ module Connection = struct
   include (Rpc_kernel.Connection : module type of struct include Rpc_kernel.Connection end
            with module Heartbeat_config := Rpc_kernel.Connection.Heartbeat_config)
 
+  (* unfortunately, copied from reader0.ml *)
+  let default_max_message_size = 100 * 1024 * 1024
+
   let create
         ?implementations
         ~connection_state
-        ?max_message_size
+        ?(max_message_size=default_max_message_size)
         ?handshake_timeout
         ?heartbeat_config
         ?description
@@ -55,12 +59,12 @@ module Connection = struct
       ?handshake_timeout:(Option.map handshake_timeout ~f:Time_ns.Span.of_span)
       ?heartbeat_config:(Option.map heartbeat_config ~f:Heartbeat_config.v2_of_v1)
       ?description
-      (Transport.of_reader_writer reader writer ?max_message_size)
+      (Transport.of_reader_writer reader writer ~max_message_size)
   ;;
 
   let with_close
         ?implementations
-        ?max_message_size
+        ?(max_message_size=default_max_message_size)
         ?handshake_timeout
         ?heartbeat_config
         ~connection_state
@@ -73,13 +77,13 @@ module Connection = struct
       ?handshake_timeout:(Option.map handshake_timeout ~f:Time_ns.Span.of_span)
       ?heartbeat_config:(Option.map heartbeat_config ~f:Heartbeat_config.v2_of_v1)
       ~connection_state
-      (Transport.of_reader_writer reader writer ?max_message_size)
+      (Transport.of_reader_writer reader writer ~max_message_size)
       ~dispatch_queries
       ~on_handshake_error
   ;;
 
   let server_with_close
-        ?max_message_size
+        ?(max_message_size=default_max_message_size)
         ?handshake_timeout
         ?heartbeat_config
         reader writer
@@ -90,7 +94,7 @@ module Connection = struct
     server_with_close
       ?handshake_timeout:(Option.map handshake_timeout ~f:Time_ns.Span.of_span)
       ?heartbeat_config:(Option.map heartbeat_config ~f:Heartbeat_config.v2_of_v1)
-      (Transport.of_reader_writer reader writer ?max_message_size)
+      (Transport.of_reader_writer reader writer ~max_message_size)
       ~implementations
       ~connection_state
       ~on_handshake_error
@@ -106,10 +110,10 @@ module Connection = struct
     ]
   ;;
 
-  type transport_maker = ?max_message_size:int -> Fd.t -> Transport.t
+  type transport_maker = Fd.t -> max_message_size:int -> Transport.t
 
-  let default_transport_maker ?max_message_size fd =
-    Transport.of_fd ?max_message_size fd
+  let default_transport_maker fd ~max_message_size =
+    Transport.of_fd fd ~max_message_size
   ;;
 
   let serve
@@ -118,7 +122,7 @@ module Connection = struct
         ~where_to_listen
         ?max_connections
         ?max_pending_connections
-        ?max_message_size
+        ?(max_message_size=default_max_message_size)
         ?(make_transport=default_transport_maker)
         ?handshake_timeout
         ?heartbeat_config
@@ -137,7 +141,7 @@ module Connection = struct
                Socket.Address.sexp_of_t
            in
            let connection_state = initial_connection_state inet in
-           let transport = make_transport ?max_message_size (Socket.fd socket) in
+           let transport = make_transport ~max_message_size (Socket.fd socket) in
            collect_errors transport ~f:(fun () ->
              Rpc_kernel.Connection.create
                ?handshake_timeout:(Option.map handshake_timeout ~f:Time_ns.Span.of_span)
@@ -175,7 +179,7 @@ module Connection = struct
   let client ~host ~port
         ?via_local_interface
         ?implementations
-        ?max_message_size
+        ?(max_message_size=default_max_message_size)
         ?(make_transport=default_transport_maker)
         ?(handshake_timeout=
           Time_ns.Span.to_span
@@ -198,7 +202,7 @@ module Connection = struct
         Info.tag_arg desc "via TCP" (host, port) <:sexp_of< string * int >>
     in
     let handshake_timeout = Time_ns.diff finish_handshake_by (Time_ns.now ()) in
-    let transport = make_transport ?max_message_size (Socket.fd sock) in
+    let transport = make_transport (Socket.fd sock) ~max_message_size in
     begin
       match implementations with
       | None ->

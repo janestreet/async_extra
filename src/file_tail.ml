@@ -348,7 +348,7 @@ let start_stat_loop t =
 ;;
 
 let start_reading t ~start_at =
-  stat t ~initial_call:true;
+  stat t ~initial_call:true
   >>> function
   | Error () ->
     (* If the initial stat failed, then it already put an error in the pipe and closed

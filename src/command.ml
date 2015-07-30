@@ -43,6 +43,10 @@ let async ~summary ?readme spec main =
   basic ~summary ?readme (in_async spec on_result) main
 ;;
 
+let async' ~summary ?readme params main =
+  async ~summary ?readme (Spec.of_params params) main
+;;
+
 let async_or_error ~summary ?readme spec main =
   let on_result = function
     | Ok () -> shutdown 0

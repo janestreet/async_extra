@@ -7,6 +7,7 @@ open Core.Std
 open Import
 
 module Transport = Rpc_transport
+module Low_latency_transport = Rpc_transport_low_latency
 
 module Any             = Rpc_kernel.Any
 module Description     = Rpc_kernel.Description
@@ -82,10 +83,11 @@ module Connection : sig
       age limit on the writer, you can pass this to the functions of this module:
 
       {[
-        ~make_transport:(Rpc.Transport.of_fd' ~buffer_age_limit:`Unlimited ())
+        ~make_transport:(fun fd ~max_message_size ->
+          Rpc.Transport.of_fd fd ~max_message_size ~buffer_age_limit:`Unlimited)
       ]}
   *)
-  type transport_maker = ?max_message_size:int -> Fd.t -> Transport.t
+  type transport_maker = Fd.t -> max_message_size:int -> Transport.t
 
   (** [serve implementations ~port ?on_handshake_error ()] starts a server with the given
       implementation on [port].  The optional auth function will be called on all incoming

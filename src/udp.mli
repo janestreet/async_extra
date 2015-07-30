@@ -99,6 +99,8 @@ val sendto
       -> unit Deferred.t
      ) Or_error.t
 
+(** [bind address] creates a socket bound to address, and, if [address] is a
+    multicast address, joins the multicast group. *)
 val bind
   :  ?ifname : string
   -> Socket.Address.Inet.t

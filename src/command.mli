@@ -9,7 +9,8 @@ include module type of Core.Std.Command
 (** [async] is like [Core.Command.basic], except that the main function it expects returns
     [unit Deferred.t], instead of [unit].  [async] will also start the Async scheduler
     before main is run, and will stop the scheduler when main returns. *)
-val async : ('a, unit Deferred.t) basic_command
+val async  : ('a, unit Deferred.t) basic_command
+val async' : ('a, unit Deferred.t) basic_command'
 
 (** [async_basic] is a deprecated synonym for [async] that will eventually go away.  It is
     here to give code outside jane street a chance to switch over before we delete it. *)

@@ -154,7 +154,7 @@ let unpack_into_pipe ~from ~using =
 ;;
 
 let unpack_iter ~from ~using ~f =
-  unpack_all ~from ~to_:(Iter ~f) ~using
+  unpack_all ~from ~to_:(Iter f) ~using
   >>| function
   | Input_closed                         -> Unpack_iter_result.Input_closed
   | Input_closed_in_the_middle_of_data x -> Input_closed_in_the_middle_of_data x

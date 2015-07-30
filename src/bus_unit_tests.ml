@@ -153,7 +153,7 @@ TEST_MODULE = (struct
            ignore (subscribe_exn t ~f:(fun () -> incr num_calls; failwith "")
                    : _ Subscriber.t);
            Deferred.unit)
-        (fun _ -> incr num_errors);
+        (fun _ -> incr num_errors)
       >>= fun () ->
       start t;
       assert (!num_calls  = 0);
@@ -182,7 +182,7 @@ TEST_MODULE = (struct
              upon (Ivar.read raise_after) (fun () -> failwith ""))
             : _ Subscriber.t);
            Deferred.unit)
-        (fun _ -> Ivar.fill got_error ());
+        (fun _ -> Ivar.fill got_error ())
       >>= fun () ->
       assert (Ivar.is_empty got_error);
       start t;

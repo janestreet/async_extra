@@ -9,13 +9,13 @@ module Async_writer = Writer
 module Reader : sig
   include module type of struct include Rpc_kernel.Transport.Reader end
 
-  val of_reader : ?max_message_size:int -> Async_reader.t -> t
+  val of_reader : max_message_size:int -> Async_reader.t -> t
 end
 
 module Writer : sig
   include module type of struct include Rpc_kernel.Transport.Writer end
 
-  val of_writer : ?max_message_size:int -> Async_writer.t -> t
+  val of_writer : max_message_size:int -> Async_writer.t -> t
 end
 
 include module type of struct include Rpc_kernel.Transport end
@@ -23,7 +23,7 @@ include module type of struct include Rpc_kernel.Transport end
   with module Writer := Writer
 
 val of_reader_writer
-  :  ?max_message_size:int
+  :  max_message_size:int
   -> Async_reader.t
   -> Async_writer.t
   -> t
@@ -31,18 +31,6 @@ val of_reader_writer
 val of_fd
   :  ?buffer_age_limit   : Async_writer.buffer_age_limit
   -> ?reader_buffer_size : int
-  -> ?max_message_size   : int
+  ->  max_message_size   : int
   -> Fd.t
   -> t
-
-(** Same as [of_fd] but its type can be easily used with the [~make_transport] argument of
-    [Rpc.Connection]'s functions. *)
-val of_fd'
-  :  ?buffer_age_limit   : Async_writer.buffer_age_limit
-  -> ?reader_buffer_size : int
-  -> unit
-  -> ?max_message_size   : int
-  -> Fd.t
-  -> t
-
-val default_max_message_size : int

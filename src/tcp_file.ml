@@ -86,9 +86,6 @@ module Protocol = struct
 end
 
 let canonicalize filename =
-  (* Remove multiple slashes in [filename].  It would be nice to use [realpath] for
-     this, but I think it's problematic on occasion, since it seems to insist the
-     file exists.  -- mshinwell *)
   let non_empty s = String.length s > 0 in
   let reform remainder = String.concat (List.filter remainder ~f:non_empty) ~sep:"/" in
   match String.split filename ~on:'/' with
@@ -276,7 +273,7 @@ module Server = struct
         match String.Table.find state.State.files (canonicalize filename) with
         | None   ->
           Pipe.write pipe_w
-            (Error (Open_file.Error.File_not_found filename));
+            (Error (Open_file.Error.File_not_found filename))
           >>| fun () ->
           Pipe.close pipe_w
         | Some file -> f file pipe_w aborted

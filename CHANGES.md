@@ -1,3 +1,27 @@
+## 113.00.00
+
+- Added `Limiter` module.
+
+    Implements an async aware throttling rate limiter on top of `Core.Limiter`.
+
+- Generalized `Persistent_rpc_client` to supports RPC connection types with
+  additional information besides the `Rpc.Connection.t` itself.
+
+    For instance: `Persistent_rpc_client.Versioned` has
+    `Versioned_rpc.Connection_with_menu.t` as its connection type.
+
+- Changed the `Persistent_rpc_client.Make` functor to not erase the type `conn`
+  from its output module's signature.
+
+    This way, the output of `Make` can be fed to functors or functions
+    that expect a module matching `Persistent_rpc_client.S`.
+
+- Moved `Log` from `Async_extra` to `Async_unix`, so that the scheduler can
+  refer to it.
+
+- Fixed a bug where `Persistent_rpc_client.close` would hang waiting for a
+  connection to close.
+
 ## 112.35.00
 
 - Added to `Log` a better mechanism for catching and handling background
