@@ -57,4 +57,8 @@ let async_or_error ~summary ?readme spec main =
   basic ~summary ?readme (in_async spec on_result) main
 ;;
 
+let async_or_error' ~summary ?readme params main =
+  async_or_error ~summary ?readme (Spec.of_params params) main
+;;
+
 let async_basic = async

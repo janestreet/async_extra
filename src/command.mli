@@ -20,6 +20,7 @@ val async_basic : ('a, unit Deferred.t) basic_command
     return an error, in which case it prints out the error message and shuts down with
     exit code 1. *)
 val async_or_error : ('a, unit Deferred.Or_error.t) basic_command
+val async_or_error' : ('a, unit Deferred.Or_error.t) basic_command'
 
 (** To create an [Arg_type.t] that uses auto-completion and uses Async to compute the
     possible completions, one should use
