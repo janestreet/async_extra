@@ -1,3 +1,132 @@
+## 113.24.00
+
+N.B. some changes happening for this release are not listed in this changelog
+since they appear only as a consequence of changes in core or async\_kernel.
+
+- When `Transfer.Writer.send*` raises, send an error to the client.
+
+- Add a new rpc that enables a "push" rather than a "poll" model.
+
+- Switched to PPX.
+
+- For connected UDP sockets, expose `send` in the same fashion as `sendto`.
+
+- `Tcp.Server` is documented to refuse excess connections beyond
+  `max_connections + max_pending_connections`, but it treats them as
+  pending connections in our standard OS configuration.  In fact,
+  research indicates that the documented behavior is nearly impossible
+  to obtain directly and consistently from `listen`.
+
+  Clarify the name and role of the `backlog` argument to `listen` and
+  rename and update documentation for `max_pending_connections` to
+  clarify what it actually does, in light of some research:
+
+      `listen` does not generally respect the backlog argument as an
+      upper limit, but as a lower limit (mod `tcp_max_syn_backlog`) and,
+
+      with `tcp_abort_on_overflow=0`, `listen` will ignore excess
+      connections rather than actively refusing them.
+
+      (With `syncookies=1`, this can look like an indefinite backlog.)
+
+  Existing, working code can substitute `max_pending_connections ->
+  backlog` and move on.  The behavior is not changed.
+
+  When possible, consider architecting applications so the server can
+  simply accept and close excess connections, rather than relying on the
+  `listen` backlog to return an active indication to the client that
+  they won't be serviced.  To make sure the client receives an RST
+  rather than an orderly shutdown, you can set the linger time to 0
+  before closing the socket.  (Added to unit tests.)
+
+  Direct `Tcp.Server` support for this paradigm is left for future work.
+
+- Make `Rpc_low_latency_transport` treat disconnections as eof, like
+  `Async_unix.Reader` does.
+
+- Add an implementation of Mvars to Async
+
+- Allow custom handling of missed async_rpc heartbeats.
+
+- adds a configuration limit on the number of tokens that can be in-flight
+
+- Replace an `#include <sys/errno.h>` by `#include <errno.h>`.
+
+  Fixes janestreet/async\_extra#4
+
+- Added `Tcp.Server.sexp_of_t`
+
+- Adds `Rpc.Pipe_rpc.dispatch_iter`, plus a bunch of additional types to support
+  it. The main reason for this is to reduce space usage: `Pipe_rpc.dispatch`
+  followed by `Pipe.iter_without_pushback` consumes ~105 words in the steady state
+  (i.e., when no messages are coming in) while `dispatch_iter` consumes ~15. I'm
+  sure `dispatch` can be improved a lot, but a pipe by itself is 46 words, so it
+  can't possibly become as small as `dispatch_iter`.
+
+  Both cases can be made smaller by making `Connection.response_handler` a GADT
+  instead of a closure. I plan to do this later.
+
+  One annoying property of the interface is that the only way to cancel
+  a subscription is to use `Pipe_rpc.abort`, which has a terrible interface.
+  The logical way to improve the interface is to return a record of
+  a `Pipe_rpc.t`, a `Connection.t`, and a `Query_id.t`, which allocates an
+  additional few words. I'd kind of like to do this but it seems counter to the
+  goal of reducing space usage.
+
+- Added `Tcp.Server.listening_on_address`, so that one can get the
+  address a server is listening on, as compared with `listening_on`,
+  which just returns the port.
+
+- Marked Command.async_basic as deprecated using the appropriate ocaml attribute.
+
+  `@@ocaml.deprecated`
+
+  (http://caml.inria.fr/pub/docs/manual-ocaml/extn.html#sec241)
+
+- Extend the interface of `Persistent_rpc_client` to make the "address"
+  type - previously fixed as `Host_and_port.t` - abstract.  This is
+  helpful for integrating with libraries that have a different notion of
+  an address, e.g. `rpc_discovery_lib`.
+
+- `Typed_tcp` mutated a Hashtbl while iterating over it when closing.
+
+- Added `Async.Bus.first_exn`, which takes a bus and a function, and
+  returns a deferred that becomes determined when the first event is
+  published to the bus for which the function returns `Some`.
+
+  This function is useful to reduce boilerplate for dealing with
+  unsubscription.
+
+- Reduced the number of threads required by tests in:
+
+    async_extra/src/tcp.ml
+
+- Added to the error message `Bus.subscribe_exn called after first write`
+  the source-code position of the caller, in case there isn't a backtrace,
+  to make the source of the problem clearer, and to avoid confusion with
+  other source-code positions of subscribers already in the bus.
+
+- Added to `Bus.first_exn` a `Source_code_position.t` argument, so that
+  in the event of subscription failure, we can see who caused the
+  subscription to the bus.
+
+
+- Added to `Tcp.Server.close` an optional argument:
+
+    ?close_existing_connections : bool
+
+  This closes the sockets of all existing connections.
+
+- Annotate errors returned by the async-rpc library with the name of the RPC for
+  which the error was returned (if it's an rpc-level error) and a description of
+  the remote side of the connection (the ip:host if connected via a network
+  socket).
+
+- Improved `Async.Udp.bind`'s error message when it fails to
+  `mcast_join` a multicast group.
+
+- Change `~callback` to `~f` throughout the `Bus` interface
+
 ## 113.00.00
 
 - Added `Limiter` module.

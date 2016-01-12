@@ -8,7 +8,7 @@ module Make (Key : Hashable) = struct
     type 'job_tag t =
       | User_job of 'job_tag option
       | Prior_jobs_done
-    with sexp
+    [@@deriving sexp]
   end
 
   module Job = struct
@@ -17,7 +17,7 @@ module Make (Key : Hashable) = struct
       ; run : ('state option -> unit Deferred.t) sexp_opaque
       }
 
-    let sexp_of_t _ sexp_of_job_tag t = t.tag |> <:sexp_of< job_tag Tag.t >>
+    let sexp_of_t _ sexp_of_job_tag t = t.tag |> [%sexp_of: job_tag Tag.t]
   end
 
   type ('state, 'job_tag) t =
@@ -27,7 +27,7 @@ module Make (Key : Hashable) = struct
        need to remove the table entry for an emptied throttle. *)
     ; jobs   : ('state, 'job_tag) Job.t Queue.t Key.Table.t
     }
-  with sexp_of, fields
+  [@@deriving sexp_of, fields]
 
   let create () =
     { states = Key.Table.create ()
@@ -90,8 +90,8 @@ module Make (Key : Hashable) = struct
     let all_keys =
       Key.Hash_set.create ~size:(Hashtbl.length t.jobs + Hashtbl.length t.states) ()
     in
-    Hashtbl.iter t.jobs   ~f:(fun ~key ~data:_ -> Hash_set.add all_keys key);
-    Hashtbl.iter t.states ~f:(fun ~key ~data:_ -> Hash_set.add all_keys key);
+    Hashtbl.iteri t.jobs   ~f:(fun ~key ~data:_ -> Hash_set.add all_keys key);
+    Hashtbl.iteri t.states ~f:(fun ~key ~data:_ -> Hash_set.add all_keys key);
     Hash_set.fold all_keys ~init ~f:(fun acc key ->
       f acc ~key (Hashtbl.find t.states key))
   ;;
@@ -110,14 +110,14 @@ module Make (Key : Hashable) = struct
   ;;
 end
 
-TEST_MODULE = struct
+let%test_module _ = (module struct
   module T = Make(Int)
 
   let (=) = Pervasives.(=)
 
   exception Abort of int
 
-  TEST_UNIT =
+  let%test_unit _ =
     (* don't run a job immediately *)
     Thread_safe.block_on_async_exn (fun () ->
       let t = T.create () in
@@ -128,7 +128,7 @@ TEST_MODULE = struct
       assert (!i = 1)
     )
 
-  TEST_UNIT =
+  let%test_unit _ =
     (* no deferred between finding state and running the job *)
     (* let [enqueue] function, when [Monitor.try_with] did not take [~run:`Now], then this
        unit test failed to pass *)
@@ -139,14 +139,14 @@ TEST_MODULE = struct
         Deferred.unit >>> fun () -> i := `deferred_determined
       );
       T.enqueue t ~key:0 (fun _ ->
-        <:test_eq<[`init | `deferred_determined]>> !i `init;
+        [%test_eq: [`init | `deferred_determined]] !i `init;
         Deferred.unit
       )
       >>| fun () ->
       debug_on_find_state := ignore
     )
 
-  TEST_UNIT =
+  let%test_unit _ =
     Thread_safe.block_on_async_exn (fun () ->
       let t = T.create () in
       let num_keys = 100 in
@@ -195,7 +195,7 @@ TEST_MODULE = struct
     )
   ;;
 
-  TEST_UNIT =
+  let%test_unit _ =
     (* Test [num_unfinished_jobs] *)
     Thread_safe.block_on_async_exn (fun () ->
       let t = T.create () in
@@ -217,7 +217,7 @@ TEST_MODULE = struct
       assert (T.num_unfinished_jobs t 0 = 0)
     )
 
-  TEST_UNIT =
+  let%test_unit _ =
     (* Test [mem] *)
     Thread_safe.block_on_async_exn (fun () ->
       let t = T.create () in
@@ -247,7 +247,7 @@ TEST_MODULE = struct
     )
   ;;
 
-  TEST_UNIT = (* enqueueing within a job doesn't lead to monitor nesting *)
+  let%test_unit _ = (* enqueueing within a job doesn't lead to monitor nesting *)
     Thread_safe.block_on_async_exn (fun () ->
       let t = T.create () in
       let rec loop n =
@@ -262,7 +262,7 @@ TEST_MODULE = struct
       loop 100)
   ;;
 
-  TEST_UNIT = (* [flushed] is determined after all current jobs are finished *)
+  let%test_unit _ = (* [flushed] is determined after all current jobs are finished *)
     Thread_safe.block_on_async_exn (fun () ->
       let t = T.create () in
       let phase1_finished = Ivar.create () in
@@ -297,4 +297,4 @@ TEST_MODULE = struct
       done;
     )
   ;;
-end
+end)

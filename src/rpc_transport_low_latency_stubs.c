@@ -1,6 +1,6 @@
 #include <stdlib.h>
+#include <errno.h>
 #include <sys/uio.h>
-#include <sys/errno.h>
 
 #include <caml/mlvalues.h>
 #include <caml/bigarray.h>

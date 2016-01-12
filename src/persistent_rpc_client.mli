@@ -5,20 +5,26 @@
 open Core.Std
 open Import
 
-module Event : sig
-  type t =
-    | Attempting_to_connect
-    | Obtained_address      of Host_and_port.t
-    | Failed_to_connect     of Error.t
-    | Connected
-    | Disconnected
-  with sexp
-end
-
 module type S = sig
   type t
-  type conn (* an rpc connection, perhaps embellished with additional information
-               upon connection *)
+
+  (* The address of a server to which one can connect.  E.g. [Host_and_port.t] might be a
+     reasonable choice (or perhaps [Rpc_discovery_lib.Std.Server_id.t]). *)
+  type address
+
+  (* An rpc connection, perhaps embellished with additional information upon
+     connection. *)
+  type conn
+
+  module Event : sig
+    type t =
+      | Attempting_to_connect
+      | Obtained_address      of address
+      | Failed_to_connect     of Error.t
+      | Connected             of Rpc.Connection.t sexp_opaque
+      | Disconnected
+    [@@deriving sexp_of]
+  end
 
   (** [create ~server_name ~log get_address] returns a persistent rpc connection to a
       server whose host and port are obtained via [get_address] every time we try to
@@ -40,8 +46,8 @@ module type S = sig
     :  server_name : string
     -> ?log        : Log.t
     -> ?on_event   : (Event.t -> unit)
-    -> connect     : (Host_and_port.t -> conn Or_error.t Deferred.t)
-    -> (unit -> Host_and_port.t Or_error.t Deferred.t)
+    -> connect     : (address -> conn Or_error.t Deferred.t)
+    -> (unit -> address Or_error.t Deferred.t)
     -> t
 
   (** [connected] returns the first available rpc connection from the time it is called.
@@ -56,14 +62,20 @@ module type S = sig
       After the deferred it returns becomes determined, the last connection has been
       closed and no others will be attempted.
 
+      [is_closed t] returns true if [close] has ever been called, even if the returned
+      deferred has not yet been fulfilled.
+
       [close_finished t] becomes determined at the same time as the result of the first
       call to [close].  [close_finished] differs from [close] in that it does not have the
       side effect of initiating a close. *)
   val close : t -> unit Deferred.t
+  val is_closed      : t -> bool
   val close_finished : t -> unit Deferred.t
 end
 
-include S with type conn = Rpc.Connection.t
+include S
+  with type conn    = Rpc.Connection.t
+   and type address = Host_and_port.t
 
 (** [create] is like the [create] from [S], but slightly more convenient for constructing
     unembellished rpc connections. *)
@@ -80,11 +92,20 @@ val create
   -> (unit -> Host_and_port.t Or_error.t Deferred.t)
   -> t
 
-module Versioned : S with type conn = Versioned_rpc.Connection_with_menu.t
+module Versioned : S with type conn    = Versioned_rpc.Connection_with_menu.t
+                      and type address = Host_and_port.t
 
 module type T = sig
+  module Address : sig
+    type t [@@deriving sexp_of]
+
+    val equal : t -> t -> bool
+  end
+
   type t
   val rpc_connection : t -> Rpc.Connection.t
 end
 
-module Make (Conn : T) : S with type conn = Conn.t
+module Make (Conn : T)
+  : S with type conn    = Conn.t
+       and type address = Conn.Address.t

@@ -9,7 +9,7 @@ let create ?message ?close_on_exec ?unlink_on_exit path =
 let create_exn ?message ?close_on_exec ?unlink_on_exit path =
   create ?message ?close_on_exec ?unlink_on_exit path
   >>| fun b ->
-  if not b then failwiths "Lock_file.create" path <:sexp_of< string >>
+  if not b then failwiths "Lock_file.create" path [%sexp_of: string]
 ;;
 
 let repeat_with_abort ~abort ~f =
@@ -29,7 +29,7 @@ let repeat_with_abort ~abort ~f =
 let fail_on_abort path = function
   | `Ok -> ()
   | `Aborted ->
-    failwiths "Lock_file timed out waiting for existing lock" path <:sexp_of< string >>
+    failwiths "Lock_file timed out waiting for existing lock" path [%sexp_of: string]
 ;;
 
 let waiting_create

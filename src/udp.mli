@@ -31,15 +31,12 @@ type write_buffer = (read_write, Iobuf.seek) Iobuf.t
     in the future. *)
 val default_capacity : int
 
-(** A typical receive loop calls [before] before calling its callback to prepare a packet
-    buffer for reading and [after] afterwards to prepare for writing (for the next
-    iteration).
+(** A typical receive loop implicitly calls [Iobuf.flip_lo] before calling its callback to
+    prepare a packet buffer for reading by the callback and [Iobuf.reset] afterward to
+    prepare for the next iteration.
 
-    One can specify [~before:ignore] or [~after:ignore] to disable the default action, as
-    when doing buffer management in the callback.  One can also specify an action, such as
-    [~after:Iobuf.compact] for use with [read_loop] on a connection-oriented socket or
-    file.  It's often convenient to use the same interface for UDP, TCP, and file variants
-    of the same protocol.
+    It's often convenient to use the same interface for UDP, TCP, and file variants of the
+    same protocol.
 
     [stop] terminates a typical loop as soon as possible, when it becomes determined.
 
@@ -50,20 +47,16 @@ module Config : sig
   type t =
     { capacity  : int
     ; init      : write_buffer
-    ; before    : write_buffer -> unit
-    ; after     : write_buffer -> unit
     ; stop      : unit Deferred.t
     ; max_ready : int
     }
-  with fields
+  [@@deriving fields]
 
   val create
-    :  ?capacity  : int                     (** default is [default_capacity] *)
-    -> ?init      : write_buffer            (** default is [Iobuf.create ~len:capacity] *)
-    -> ?before    : (write_buffer -> unit)  (** default is [Iobuf.flip_lo] *)
-    -> ?after     : (write_buffer -> unit)  (** default is [Iobuf.reset] *)
-    -> ?stop      : (unit Deferred.t)       (** default is [Deferred.never] *)
-    -> ?max_ready : int                     (** default is [12] *)
+    :  ?capacity  : int                 (** default is [default_capacity] *)
+    -> ?init      : write_buffer        (** default is [Iobuf.create ~len:capacity] *)
+    -> ?stop      : (unit Deferred.t)   (** default is [Deferred.never] *)
+    -> ?max_ready : int                 (** default is [12] *)
     -> unit
     -> t
 end
@@ -87,6 +80,20 @@ val sendto_sync
       -> Unix.Syscall_result.Unit.t
      ) Or_error.t
 
+(** [send_sync sock buf] has identical semantics to [sendto_sync], but is intended for
+    connected UDP sockets (and therefore does not require a "to" address).
+
+    See also
+    {!Iobuf.send_nonblocking_no_sigpipe} and
+    {!Bigstring.send_nonblocking_no_sigpipe}.
+
+    @raise [Failure] on internal errors but return [Unix.error] via
+    [Unix.Syscall_result.Unit.t] rather than raising [Unix_error]. *)
+val send_sync
+  :  unit
+  -> (Fd.t -> ([> read ], Iobuf.seek) Iobuf.t -> Unix.Syscall_result.Unit.t) Or_error.t
+
+
 (** [sendto sock buf addr] retries if [sock] is not ready to write.
 
     @raise [Unix_error] in the case of Unix output errors and [Failure] on internal
@@ -98,6 +105,18 @@ val sendto
       -> Socket.Address.Inet.t
       -> unit Deferred.t
      ) Or_error.t
+
+(** [send sock buf] retries if [sock] is not ready to write.
+
+    @raise [Unix_error] in the case of Unix output errors and [Failure] on internal
+    errors. *)
+val send
+  :  unit
+  -> (Fd.t
+      -> ([> read ], Iobuf.seek) Iobuf.t
+      -> unit Deferred.t
+     ) Or_error.t
+
 
 (** [bind address] creates a socket bound to address, and, if [address] is a
     multicast address, joins the multicast group. *)
@@ -137,40 +156,17 @@ val read_loop_with_buffer_replacement
   -> write_buffer Deferred.t
 
 (** [recvmmsg_loop ~socket callback] iteratively receives up to [max_count] packets at a
-    time on [socket] and passes them to [callback].  Each packet is up to [capacity]
-    bytes.  If [create_srcs], collect from-addresses there.
+    time on [socket] and passes them to [callback].  Each packet is up to [Iobuf.capacity]
+    bytes.
 
-    [callback ?srcs bufs ~count] processes [count] packets synchronously.  [callback] may
-    replace packet buffers in [bufs] and take ownership of the corresponding originals.
-    [srcs] contains the corresponding source addresses of the packets in [bufs], if
-    requested, and will similarly be reused when [callback] returns.
+    [callback bufs ~count] processes [count] packets synchronously.
 
     [Config.init config] is used as a prototype for [bufs] and as one of the elements. *)
 val recvmmsg_loop
-  : (?config           : Config.t              (** default is [Config.create ()] *)
-     -> ?create_srcs   : bool                  (** default is [false] *)
+  : (?config           : Config.t       (** default is [Config.create ()] *)
      -> ?max_count     : int
-     -> ?bufs          : (write_buffer array)  (** supplies the packet buffers explicitly *)
-     -> ?on_wouldblock : (unit -> unit)        (** callback if recvmmsg would block *)
+     -> ?on_wouldblock : (unit -> unit) (** callback if [recvmmsg] would block *)
      -> Fd.t
-     -> (?srcs : (Core.Std.Unix.sockaddr array)
-         -> write_buffer array
-         -> count : int
-         -> unit)                       (** may modify [bufs] or [srcs] *)
-     -> unit Deferred.t)
-      Or_error.t
-
-(** [recvmmsg_no_sources_loop ~socket callback] is identical to [recvmmsg_loop], but can
-    be used when sources are ignored to avoid some overhead incurred by optional
-    arguments. *)
-val recvmmsg_no_sources_loop
-  : (?config           : Config.t              (** default is [Config.create ()] *)
-     -> Fd.t
-     -> ?max_count     : int
-     -> ?bufs          : (write_buffer array)  (** supplies the packet buffers explicitly *)
-     -> ?on_wouldblock : (unit -> unit)        (** called if [recvmmsg] would block *)
-     -> (write_buffer array
-         -> count : int
-         -> unit)  (** may modify [bufs] *)
+     -> (write_buffer array -> count : int -> unit)
      -> unit Deferred.t)
       Or_error.t

@@ -14,33 +14,7 @@ module Rpc             = Rpc_kernel.Rpc
 module State_rpc       = Rpc_kernel.State_rpc
 
 module Connection = struct
-  module Heartbeat_config = struct
-    open Core.Stable
-    module Stable = struct
-      module V1 = struct
-        type t =
-          { timeout    : Span.V2.t
-          ; send_every : Span.V2.t
-          } with sexp, bin_io
-      end
-      module V2 = struct
-        type t = Rpc_kernel.Connection.Heartbeat_config.t =
-          { timeout    : Time_ns.Span.V1.t
-          ; send_every : Time_ns.Span.V1.t
-          } with sexp, bin_io
-      end
-    end
-    include Stable.V1
-
-    open Core.Std
-    let v2_of_v1 (t : Stable.V1.t) : Stable.V2.t =
-      { timeout    = Time_ns.Span.of_span t.timeout
-      ; send_every = Time_ns.Span.of_span t.send_every
-      }
-  end
-
-  include (Rpc_kernel.Connection : module type of struct include Rpc_kernel.Connection end
-           with module Heartbeat_config := Rpc_kernel.Connection.Heartbeat_config)
+  include Rpc_kernel.Connection
 
   (* unfortunately, copied from reader0.ml *)
   let default_max_message_size = 100 * 1024 * 1024
@@ -57,7 +31,7 @@ module Connection = struct
       ?implementations
       ~connection_state
       ?handshake_timeout:(Option.map handshake_timeout ~f:Time_ns.Span.of_span)
-      ?heartbeat_config:(Option.map heartbeat_config ~f:Heartbeat_config.v2_of_v1)
+      ?heartbeat_config
       ?description
       (Transport.of_reader_writer reader writer ~max_message_size)
   ;;
@@ -75,7 +49,7 @@ module Connection = struct
     with_close
       ?implementations
       ?handshake_timeout:(Option.map handshake_timeout ~f:Time_ns.Span.of_span)
-      ?heartbeat_config:(Option.map heartbeat_config ~f:Heartbeat_config.v2_of_v1)
+      ?heartbeat_config
       ~connection_state
       (Transport.of_reader_writer reader writer ~max_message_size)
       ~dispatch_queries
@@ -93,7 +67,7 @@ module Connection = struct
     =
     server_with_close
       ?handshake_timeout:(Option.map handshake_timeout ~f:Time_ns.Span.of_span)
-      ?heartbeat_config:(Option.map heartbeat_config ~f:Heartbeat_config.v2_of_v1)
+      ?heartbeat_config
       (Transport.of_reader_writer reader writer ~max_message_size)
       ~implementations
       ~connection_state
@@ -121,7 +95,7 @@ module Connection = struct
         ~initial_connection_state
         ~where_to_listen
         ?max_connections
-        ?max_pending_connections
+        ?backlog
         ?(max_message_size=default_max_message_size)
         ?(make_transport=default_transport_maker)
         ?handshake_timeout
@@ -129,7 +103,7 @@ module Connection = struct
         ?(auth = (fun _ -> true))
         ?(on_handshake_error = `Ignore)
         () =
-    Tcp.Server.create_sock ?max_connections ?max_pending_connections where_to_listen
+    Tcp.Server.create_sock ?max_connections ?backlog where_to_listen
       ~on_handler_error:`Ignore
       (fun inet socket ->
          if not (auth inet) then
@@ -145,8 +119,7 @@ module Connection = struct
            collect_errors transport ~f:(fun () ->
              Rpc_kernel.Connection.create
                ?handshake_timeout:(Option.map handshake_timeout ~f:Time_ns.Span.of_span)
-               ?heartbeat_config:(Option.map heartbeat_config
-                                    ~f:Heartbeat_config.v2_of_v1)
+               ?heartbeat_config
                ~implementations ~description ~connection_state transport
              >>= function
              | Ok t -> close_finished t
@@ -197,9 +170,9 @@ module Connection = struct
     let description =
       match description with
       | None ->
-        Info.create "Client connected via TCP" (host, port) <:sexp_of< string * int >>
+        Info.create "Client connected via TCP" (host, port) [%sexp_of: string * int]
       | Some desc ->
-        Info.tag_arg desc "via TCP" (host, port) <:sexp_of< string * int >>
+        Info.tag_arg desc "via TCP" (host, port) [%sexp_of: string * int]
     in
     let handshake_timeout = Time_ns.diff finish_handshake_by (Time_ns.now ()) in
     let transport = make_transport (Socket.fd sock) ~max_message_size in
@@ -210,12 +183,10 @@ module Connection = struct
           Client_implementations.null ()
         in
         Rpc_kernel.Connection.create transport ~handshake_timeout
-          ?heartbeat_config:(Option.map heartbeat_config ~f:Heartbeat_config.v2_of_v1)
-          ~implementations ~description ~connection_state
+          ?heartbeat_config ~implementations ~description ~connection_state
       | Some { Client_implementations. connection_state; implementations } ->
         Rpc_kernel.Connection.create transport ~handshake_timeout
-          ?heartbeat_config:(Option.map heartbeat_config ~f:Heartbeat_config.v2_of_v1)
-          ~implementations ~description ~connection_state
+          ?heartbeat_config ~implementations ~description ~connection_state
     end >>= function
     | Ok _ as ok -> return ok
     | Error _ as error ->
@@ -246,7 +217,7 @@ module Connection = struct
     result
 end
 
-TEST_UNIT "Open dispatches see connection closed error" =
+let%test_unit "Open dispatches see connection closed error" =
   Thread_safe.block_on_async_exn (fun () ->
     let bin_t = Bin_prot.Type_class.bin_unit in
     let rpc =
@@ -272,15 +243,18 @@ TEST_UNIT "Open dispatches see connection closed error" =
       >>| Result.ok_exn
       >>= fun connection ->
       let res = Rpc.dispatch rpc connection () in
-      don't_wait_for (
-        Clock.after (sec 0.1)
-        >>= fun () -> Connection.close connection);
-      Clock.with_timeout (sec 0.2) res
+      don't_wait_for (Connection.close connection);
+      res
       >>| function
-      | `Timeout -> failwith "Dispatch should have gotten an error within 0.2s"
-      | `Result (Ok ()) -> failwith "Dispatch should have failed"
-      | `Result (Error err) ->
-        assert ("(rpc Connection_closed)" = Error.to_string_hum err);
+      | Ok ()     -> failwith "Dispatch should have failed"
+      | Error err ->
+        [%test_eq:string]
+          (sprintf
+             "((rpc_error Connection_closed)\
+              \n (connection_description (\"Client connected via TCP\" (localhost %d)))\
+              \n (rpc_tag __TEST_Async_rpc.Rpc) (rpc_version 1))"
+             port)
+          (Error.to_string_hum err)
     in
     serve ()
     >>= fun server ->

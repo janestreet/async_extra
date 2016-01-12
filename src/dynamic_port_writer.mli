@@ -57,7 +57,7 @@
 open Core.Std
 open Import
 
-type t with bin_io, sexp
+type t [@@deriving bin_io, sexp]
 
 include Stringable with type t := t
 

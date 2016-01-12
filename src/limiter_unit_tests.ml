@@ -6,13 +6,13 @@ module Limiter = Async_limiter
 let async_unit_test = Thread_safe.block_on_async_exn
 let stabilize = Async_kernel.Scheduler.run_cycles_until_no_jobs_remain
 
-TEST_MODULE = (struct
+let%test_module _ = (module (struct
   open Limiter
 
   module Outcome = Outcome
 
-  type t = Limiter.t with sexp_of
-  type limiter = t with sexp_of
+  type t = Limiter.t [@@deriving sexp_of]
+  type limiter = t [@@deriving sexp_of]
 
   module type Common = Common
 
@@ -25,7 +25,7 @@ TEST_MODULE = (struct
   module Token_bucket = struct
     open Token_bucket
 
-    type t = Token_bucket.t
+    type t = Token_bucket.t [@@deriving sexp_of]
     type _ u = t
 
     let create_exn         = create_exn
@@ -35,7 +35,7 @@ TEST_MODULE = (struct
     let is_dead            = is_dead
     let to_limiter         = to_limiter
 
-    TEST_UNIT "rate limit is honored" =
+    let%test_unit "rate limit is honored" =
       async_unit_test (fun () ->
         let rate_per_second = 1000. in
         let t =
@@ -47,7 +47,7 @@ TEST_MODULE = (struct
         let min_time           = Time.add start_time (sec 0.5) in
         let jobs_remaining     = ref (Float.to_int job_count) in
         let finished           = Ivar.create () in
-        for _i = 1 to !jobs_remaining do
+        for _ = 1 to !jobs_remaining do
           enqueue_exn t 1. (fun () -> fill_if_zero jobs_remaining finished) ();
         done;
         Ivar.read finished
@@ -55,7 +55,7 @@ TEST_MODULE = (struct
         assert (Time.(>=) (Scheduler.cycle_start ()) min_time))
     ;;
 
-    TEST_UNIT "burst rate is honored" =
+    let%test_unit "burst rate is honored" =
       async_unit_test (fun () ->
         let rate_per_second = 1000. in
         let burst_size = 100 in
@@ -72,7 +72,7 @@ TEST_MODULE = (struct
         let hit_burst_rate    = ref false in
         let current_job_count = ref 0 in
         let finished          = Ivar.create () in
-        for _i = 1 to !job_count do
+        for _ = 1 to !job_count do
           enqueue' t 1. (fun () ->
             incr current_job_count;
             if !current_job_count = burst_size
@@ -88,10 +88,10 @@ TEST_MODULE = (struct
         done;
         Ivar.read finished
         >>| fun () ->
-        assert !hit_burst_rate);
+        assert !hit_burst_rate)
     ;;
 
-    TEST_UNIT "allow_immediate_run is honored" =
+    let%test_unit "allow_immediate_run is honored" =
       let t =
         create_exn ~burst_size:1. ~sustained_rate_per_sec:(1. /. 100.)
           ~continue_on_error:false ~initial_burst_size:1. ()
@@ -107,73 +107,104 @@ TEST_MODULE = (struct
   module Throttle = struct
     open Throttle
 
-    type t = Throttle.t
+    type t = Throttle.t [@@deriving sexp_of]
     type _ u = t
 
     let create_exn                     = create_exn
     let enqueue_exn                    = enqueue_exn
     let enqueue'                       = enqueue'
     let concurrent_jobs_target         = concurrent_jobs_target
-    let set_concurrent_jobs_target_exn = set_concurrent_jobs_target_exn
     let num_jobs_running               = num_jobs_running
     let num_jobs_waiting_to_start      = num_jobs_waiting_to_start
     let kill                           = kill
     let is_dead                        = is_dead
     let to_limiter                     = to_limiter
 
-    let assert_concurrent_jobs_target_honored (t : t) concurrent_jobs_target =
+    let assert_concurrent_jobs_target_honored (t : t)
+          ?jobs_finished ?total_jobs max_concurrent_jobs =
       let max_running_concurrently = ref 0 in
       let num_running              = ref 0 in
-      let job_count                = ref (concurrent_jobs_target * 2) in
+      let job_count                =
+        ref (Option.value total_jobs ~default:(max_concurrent_jobs * 3))
+      in
       let finished                 = Ivar.create () in
-      for _i = 1 to !job_count do
+      for _ = 1 to !job_count do
         enqueue' t (fun () ->
           incr num_running;
           max_running_concurrently := Int.max !max_running_concurrently !num_running;
-          if !num_running > concurrent_jobs_target
-          then failwithf  "number of running jobs (%i) is greater than \
-                           concurrent_jobs_target (%i)\n%!"
-                 !num_running concurrent_jobs_target ();
           Deferred.unit
           >>| fun () ->
           decr num_running) ()
-        >>> (function
-          | Ok ()    -> fill_if_zero job_count finished
-          | Aborted  -> assert false
-          | Raised e -> raise e)
+        >>> function
+        | Ok ()    ->
+          Option.iter jobs_finished ~f:incr;
+          fill_if_zero job_count finished
+        | Aborted  -> assert false
+        | Raised e -> raise e
       done;
       Ivar.read finished
       >>| fun () ->
-      if !max_running_concurrently < concurrent_jobs_target
-      then failwithf "concurrent_jobs_target was set to %i, but we only ever ran %i at once"
-             concurrent_jobs_target !max_running_concurrently ()
+      if !max_running_concurrently <> max_concurrent_jobs then
+        failwithf "max number of running jobs (%i) is not the same as expected (%i)\n%!"
+          !max_running_concurrently max_concurrent_jobs ()
     ;;
 
-    TEST_UNIT "concurrent_jobs_target is honored" =
+    let%test_unit "concurrent_jobs_target is honored" =
       async_unit_test (fun () ->
         let concurrent_jobs_target = 100 in
         let t = create_exn ~concurrent_jobs_target ~continue_on_error:false () in
         assert_concurrent_jobs_target_honored t concurrent_jobs_target)
     ;;
 
-    TEST_UNIT "set_concurrent_jobs_target works" =
-      let target_settings = [ 5; 10; 15; 20; 5; 20; 15; 10 ] in
+    let%test_unit "burst_size is honored when smaller than concurrent_jobs_target" =
       async_unit_test (fun () ->
-        let t = create_exn ~concurrent_jobs_target:10 ~continue_on_error:false () in
-        Deferred.List.iter target_settings ~f:(fun concurrent_jobs_target ->
-          set_concurrent_jobs_target_exn t concurrent_jobs_target;
-          assert_concurrent_jobs_target_honored t concurrent_jobs_target))
+        let burst_size = 10 in
+        let t =
+          create_exn
+            ~concurrent_jobs_target:1_000_000
+            ~burst_size
+            ~sustained_rate_per_sec:1_000_000.
+            ~continue_on_error:false ()
+        in
+        Clock.after (sec 0.1) >>= fun () ->
+        assert_concurrent_jobs_target_honored t burst_size;
+      )
+    ;;
+
+    let%test_unit "burst_size is honored when bigger than concurrent_jobs_target" =
+      async_unit_test (fun () ->
+        let concurrent_jobs_target = 2 in
+        let burst_size = 10 in
+        let t =
+          create_exn
+            ~concurrent_jobs_target:2
+            ~burst_size
+            ~sustained_rate_per_sec:100.
+            ~continue_on_error:false ()
+        in
+        (* enough time to generate a burst *)
+        Clock.after (sec 0.15) >>= fun () ->
+        let jobs_finished = ref 0 in
+        let assert_job =
+          assert_concurrent_jobs_target_honored t concurrent_jobs_target
+            ~jobs_finished ~total_jobs:(burst_size * 2)
+        in
+        (* before next job could be moved from hopper to bucket *)
+        Clock.after (sec 0.000_1) >>= fun () ->
+        [%test_eq: int] ~message:"finished jobs in a burst" !jobs_finished burst_size;
+        assert_job
+      )
     ;;
 
     (* tests from the previous Throttle implementation *)
-    TEST =
+    let%test _ =
       try
         ignore (create_exn ~continue_on_error:false ~concurrent_jobs_target:0 ());
         false
       with _ -> true
     ;;
 
-    TEST_UNIT "enqueue does not start the job immediately" =
+    let%test_unit "enqueue does not start the job immediately" =
       let t = create_exn ~continue_on_error:false ~concurrent_jobs_target:1 () in
       let i = ref 0 in
       let (_ : unit Outcome.t Deferred.t) = enqueue' t (fun () -> incr i; Deferred.unit) () in
@@ -182,7 +213,7 @@ TEST_MODULE = (struct
       assert (!i = 1)
     ;;
 
-    TEST_UNIT "jobs are started in the order they are enqueued" =
+    let%test_unit "jobs are started in the order they are enqueued" =
       async_unit_test (fun () ->
         let t = create_exn ~continue_on_error:false ~concurrent_jobs_target:2 () in
         assert (concurrent_jobs_target t = 2);
@@ -197,10 +228,10 @@ TEST_MODULE = (struct
         done;
         Ivar.read finished
         >>| fun () ->
-        assert (!r = List.rev (List.init 100 ~f:Fn.id)));
+        assert (!r = List.rev (List.init 100 ~f:Fn.id)))
     ;;
 
-    TEST_UNIT "jobs waiting to start and jobs running are sane" =
+    let%test_unit "jobs waiting to start and jobs running are sane" =
       let t = create_exn ~continue_on_error:false ~concurrent_jobs_target:2 () in
       assert (num_jobs_waiting_to_start t = 0);
       let add_job () =
@@ -229,30 +260,30 @@ TEST_MODULE = (struct
       Ivar.fill i1 ();
       stabilize ();
       assert (num_jobs_waiting_to_start t = 0);
-      assert (num_jobs_running t = 2);
+      assert (num_jobs_running t = 2)
     ;;
 
-    TEST_UNIT "jobs enqueued in the same cycle as kill are aborted" =
+    let%test_unit "jobs enqueued in the same cycle as kill are aborted" =
       let t = create_exn ~continue_on_error:false ~concurrent_jobs_target:1 () in
       let r = ref false in
       let d = enqueue' t (fun () -> r := true; return ()) () in
       kill t;
       stabilize ();
       assert (Deferred.peek d = Some Aborted);
-      assert (not !r);
+      assert (not !r)
     ;;
 
-    TEST_UNIT "jobs enqueued after kill are aborted" =
+    let%test_unit "jobs enqueued after kill are aborted" =
       let t = create_exn ~continue_on_error:false ~concurrent_jobs_target:1 () in
       kill t;
       let r = ref true in
       let d = enqueue' t (fun () -> r := false; return ()) () in
       stabilize ();
       assert (Deferred.peek d = Some Aborted);
-      assert !r;
+      assert !r
     ;;
 
-    TEST_UNIT "enqueueing withing a job doesn't lead to monitor nesting" =
+    let%test_unit "enqueueing withing a job doesn't lead to monitor nesting" =
       let seq = create_exn ~concurrent_jobs_target:1 ~continue_on_error:false () in
       let rec loop n =
         if n = 0
@@ -266,14 +297,14 @@ TEST_MODULE = (struct
       in
       let d = loop 100 in
       stabilize ();
-      assert (Deferred.peek d = Some ());
+      assert (Deferred.peek d = Some ())
     ;;
   end
 
   module Resource_throttle = struct
     open Resource_throttle
 
-    type 'a t = 'a Resource_throttle.t
+    type 'a t = 'a Resource_throttle.t [@@deriving sexp_of]
 
     let create_exn          = create_exn
     let enqueue_exn         = enqueue_exn
@@ -297,7 +328,7 @@ TEST_MODULE = (struct
       let create () = ref 0
     end
 
-    TEST_UNIT "resources are never double used" =
+    let%test_unit "resources are never double used" =
       async_unit_test (fun () ->
         let resources = [ Resource.create (); Resource.create (); Resource.create () ] in
         let t =
@@ -308,7 +339,7 @@ TEST_MODULE = (struct
         in
         let job_count = ref 100 in
         let finished  = Ivar.create () in
-        for _i = 1 to !job_count do
+        for _ = 1 to !job_count do
           enqueue' t
             (fun r ->
                Resource.use r;
@@ -321,11 +352,11 @@ TEST_MODULE = (struct
         done;
         Ivar.read finished
         >>| fun () ->
-        List.iter resources ~f:(fun r -> assert (!r = 0)));
+        List.iter resources ~f:(fun r -> assert (!r = 0)))
   end
 
   module Sequencer = struct
-    type t = Sequencer.t
+    type t = Sequencer.t [@@deriving sexp_of]
     type _ u = t
     open Sequencer
 
@@ -338,14 +369,14 @@ TEST_MODULE = (struct
 
   end
 
-  TEST_UNIT "sequencers run only one job at a time" =
+  let%test_unit "sequencers run only one job at a time" =
     async_unit_test (fun () ->
       let t             = Sequencer.create ~continue_on_error:true () in
       let num_jobs_run  = ref 0 in
       let expected_jobs = 100 in
       let job_count     = ref expected_jobs in
       let finished      = Ivar.create () in
-      for _i = 1 to !job_count do
+      for _ = 1 to !job_count do
         Sequencer.enqueue' t (fun () -> incr num_jobs_run; assert false) ()
         >>> (function
           | Ok _ | Aborted -> assert false
@@ -353,10 +384,10 @@ TEST_MODULE = (struct
       done;
       Ivar.read finished
       >>| fun () ->
-      assert (!num_jobs_run = expected_jobs));
+      assert (!num_jobs_run = expected_jobs))
   ;;
 
-  TEST_UNIT "jobs can kill the throttle" =
+  let%test_unit "jobs can kill the throttle" =
     async_unit_test (fun () ->
       let t = Sequencer.create () in
       let num_ok = ref 0 in
@@ -364,7 +395,7 @@ TEST_MODULE = (struct
       let jobs_remaining = ref 100 in
       let all_jobs_returned = Ivar.create () in
       let num_jobs_run = ref 0 in
-      for _i = 1 to !jobs_remaining do
+      for _ = 1 to !jobs_remaining do
         Sequencer.enqueue' t (fun () ->
           incr num_jobs_run;
           if !num_jobs_run = 1
@@ -382,17 +413,17 @@ TEST_MODULE = (struct
       Ivar.read all_jobs_returned
       >>| fun () ->
       assert (!num_ok = 1);
-      assert (!num_aborted = 99));
+      assert (!num_aborted = 99))
   ;;
 
   module Expert = struct
     open Expert
     let cost_of_jobs_waiting_to_start = cost_of_jobs_waiting_to_start
-    let to_core_limiter               = to_core_limiter
+    let to_jane_limiter               = to_jane_limiter
     let is_dead                       = is_dead
     let kill                          = kill
   end
 end
 (* This signature constraint is here to remind us to add a unit test whenever the
-   interface to [Bus] changes. *)
-: module type of Limiter)
+   interface to [Limiter] changes. *)
+: module type of Limiter))

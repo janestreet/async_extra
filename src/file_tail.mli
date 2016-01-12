@@ -28,7 +28,7 @@ module Error : sig
         fails. *)
     | Stat_failed   of exn
     (** [Stat_failed] occurs if [stat] fails. *)
-  with sexp_of
+  [@@deriving sexp_of]
 
   val to_string_hum : t -> string
 end
@@ -53,7 +53,7 @@ module Warning : sig
     (** [No_longer_delayed_due_to_null_reads] occurs after a nonempty sequence of
         [Delayed_due_to_null_reads_for] warnings, once the file tail gets a read that does
         not contain null reads. *)
-  with sexp_of
+  [@@deriving sexp_of]
 
   val to_string_hum : t -> string
 end
@@ -68,7 +68,7 @@ module Update : sig
         The [string] is the file name. *)
     | Error   of string * Error.t
     (** Errors cause the stream to be closed.  The [string] is the file name. *)
-  with sexp_of
+  [@@deriving sexp_of]
 
   val to_string_hum : t -> string
 end

@@ -18,7 +18,7 @@ module Make (Arg : Arg) () = struct
       | Disconnect    of Client_id.t * Sexp.t
       | Denied_access of string
       | Data          of Client_id.t * Client_message.t
-    with sexp
+    [@@deriving sexp]
 
   end
 
@@ -50,10 +50,10 @@ module Make (Arg : Arg) () = struct
   let try_with = Monitor.try_with
   let ignore_errors f = don't_wait_for (try_with f >>| ignore)
 
-  exception Exception_while_reading of exn with sexp
+  exception Exception_while_reading of exn [@@deriving sexp]
 
-  exception Eof_from_client with sexp
-  exception Pipe_closed with sexp
+  exception Eof_from_client [@@deriving sexp]
+  exception Pipe_closed [@@deriving sexp]
 
   let handle_client t ~close ~transport ~id ~stop =
     let rec loop () =
@@ -85,9 +85,9 @@ module Make (Arg : Arg) () = struct
     in
     loop ()
 
-  exception Connection_closed of exn with sexp
+  exception Connection_closed of exn [@@deriving sexp]
 
-  exception Exception_in_writer of exn with sexp
+  exception Exception_in_writer of exn [@@deriving sexp]
 
   let listener t =
     let rec loop () =
@@ -174,7 +174,7 @@ module Make (Arg : Arg) () = struct
     end
   ;;
 
-  let create ?max_pending_connections
+  let create ?backlog
         ?(verbose = false)
         ?(log_disconnects = true)
         ?buffer_age_limit ~port ~auth () =
@@ -186,7 +186,7 @@ module Make (Arg : Arg) () = struct
       Unix.close (Socket.fd s) >>| fun () -> raise e
     | Ok s ->
       let server_port = Socket.Address.Inet.port (Socket.getsockname s) in
-      let s           = Socket.listen s ?max_pending_connections in
+      let s           = Socket.listen s ?backlog in
       let result_reader, result_writer = Pipe.create () in
       let t =
         { verbose
@@ -229,9 +229,9 @@ module Make (Arg : Arg) () = struct
   let has_client_id t id =
     Hashtbl.mem t.clients id
 
-  exception Missing_client_id of Client_id.t with sexp
+  exception Missing_client_id of Client_id.t [@@deriving sexp]
 
-  exception Exception_while_writing of exn with sexp
+  exception Exception_while_writing of exn [@@deriving sexp]
 
   let send t id m =
     match Hashtbl.find t.clients id with
@@ -258,7 +258,7 @@ module Make (Arg : Arg) () = struct
       ~f:(fun client -> Transport.write client.transport m)
   ;;
 
-  exception Closed_by_server with sexp
+  exception Closed_by_server [@@deriving sexp]
 
   let close t id =
     match Hashtbl.find t.clients id with
@@ -267,9 +267,7 @@ module Make (Arg : Arg) () = struct
   ;;
 
   let close_server t =
-    Hashtbl.iter t.clients ~f:(fun ~key:_ ~data:client ->
-      client.close Closed_by_server
-    );
+    List.iter (Hashtbl.data t.clients) ~f:(fun client -> client.close Closed_by_server);
     Unix.close (Socket.fd t.socket)
   ;;
 

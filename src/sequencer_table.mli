@@ -41,7 +41,7 @@ module Make (Key : Hashable) : sig
       key gets access to.  Jobs maybe have an associated [job_tag] which is provided
       purely to assist debugging, as the tag is included in the sexp serialization of
       [t]. *)
-  type ('state, 'job_tag) t with sexp_of
+  type ('state, 'job_tag) t [@@deriving sexp_of]
 
   val create : unit -> _ t
 

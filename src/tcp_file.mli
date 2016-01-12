@@ -93,7 +93,7 @@ module Client : sig
     type t =
       | File_not_found of string
       | Unknown        of string
-    with sexp
+    [@@deriving sexp]
 
     val to_string : t -> string
   end
@@ -102,7 +102,7 @@ module Client : sig
     type t =
       | String    of string
       | Bigstring of Bigstring.t
-    with bin_io
+    [@@deriving bin_io]
 
     val length        : t -> int
     (** None is returned in cases where the message cannot fit into a string (original

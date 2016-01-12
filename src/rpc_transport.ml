@@ -8,22 +8,24 @@ module Kernel_transport = Rpc_kernel.Transport
 
 module Header         = Kernel_transport.Header
 module Handler_result = Kernel_transport.Handler_result
+module Send_result    = Kernel_transport.Send_result
 
 module With_limit : sig
   type 'a t = private
     { t                : 'a
     ; max_message_size : int
     }
-  with sexp_of
+  [@@deriving sexp_of]
 
   val create : 'a -> max_message_size:int -> 'a t
+  val message_size_ok    : _ t -> payload_len:int -> bool
   val check_message_size : _ t -> payload_len:int -> unit
 end = struct
   type 'a t =
     { t                : 'a
     ; max_message_size : int
     }
-  with sexp_of
+  [@@deriving sexp_of]
 
   let create t ~max_message_size =
     if max_message_size < 0 then
@@ -32,18 +34,22 @@ end = struct
     { t; max_message_size }
   ;;
 
+  let message_size_ok t ~payload_len =
+    payload_len >= 0 && payload_len <= t.max_message_size
+  ;;
+
   let check_message_size t ~payload_len =
-    if payload_len < 0 || payload_len > t.max_message_size then
+    if not (message_size_ok t ~payload_len) then
       failwiths "Rpc_transport: message too small or too big"
         (`Message_size payload_len, `Max_message_size t.max_message_size)
-        <:sexp_of< [ `Message_size of int ] * [ `Max_message_size of int ] >>
+        [%sexp_of: [ `Message_size of int ] * [ `Max_message_size of int ]]
   ;;
 end
 
 module Unix_reader = struct
   open With_limit
 
-  type t = Reader.t With_limit.t with sexp_of
+  type t = Reader.t With_limit.t [@@deriving sexp_of]
 
   let create ~reader ~max_message_size =
     With_limit.create reader ~max_message_size
@@ -106,7 +112,7 @@ end
 module Unix_writer = struct
   open With_limit
 
-  type t = Writer.t With_limit.t with sexp_of
+  type t = Writer.t With_limit.t [@@deriving sexp_of]
 
   let create ~writer ~max_message_size =
     (* Prevent exceptions in the writer when the other side disconnects. Note that "stale
@@ -133,31 +139,43 @@ module Unix_writer = struct
 
   let send_bin_prot_internal
         t (bin_writer : _ Bin_prot.Type_class.writer) x ~followup_len
-    =
-    if Writer.is_closed t.t then
-      failwith "Rpc_transport.Unix_writer got closed writer";
-    let data_len = bin_writer.size x in
-    let payload_len = data_len + followup_len in
-    check_message_size t ~payload_len;
-    Writer.write_bin_prot_no_size_header t.t ~size:Header.length
-      bin_write_payload_length payload_len;
-    Writer.write_bin_prot_no_size_header t.t ~size:data_len
-      bin_writer.write x;
+    : _ Send_result.t =
+    if not (Writer.is_closed t.t) then begin
+      let data_len = bin_writer.size x in
+      let payload_len = data_len + followup_len in
+      if message_size_ok t ~payload_len then begin
+        Writer.write_bin_prot_no_size_header t.t ~size:Header.length
+          bin_write_payload_length payload_len;
+        Writer.write_bin_prot_no_size_header t.t ~size:data_len
+          bin_writer.write x;
+        Sent ()
+      end else
+        Message_too_big { size             = payload_len
+                        ; max_message_size = t.max_message_size }
+    end else
+      Closed
   ;;
 
   let send_bin_prot t bin_writer x =
     send_bin_prot_internal t bin_writer x ~followup_len:0
   ;;
 
-  let send_bin_prot_and_bigstring t bin_writer x ~buf ~pos ~len =
-    send_bin_prot_internal t bin_writer x ~followup_len:len;
-    Writer.write_bigstring t.t buf ~pos ~len;
+  let send_bin_prot_and_bigstring t bin_writer x ~buf ~pos ~len : _ Send_result.t =
+    match send_bin_prot_internal t bin_writer x ~followup_len:len with
+    | Sent () ->
+      Writer.write_bigstring t.t buf ~pos ~len;
+      Sent ()
+    | error ->
+      error
   ;;
 
-  let send_bin_prot_and_bigstring_non_copying t bin_writer x ~buf ~pos ~len =
-    send_bin_prot_internal t bin_writer x ~followup_len:len;
-    Writer.schedule_bigstring t.t buf ~pos ~len;
-    Writer.flushed t.t
+  let send_bin_prot_and_bigstring_non_copying t bin_writer x ~buf ~pos ~len
+    : _ Send_result.t =
+    match send_bin_prot_internal t bin_writer x ~followup_len:len with
+    | Sent () ->
+      Writer.schedule_bigstring t.t buf ~pos ~len;
+      Sent (Writer.flushed t.t)
+    | Closed | Message_too_big _ as r -> r
   ;;
 end
 
@@ -181,7 +199,7 @@ type t = Kernel_transport.t =
   { reader : Reader.t
   ; writer : Writer.t
   }
-with sexp_of
+[@@deriving sexp_of]
 
 let close = Kernel_transport.close
 

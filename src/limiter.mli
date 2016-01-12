@@ -18,11 +18,11 @@ module Outcome : sig
     | Ok of 'a
     | Aborted
     | Raised of exn
-  with sexp_of
+  [@@deriving sexp_of]
 end
 
-type t with sexp_of
-type limiter = t with sexp_of
+type t [@@deriving sexp_of]
+type limiter = t [@@deriving sexp_of]
 
 
 (** {5 Specialized limiters}
@@ -46,15 +46,16 @@ module type Common = sig
   val to_limiter : _ t -> limiter
 end
 
-(** Implements a basic token bucket based rate limiter. *)
 module Token_bucket : sig
-  type t
+  type t [@@deriving sexp_of]
 
   val create_exn
     :  burst_size:float
     -> sustained_rate_per_sec:float
-    -> continue_on_error:bool      (** If false, then the token bucket is [kill]ed if
-                                       there's an unhandled exception in any job *)
+    -> continue_on_error:bool (** If false, then the token bucket is [kill]ed if there's
+                                  an unhandled exception in any job *)
+    -> ?in_flight_limit:float (** default to infinite. This can be used for concurrency
+                                  control *)
     -> ?initial_burst_size:float (** Defaults to zero *)
     -> unit
     -> t
@@ -100,7 +101,7 @@ end
     mutable, however, and so may be violated temporarily if the value is reduced.
 *)
 module Throttle : sig
-  type t
+  type t [@@ deriving sexp_of]
 
   val create_exn
     :  concurrent_jobs_target:int
@@ -114,12 +115,6 @@ module Throttle : sig
   val num_jobs_waiting_to_start : t -> int
   val num_jobs_running          : t -> int
 
-  (** sets the target for the number of concurrent jobs going forward.  As workers
-      complete new tasks will only be started up to the new level set, which may be higher
-      or lower than the previous level.  Thus, after a call to this function,
-      [num_jobs_running] can be greater than [target_concurrent_jobs]. *)
-  val set_concurrent_jobs_target_exn : t -> int -> unit
-
   val enqueue_exn        : t -> ?allow_immediate_run:bool -> ('a -> unit) -> 'a -> unit
   val enqueue'           : t -> ('a -> 'b Deferred.t) -> 'a -> 'b Outcome.t Deferred.t
 
@@ -131,7 +126,7 @@ end
 (** A sequencer is a throttle that is specialized to only allow one job at a time and to,
     by default, not continue on error. *)
 module Sequencer : sig
-  type t
+  type t [@@deriving sexp_of]
 
   val create
     :  ?continue_on_error:bool (** default is [false] *)
@@ -153,7 +148,7 @@ end
     may be re-used many times in the lifetime of [t] but will never be used by more
     than one job at a time. *)
 module Resource_throttle : sig
-  type 'a t
+  type 'a t [@@deriving sexp_of]
 
   val create_exn
     :  resources:'a list
@@ -187,5 +182,5 @@ module Expert : sig
 
   (** returns the underlying limiter.  It is an error to do anything with the limiter that
       isn't a read-only operation. *)
-  val to_core_limiter  : t -> Core.Limiter.t
+  val to_jane_limiter  : t -> Core.Std.Limiter.t
 end

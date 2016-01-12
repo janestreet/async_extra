@@ -4,7 +4,7 @@ open Core.Std
 open Import
 
 module Config : sig
-  type t with sexp
+  type t [@@deriving sexp]
 
   (** - [max_message_size] is the maximum message size a reader/writer will accept to
       receive/send.

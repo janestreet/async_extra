@@ -3,7 +3,6 @@ open Import
 
 include Core.Std.Command
 
-
 let shutdown exit_code =
   don't_wait_for begin
     (* Although [Writer.std{out,err}] have [at_shutdown] handlers that flush them, those
@@ -28,33 +27,31 @@ let shutdown exit_code =
   end;
 ;;
 
-let in_async spec on_result =
-  Spec.wrap
-    (fun ~run ~main ->
-       let args_applied = run main in
-       (fun () ->
-          upon (args_applied ()) on_result;
-          (never_returns (Scheduler.go ()) : unit)))
-    spec
+let in_async param on_result =
+  Param.map param ~f:(fun main () ->
+    upon (main ()) on_result;
+    (never_returns (Scheduler.go ()) : unit)
+  )
 ;;
 
-let async ~summary ?readme spec main =
+let async' ~summary ?readme param =
   let on_result () = shutdown 0 in
-  basic ~summary ?readme (in_async spec on_result) main
+  basic' ~summary ?readme (in_async param on_result)
 ;;
 
-let async' ~summary ?readme params main =
-  async ~summary ?readme (Spec.of_params params) main
-;;
+let async ~summary ?readme spec main = async' ~summary ?readme (Spec.to_param spec main)
 
-let async_or_error ~summary ?readme spec main =
+let async_or_error' ~summary ?readme param =
   let on_result = function
     | Ok () -> shutdown 0
     | Error error ->
       prerr_endline (Error.to_string_hum error);
       shutdown 1
   in
-  basic ~summary ?readme (in_async spec on_result) main
+  basic' ~summary ?readme (in_async param on_result)
 ;;
+
+let async_or_error ~summary ?readme spec main =
+  async_or_error' ~summary ?readme (Spec.to_param spec main)
 
 let async_basic = async

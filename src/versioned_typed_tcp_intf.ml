@@ -2,7 +2,7 @@ open Core.Std
 open Import
 
 module type Name = sig
-  type t with sexp
+  type t [@@deriving sexp]
   include Hashable with type t := t
   include Binable with type t := t
   include Stringable with type t := t
@@ -10,7 +10,7 @@ module type Name = sig
 end
 
 module Version : sig
-  type t with bin_io, sexp
+  type t [@@deriving bin_io, sexp]
 
   val min : t -> t -> t
   val of_int : int -> t
@@ -98,7 +98,7 @@ module Read_result = struct
     ; time_sent     : Time.t
     ; data          : 'data
     }
-  with bin_io, sexp
+  [@@deriving bin_io, sexp]
 end
 
 (** The messages which the code using this library on the server side needs to process.
@@ -116,13 +116,13 @@ module Server_msg = struct
       | Disconnect       of 'name * Sexp.t
       | Parse_error      of 'name * string
       | Protocol_error   of string
-    with bin_io, sexp
+    [@@deriving bin_io, sexp]
   end
 
   type ('name, 'data) t =
     | Control of 'name Control.t
     | Data of ('name, 'data) Read_result.t
-  with sexp
+  [@@deriving sexp]
 end
 
 (** The messages which the code using this library on the client side needs to process.
@@ -136,13 +136,13 @@ module Client_msg = struct
       | Disconnect     of 'name * Sexp.t
       | Parse_error    of 'name * string
       | Protocol_error of string
-    with bin_io, sexp
+    [@@deriving bin_io, sexp]
   end
 
   type ('name, 'data) t =
     | Control of 'name Control.t
     | Data    of ('name, 'data) Read_result.t
-  with bin_io, sexp
+  [@@deriving bin_io, sexp]
 end
 
 module type S = sig
@@ -256,6 +256,8 @@ module type S = sig
          ) Deferred.t
 
     val shutdown : t -> unit Deferred.t
+
+    val shutdown_and_disconnect_clients : t -> unit Deferred.t
   end
 
   module Client : sig

@@ -1,5 +1,5 @@
-open Core.Std  let _ = _squelch_unused_module_warning_
-open Import    let _ = _squelch_unused_module_warning_
+open! Core.Std
+open! Import
 
 include Core.Std.Weak_hashtbl
 
@@ -30,7 +30,7 @@ let create ?growth_allowed ?size hashable =
 let remove_keys_with_unused_data `Do_not_use = assert false
 let set_run_when_unused_data     `Do_not_use = assert false
 
-TEST_UNIT = (* automatic reclamation, multiple times *)
+let%test_unit _ = (* automatic reclamation, multiple times *)
   Thread_safe.block_on_async_exn (fun () ->
     let t = create Int.hashable in
     let heap_block i = Heap_block.create_exn (ref i) in

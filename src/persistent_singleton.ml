@@ -29,8 +29,8 @@ module Make (Z : Arg) : S with type persistent_singleton = Z.t = struct
     Writer.save_sexp file (Option.sexp_of_t Z.sexp_of_t option)
   ;;
 
-  exception Can_not_determine_whether_file_exists of string with sexp
-  exception Can_not_load_due_to_unclean_shutdown of string with sexp
+  exception Can_not_determine_whether_file_exists of string [@@deriving sexp]
+  exception Can_not_load_due_to_unclean_shutdown of string [@@deriving sexp]
 
   let load file ~default =
     let res =

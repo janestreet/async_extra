@@ -11,7 +11,7 @@
 open Core.Std
 open Import
 
-type t with sexp_of
+type t [@@deriving sexp_of]
 
 (** [create file] opens [file], creating it if it doesn't exist. *)
 val create : ?append:bool (** default is [true] *) -> string -> t Deferred.t
@@ -21,6 +21,7 @@ val write : t -> string -> unit
 
 val write_substring : t -> Substring.t -> unit
 val write_bigsubstring : t -> Bigsubstring.t -> unit
+val write_bigstring : t -> ?pos:int -> ?len:int -> Bigstring.t -> unit
 val schedule_bigstring : t -> Bigstring.t -> unit
 
 val write_bin_prot : t -> 'a Bin_prot.Type_class.writer -> 'a -> unit

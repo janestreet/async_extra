@@ -16,7 +16,7 @@ module Error = struct
     | File_shrank
     | Read_failed   of exn
     | Stat_failed   of exn
-  with sexp_of
+  [@@deriving sexp_of]
 
   let to_string_hum t =
     match t with
@@ -33,7 +33,7 @@ module Warning = struct
     | Reached_eof
     | Delayed_due_to_null_reads_for       of Time.Span.t
     | No_longer_delayed_due_to_null_reads
-  with sexp_of
+  [@@deriving sexp_of]
 
   let to_string_hum t =
     match t with
@@ -51,7 +51,7 @@ module Update = struct
     | Data    of string
     | Warning of string * Warning.t
     | Error   of string * Error.t
-  with sexp_of
+  [@@deriving sexp_of]
 
   let to_string_hum = function
     | Data d -> sprintf "data:%s" d
@@ -63,7 +63,7 @@ end
 module Chunker : sig
   (** A chunker is used to convert the incoming strings of data into a sequence of
       updates.  One creates a chunker, and then repeatedly [feed]s it data. *)
-  type t with sexp_of
+  type t [@@deriving sexp_of]
 
   include Invariant.S with type t := t
   val create : break_on_lines:bool -> t
@@ -72,7 +72,7 @@ end = struct
   type t =
     | Simple
     | By_line of Buffer.t sexp_opaque
-  with sexp_of
+  [@@deriving sexp_of]
 
   let newline = '\n'
 
@@ -84,7 +84,7 @@ end = struct
         for i = 0 to Buffer.length buffer - 1 do
           assert (Buffer.nth buffer i <> newline)
         done;
-    with exn -> failwiths "invariant failed" (exn, t) <:sexp_of< exn * t >>
+    with exn -> failwiths "invariant failed" (exn, t) [%sexp_of: exn * t]
   ;;
 
   let create ~break_on_lines =
@@ -121,7 +121,7 @@ end = struct
   ;;
 end
 
-TEST_UNIT =
+let%test_unit _ =
   let open Chunker in
   let buf =
     String.concat
@@ -171,7 +171,7 @@ type t =
      time we reach EOF. *)
   ; mutable need_to_report_eof            : bool
   }
-with fields, sexp_of
+[@@deriving fields, sexp_of]
 
 let _invariant t =
   try
@@ -181,7 +181,7 @@ let _invariant t =
     (* It is possible to have [t.file_pos > t.file_len], since we read as much as
        we can into [t.read_buf] and the file may have grown in between the time we stat
        and the time we read. *)
-  with exn -> failwiths "invariant failed" (exn, t) <:sexp_of< exn * t >>
+  with exn -> failwiths "invariant failed" (exn, t) [%sexp_of: exn * t]
 ;;
 
 let need_to_read t = t.file_pos < t.file_len

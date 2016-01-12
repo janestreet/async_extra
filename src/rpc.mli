@@ -19,21 +19,7 @@ module Rpc             = Rpc_kernel.Rpc
 module State_rpc       = Rpc_kernel.State_rpc
 
 module Connection : sig
-  module Heartbeat_config : sig
-    type t =
-      { timeout    : Time.Span.t
-      ; send_every : Time.Span.t
-      } with sexp, bin_io
-
-    module Stable : sig
-      module V1 : sig
-        type nonrec t = t with sexp, bin_io
-      end
-    end
-  end
-
-  include (module type of struct include Rpc_kernel.Connection end
-            with module Heartbeat_config := Rpc_kernel.Connection.Heartbeat_config)
+  include module type of struct include Rpc_kernel.Connection end
 
   (** These functions are mostly the same as the ones with the same names in
       [Async_rpc_kernel.Std.Rpc.Connection]; see [Connection_intf] in that library for
@@ -101,7 +87,7 @@ module Connection : sig
     -> initial_connection_state : ('address -> t -> 's)
     -> where_to_listen          : ('address, 'listening_on) Tcp.Where_to_listen.t
     -> ?max_connections         : int
-    -> ?max_pending_connections : int
+    -> ?backlog                 : int
     -> ?max_message_size        : int
     -> ?make_transport          : transport_maker
     -> ?handshake_timeout       : Time.Span.t

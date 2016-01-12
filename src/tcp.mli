@@ -59,10 +59,11 @@ val connect_sock
 
 (** [connect ~host ~port] is a convenience wrapper around [connect_sock] that returns the
     socket, and a reader and writer for the socket.  The reader and writer share a file
-    descriptor, and so closing one will affect the other.  In particular, closing the
-    reader before closing the writer will cause the writer to subsequently raise an
-    exception when it attempts to flush internally-buffered bytes to the OS, due to a
-    closed fd.  You should close the [Writer] first to avoid this problem.
+    descriptor, and so closing one will affect the other by closing its underlying fd.  In
+    particular, closing the reader before closing the writer will cause the writer to
+    subsequently raise an exception when it attempts to flush internally-buffered bytes to
+    the OS, due to a closed fd.  You should close the [Writer] first to avoid this
+    problem.
 
     If possible, use [with_connection], which automatically handles closing.
 
@@ -76,10 +77,10 @@ val connect
 (** A [Where_to_listen] describes the socket that a tcp server should listen on. *)
 module Where_to_listen : sig
   type ('address, 'listening_on) t constraint 'address = [< Socket.Address.t ]
-  with sexp_of
+  [@@deriving sexp_of]
 
-  type inet = (Socket.Address.Inet.t, int   ) t with sexp_of
-  type unix = (Socket.Address.Unix.t, string) t with sexp_of
+  type inet = (Socket.Address.Inet.t, int   ) t [@@deriving sexp_of]
+  type unix = (Socket.Address.Unix.t, string) t [@@deriving sexp_of]
 
   val create
     :  socket_type  : 'address Socket.Type.t
@@ -96,15 +97,18 @@ val on_file              : string -> Where_to_listen.unix
 
 (** A [Server.t] represents a TCP server listening on a socket. *)
 module Server : sig
+  type ('address, 'listening_on) t
+    constraint 'address = [< Socket.Address.t ]
+    [@@deriving sexp_of]
 
-  type ('address, 'listening_on) t constraint 'address = [< Socket.Address.t ]
-
-  type inet = (Socket.Address.Inet.t, int   ) t
-  type unix = (Socket.Address.Unix.t, string) t
+  type inet = (Socket.Address.Inet.t, int)    t [@@deriving sexp_of]
+  type unix = (Socket.Address.Unix.t, string) t [@@deriving sexp_of]
 
   val invariant : (_, _) t -> unit
 
   val listening_on : (_, 'listening_on) t -> 'listening_on
+
+  val listening_on_address : ('address, _) t -> 'address
 
   (** [close t] starts closing the listening socket, and returns a deferred that becomes
       determined after [Fd.close_finished fd] on the socket's fd.  It is guaranteed that
@@ -112,20 +116,29 @@ module Server : sig
       multiple times on the same [t]; calls subsequent to the initial call will have no
       effect, but will return the same deferred as the original call.
 
-      [close_finished] becomes determined after [Fd.close_finished fd] on the socket's fd,
-      i.e. the same deferred that [close] returns.  [close_finished] differs from [close]
-      in that it does not have the side effect of initiating a close.
+      With [~close_existing_connections:true], [close] closes the sockets of all existing
+      connections.  [close] does not (and cannot) stop the handlers handling the
+      connections, but they will of course be unable to write to or read from the socket.
+      The result of [close] becomes determined when all the socket file descriptors are
+      closed and the socket's fd is closed. *)
+  val close
+    :  ?close_existing_connections:bool  (** default is [false] *)
+    -> (_, _) t
+    -> unit Deferred.t
 
-      [is_closed t] returns [true] iff [close t] has been called. *)
-  val close          : (_, _) t -> unit Deferred.t
+  (** [close_finished] becomes determined after [Fd.close_finished fd] on the socket's fd,
+      i.e. the same deferred that [close] returns.  [close_finished] differs from [close]
+      in that it does not have the side effect of initiating a close. *)
   val close_finished : (_, _) t -> unit Deferred.t
-  val is_closed      : (_, _) t -> bool
+
+  (** [is_closed t] returns [true] iff [close t] has been called. *)
+  val is_closed : (_, _) t -> bool
 
   (** Options for server creation:
 
-      [max_pending_connections] is the maximum number of clients that can have a
-      connection pending, as with [Unix.Socket.listen].  Additional connections will be
-      rejected.
+      [backlog] is the number of clients that can have a connection pending, as with
+      {!Unix.Socket.listen}.  Additional connections may be rejected, ignored, or enqueued
+      anyway, depending on OS, version, and configuration.
 
       [max_connections] is the maximum number of clients that can be connected
       simultaneously.  The server will not call [accept] unless the number of clients is
@@ -137,12 +150,12 @@ module Server : sig
       explicitely via [`Raise], or in the closure passed to [`Call]) no further
       connections will be accepted.  *)
   type ('address, 'listening_on, 'callback) create_options
-    =  ?max_connections         : int
-    -> ?max_pending_connections : int
-    -> ?on_handler_error        : [ `Raise
-                                  | `Ignore
-                                  | `Call of ('address -> exn -> unit)
-                                  ]
+    =  ?max_connections  : int
+    -> ?backlog          : int
+    -> ?on_handler_error : [ `Raise
+                           | `Ignore
+                           | `Call of ('address -> exn -> unit)
+                           ]
     -> ('address, 'listening_on) Where_to_listen.t
     -> 'callback
     -> ('address, 'listening_on) t Deferred.t

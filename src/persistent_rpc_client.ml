@@ -1,48 +1,27 @@
 open Core.Std
 open Import
 
-module Event = struct
-
-  type t =
-    | Attempting_to_connect
-    | Obtained_address      of Host_and_port.t
-    | Failed_to_connect     of Error.t
-    | Connected
-    | Disconnected
-  with sexp
-
-  type event = t
-
-  module Handler = struct
-    type t =
-      { server_name : string
-      ; on_event    : event -> unit
-      ; log         : Log.t option
-      }
-  end
-
-  let log_level = function
-    | Attempting_to_connect | Connected | Disconnected | Obtained_address _ -> `Info
-    | Failed_to_connect _ -> `Error
-
-  let handle t { Handler. server_name; log; on_event } =
-    on_event t;
-    Option.iter log ~f:(fun log ->
-      Log.sexp log t sexp_of_t ~level:(log_level t)
-        ~tags:[("persistent-connection-to", server_name)])
-
-end
-
 module type S = sig
   type t
+  type address
   type conn
+
+  module Event : sig
+    type t =
+      | Attempting_to_connect
+      | Obtained_address      of address
+      | Failed_to_connect     of Error.t
+      | Connected             of Rpc.Connection.t sexp_opaque
+      | Disconnected
+    [@@deriving sexp_of]
+  end
 
   val create
     :  server_name : string
     -> ?log        : Log.t
     -> ?on_event   : (Event.t -> unit)
-    -> connect     : (Host_and_port.t -> conn Or_error.t Deferred.t)
-    -> (unit -> Host_and_port.t Or_error.t Deferred.t)
+    -> connect     : (address -> conn Or_error.t Deferred.t)
+    -> (unit -> address Or_error.t Deferred.t)
     -> t
 
   val connected : t -> conn Deferred.t
@@ -51,27 +30,64 @@ module type S = sig
 
   val close : t -> unit Deferred.t
 
+  val is_closed      : t -> bool
+
   val close_finished : t -> unit Deferred.t
 end
 
 module type T = sig
+  module Address : sig
+    type t [@@deriving sexp_of]
+    val equal : t -> t -> bool
+  end
+
   type t
   val rpc_connection : t -> Rpc.Connection.t
 end
 
 module Make (Conn : T) = struct
-
+  type address = Conn.Address.t [@@deriving sexp_of]
   type conn = Conn.t
 
+  module Event = struct
+    type t =
+      | Attempting_to_connect
+      | Obtained_address      of address
+      | Failed_to_connect     of Error.t
+      | Connected             of Rpc.Connection.t sexp_opaque
+      | Disconnected
+    [@@deriving sexp_of]
+
+    type event = t
+
+    module Handler = struct
+      type t =
+        { server_name     : string
+        ; on_event        : event -> unit
+        ; log             : Log.t option
+        }
+    end
+
+    let log_level = function
+      | Attempting_to_connect | Connected _ | Disconnected | Obtained_address _ -> `Info
+      | Failed_to_connect _ -> `Error
+
+    let handle t { Handler. server_name ; log ; on_event } =
+      on_event t;
+      Option.iter log ~f:(fun log ->
+        Log.sexp log t sexp_of_t ~level:(log_level t)
+          ~tags:[("persistent-connection-to", server_name)])
+  end
+
   type t =
-    { get_address    : unit -> Host_and_port.t Or_error.t Deferred.t
-    ; connect        : Host_and_port.t -> Conn.t Or_error.t Deferred.t
+    { get_address    : unit -> address Or_error.t Deferred.t
+    ; connect        : address -> Conn.t Or_error.t Deferred.t
     ; mutable conn   : [`Ok of Conn.t | `Close_started] Ivar.t
     ; event_handler  : Event.Handler.t
     ; close_started  : unit Ivar.t
     ; close_finished : unit Ivar.t
     }
-  with fields
+  [@@deriving fields]
 
   let handle_event t event = Event.handle event t.event_handler
 
@@ -101,7 +117,7 @@ module Make (Conn : T) = struct
         let same_as_previous_address =
           match !previous_address with
           | None -> false
-          | Some previous_address -> Host_and_port.equal addr previous_address
+          | Some previous_address -> Conn.Address.equal addr previous_address
         in
         previous_address := Some addr;
         if not same_as_previous_address then handle_event t (Obtained_address addr);
@@ -151,7 +167,7 @@ module Make (Conn : T) = struct
       match maybe_conn with
       | `Close_started -> return (`Finished ())
       | `Ok conn ->
-        handle_event t Connected;
+        handle_event t (Connected (Conn.rpc_connection conn));
         Rpc.Connection.close_finished (Conn.rpc_connection conn)
         >>= fun () ->
         t.conn <- Ivar.create ();
@@ -213,6 +229,7 @@ module Make (Conn : T) = struct
     | Some (`Ok conn) -> Some conn
 
   let close_finished t = Ivar.read t.close_finished
+  let is_closed t      = Ivar.is_full t.close_started
 
   let close t =
     if Ivar.is_full t.close_started then
@@ -233,23 +250,28 @@ module Make (Conn : T) = struct
 end
 
 module Versioned = Make (struct
+    module Address = Host_and_port
     type t = Versioned_rpc.Connection_with_menu.t
     let rpc_connection = Versioned_rpc.Connection_with_menu.connection
   end)
 
 include Make (struct
+    module Address = Host_and_port
     type t = Rpc.Connection.t
     let rpc_connection = Fn.id
   end)
 
 (* convenience wrapper *)
 let create ~server_name ?log ?on_event ?via_local_interface ?implementations
-      ?max_message_size ?make_transport ?handshake_timeout ?heartbeat_config get_address =
+      ?max_message_size ?make_transport ?handshake_timeout
+      ?heartbeat_config get_address =
   let connect host_and_port =
     let (host, port) = Host_and_port.tuple host_and_port in
     Rpc.Connection.client ~host ~port ?via_local_interface ?implementations
-      ?max_message_size ?make_transport ?handshake_timeout ?heartbeat_config
+      ?max_message_size ?make_transport ?handshake_timeout
+      ?heartbeat_config
       ~description:(Info.of_string ("persistent connection to " ^ server_name)) ()
     >>| Or_error.of_exn_result
   in
   create ~server_name ?log ?on_event ~connect get_address
+

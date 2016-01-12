@@ -3,7 +3,7 @@ open Import
 
 module File_descr = Core.Std.Unix.File_descr
 
-type t = File_descr.t with bin_io, sexp
+type t = File_descr.t [@@deriving bin_io, sexp]
 
 include (File_descr : Stringable with type t := t)
 

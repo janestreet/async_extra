@@ -49,15 +49,15 @@ module type S = sig
   type t
 
   val create
-    :  ?max_pending_connections : int
-    -> ?verbose                 : bool (** default is [false] *)
-    -> ?log_disconnects         : bool (** default is [true] *)
-    -> ?buffer_age_limit        : [ `At_most of Time.Span.t | `Unlimited ]
-    -> port                     : int
-    -> auth                     : (Unix.Inet_addr.t
-                                   -> int
-                                   -> Client_id.t
-                                   -> [ `Allow | `Deny of string option ] Deferred.t)
+    :  ?backlog          : int
+    -> ?verbose          : bool (** default is [false] *)
+    -> ?log_disconnects  : bool (** default is [true] *)
+    -> ?buffer_age_limit : [ `At_most of Time.Span.t | `Unlimited ]
+    -> port              : int
+    -> auth              : (Unix.Inet_addr.t
+                            -> int
+                            -> Client_id.t
+                            -> [ `Allow | `Deny of string option ] Deferred.t)
     -> unit
     -> t Deferred.t
 

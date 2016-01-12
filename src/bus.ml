@@ -1,214 +1,88 @@
-open Core.Std
-open Import
+open! Core.Std
+open! Import
 
-let verbose = false
+module Bus = Core_kernel.Bus
+include Bus
 
-module Bus_id = Unique_id.Int ()
-
-module State = struct
-  type t =
-    | Created
-    | Started
-    | Syncing
-  with sexp_of
-end
-
-open State
-
-module Subscriber = struct
-  type 'a t =
-    { bus_id                  : Bus_id.t
-    ; mutable am_subscribed   : bool
-    ; mutable subscribers_elt : 'a t sexp_opaque Bag.Elt.t option
-    ; f                       : 'a -> unit
-    ; send_f_raises_to        : Monitor.t
-    }
-  with fields, sexp_of
-
-  let invariant _invariant_a t =
-    Invariant.invariant _here_ t <:sexp_of< _ t >> (fun () ->
-      let check f = Invariant.check_field t f in
-      Fields.iter
-        ~bus_id:ignore
-        ~am_subscribed:ignore
-        ~f:ignore
-        ~send_f_raises_to:ignore
-        ~subscribers_elt:(check (function
-          | None -> ()
-          | Some subscribers_elt ->
-            assert (phys_equal t (Bag.Elt.value subscribers_elt)))))
-  ;;
-end
-
-module Todo = struct
-  type 'a t =
-    | Flushed     of unit Ivar.t
-    | Subscribe   of 'a Subscriber.t
-    | Unsubscribe of 'a Subscriber.t
-    | Write       of 'a
-  with sexp_of
-
-  let invariant invariant_a t =
-    Invariant.invariant _here_ t <:sexp_of< _ t >> (fun () ->
-      match t with
-      | Write a                   -> invariant_a a;
-      | Flushed fill_when_flushed -> assert (Ivar.is_empty fill_when_flushed);
-      | Subscribe subscriber      -> Subscriber.invariant invariant_a subscriber
-      | Unsubscribe subscriber    ->
-        Subscriber.invariant invariant_a subscriber;
-        assert (not subscriber.am_subscribed));
-  ;;
-end
-
-type 'a t =
-  { id                        : Bus_id.t
-  ; mutable state             : State.t
-  ; can_subscribe_after_start : bool
-  ; subscribers               : 'a Subscriber.t Bag.t
-  ; todo                      : 'a Todo.t Queue.t
-  }
-with fields, sexp_of
-
-let invariant invariant_a t =
-  Invariant.invariant _here_ t <:sexp_of< _ t >> (fun () ->
-    let check f = Invariant.check_field t f in
-    Fields.iter
-      ~id:ignore
-      ~can_subscribe_after_start:ignore
-      ~state:(check (function Created | Started | Syncing -> ()))
-      ~subscribers:(check (fun subscribers ->
-        Bag.invariant subscribers;
-        Bag.iter subscribers ~f:(Subscriber.invariant invariant_a)))
-      ~todo:(check (fun todo ->
-        Queue.iter todo ~f:(Todo.invariant invariant_a);
-        match t.state with
-        | Syncing -> ()
-        | Started -> assert (Queue.is_empty t.todo)
-        | Created ->
-          Queue.iter todo ~f:(function
-            | Flushed _ | Write _ -> ()
-            | Subscribe _ | Unsubscribe _ -> assert false))))
-;;
-
-let create ~can_subscribe_after_start =
-  { id                        = Bus_id.create ()
-  ; state                     = Created
-  ; can_subscribe_after_start
-  ; subscribers               = Bag.create ()
-  ; todo                      = Queue.create ()
-  }
-;;
-
-let do_subscribe t (subscriber : _ Subscriber.t) =
-  assert subscriber.am_subscribed;
-  subscriber.subscribers_elt <- Some (Bag.add t.subscribers subscriber);
-;;
-
-let do_unsubscribe t (subscriber : _ Subscriber.t) =
-  assert (not subscriber.am_subscribed);
-  match subscriber.subscribers_elt with
-  | None ->
-    (* This can happen if [unsubscribe t subscriber] is called before [Todo.Subscribe] is
-       processed. *)
-    ()
-  | Some elt ->
-    Bag.remove t.subscribers elt;
-    subscriber.subscribers_elt <- None;
-;;
-
-let sync t =
-  if verbose then Core.Std.Debug.eprints "sync" t <:sexp_of< _ t >>;
-  match t.state with
-  | Created | Syncing -> ()
-  | Started           ->
-    t.state <- Syncing;
-    upon Deferred.unit (fun () ->
-      while not (Queue.is_empty t.todo) do
-        match Queue.dequeue_exn t.todo with
-        | Flushed fill_when_flushed -> Ivar.fill fill_when_flushed ();
-        | Subscribe subscriber ->
-          if subscriber.am_subscribed then do_subscribe t subscriber;
-        | Unsubscribe subscriber -> do_unsubscribe t subscriber;
-        | Write a ->
-          Bag.iter t.subscribers ~f:(fun subscriber ->
-            let { Subscriber. am_subscribed; send_f_raises_to; f; _ } = subscriber in
-            if am_subscribed then
-              match Scheduler.within_v ~monitor:send_f_raises_to (fun () -> f a) with
-              | Some () -> ()
-              | None    ->
-                if subscriber.am_subscribed then begin
-                  subscriber.am_subscribed <- false;
-                  Queue.enqueue t.todo (Unsubscribe subscriber);
-                end);
-      done;
-      t.state <- Started)
-;;
-
-let enqueue t todo = Queue.enqueue t.todo todo; sync t
-
-let flushed t = Deferred.create (fun ivar -> enqueue t (Flushed ivar))
-
-let write t a = enqueue t (Write a)
-
-let start t =
-  match t.state with
-  | Started | Syncing -> ()
-  | Created           ->
-    t.state <- Started;
-    if not (Queue.is_empty t.todo) then sync t;
-;;
-
-let fail_if_not_can_subscribe_after_start t =
-  if not t.can_subscribe_after_start
-  then failwiths
-         "cannot subscribe to started bus created with ~can_subscribe_after_start:false"
-         t <:sexp_of< _ t >>
-;;
-
-let subscribe_exn t ~f =
-  let subscriber =
-    { Subscriber.
-      bus_id           = t.id
-    ; am_subscribed    = true
-    ; f
-    ; send_f_raises_to = Monitor.current ()
-    ; subscribers_elt  = None
-    }
-  in
-  begin match t.state with
-  (* If [t.state = Created], we [do_subscribe] now so that subscriptions before [start]
-     see all messages.  If [t.state = Started], we [do_subscribe] now since [t.todo] is
-     empty and we are not running a subscriber.  If [t.state = Started] or [t.state =
-     Syncing] we need to check [t.can_subscribe_after_start] *)
-  | Created -> do_subscribe t subscriber;
-  | Started ->
-    fail_if_not_can_subscribe_after_start t; do_subscribe t subscriber
-  | Syncing ->
-    fail_if_not_can_subscribe_after_start t; enqueue t (Subscribe subscriber)
-  end;
-  subscriber;
-;;
-
-let unsubscribe t (subscriber : _ Subscriber.t) =
-  if not (Bus_id.equal t.id subscriber.bus_id)
-  then failwiths "Bus.unsubscribe of mismatched bus and subscriber" (t, subscriber)
-         <:sexp_of< _ t * _ Subscriber.t >>;
-  if subscriber.am_subscribed then begin
-    subscriber.am_subscribed <- false;
-    match t.state with
-    (* If [t.state = Created] or [t.state = Started], we can [do_unsubscribe] now
-       since we can not be running a subscriber. *)
-    | Created | Started -> do_unsubscribe t subscriber
-    | Syncing -> enqueue t (Unsubscribe subscriber)
-  end;
-;;
-
-let reader_exn t =
+let pipe1_exn (t : ('a -> unit) Read_only.t) =
   let r, w = Pipe.create () in
-  let token =
-    subscribe_exn t ~f:(fun x ->
-      if not (Pipe.is_closed w) then Pipe.write_without_pushback w x)
+  let subscription =
+    subscribe_exn t [%here] ~f:(function v ->
+      Pipe.write_without_pushback_if_open w v)
   in
-  upon (Pipe.closed w) (fun () -> unsubscribe t token);
+  upon (Pipe.closed w) (fun () -> unsubscribe t subscription);
   r
+;;
+
+module First_arity = struct
+  type (_, _, _) t =
+    | Arity1 : ('a ->                   unit, 'a ->                   'r option, 'r) t
+    | Arity2 : ('a -> 'b ->             unit, 'a -> 'b ->             'r option, 'r) t
+    | Arity3 : ('a -> 'b -> 'c ->       unit, 'a -> 'b -> 'c ->       'r option, 'r) t
+    | Arity4 : ('a -> 'b -> 'c -> 'd -> unit, 'a -> 'b -> 'c -> 'd -> 'r option, 'r) t
+  [@@deriving sexp_of]
+end
+
+let first_exn (type c) (type f) (type r)
+      t here (first_arity : (c, f, r) First_arity.t) ~(f : f) =
+  let module A = First_arity in
+  Deferred.create (fun ivar ->
+    let subscriber : c Bus.Subscriber.t option ref = ref None in
+    let finish : r option -> unit = function
+      | None -> ()
+      | Some r ->
+        Ivar.fill ivar r;
+        Bus.unsubscribe t (Option.value_exn !subscriber);
+    in
+    subscriber :=
+      Some
+        (Bus.subscribe_exn t here
+           ~on_callback_raise:(let monitor = Monitor.current () in
+                               fun error -> Monitor.send_exn monitor (Error.to_exn error))
+           ~f:(match first_arity with
+             | A.Arity1 -> (fun a           -> finish (f a)          )
+             | A.Arity2 -> (fun a1 a2       -> finish (f a1 a2)      )
+             | A.Arity3 -> (fun a1 a2 a3    -> finish (f a1 a2 a3)   )
+             | A.Arity4 -> (fun a1 a2 a3 a4 -> finish (f a1 a2 a3 a4)))))
+;;
+
+let%test_unit "first_exn" =
+  let bus =
+    Bus.create [%here]
+      Arity1
+      ~allow_subscription_after_first_write:true
+      ~on_callback_raise:Error.raise
+  in
+  let d = first_exn (Bus.read_only bus) [%here] Arity1 ~f:(fun _ -> Some ()) in
+  [%test_result: int] (Bus.num_subscribers bus) ~expect:1;
+  Bus.write bus 0;
+  assert (Deferred.is_determined d);
+  [%test_result: int] (Bus.num_subscribers bus) ~expect:0;
+  let d =
+    first_exn (Bus.read_only bus) [%here] Arity1
+      ~f:(fun i -> if i = 13 then Some () else None)
+  in
+  Bus.write bus 12;
+  assert (not (Deferred.is_determined d));
+  [%test_result: int] (Bus.num_subscribers bus) ~expect:1;
+  Bus.write bus 13;
+  assert (Deferred.is_determined d)
+;;
+
+let%test_unit "first_exn ~f raises" =
+  let bus =
+    Bus.create [%here]
+      Arity1
+      ~allow_subscription_after_first_write:true
+      ~on_callback_raise:Error.raise
+  in
+  let monitor = Monitor.create () in
+  Monitor.detach monitor;
+  let d =
+    within' ~monitor (fun () ->
+      first_exn (Bus.read_only bus) [%here] Arity1 ~f:(fun _ -> failwith ""))
+  in
+  Bus.write bus 0;
+  assert (not (Deferred.is_determined d));
+  assert (Monitor.has_seen_error monitor);
 ;;

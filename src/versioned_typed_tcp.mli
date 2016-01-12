@@ -120,7 +120,7 @@ end
     to 5 versions (easily extensible to more) *)
 module Datumable_of_binable : sig
   module type T = sig type t end
-  module type T_bin = sig type t with bin_io end
+  module type T_bin = sig type t [@@deriving bin_io] end
 
   module V (V : T) (T : T) : sig
     module type S = sig

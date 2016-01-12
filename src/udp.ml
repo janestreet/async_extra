@@ -12,27 +12,22 @@ module Config = struct
   type t =
     { capacity  : int
     ; init      : write_buffer
-    ; before    : write_buffer -> unit
-    ; after     : write_buffer -> unit
     ; stop      : unit Deferred.t
     ; max_ready : int
-    } with fields
+    } [@@deriving fields]
 
   let create
-        ?(capacity = default_capacity)
-        ?(init = Iobuf.create ~len:capacity)
-        ?(before = Iobuf.flip_lo)
-        ?(after = Iobuf.reset)
-        ?(stop = Deferred.never ())
+        ?(capacity  = default_capacity)
+        ?(init      = Iobuf.create ~len:capacity)
+        ?(stop      = Deferred.never ())
         ?(max_ready = default_retry)
-        ()
-    =
-    { capacity; init; before; after; stop; max_ready }
+        () =
+    { capacity; init; stop; max_ready }
 end
 
 let fail iobuf message a sexp_of_a =
   (* Render buffers immediately, before we have a chance to change them. *)
-  failwiths message (a, <:sexp_of< (_, _) Iobuf.t >> iobuf)
+  failwiths message (a, [%sexp_of: (_, _) Iobuf.t] iobuf)
     (Tuple.T2.sexp_of_t sexp_of_a ident)
 ;;
 
@@ -43,6 +38,14 @@ let sendto_sync () =
         Fd.with_file_descr_exn fd ~nonblocking:true
           (fun desc -> sendto buf desc (Unix.Socket.Address.to_sockaddr addr))
     )
+;;
+
+let send_sync () =
+  Or_error.map (Iobuf.send_nonblocking_no_sigpipe ())
+    ~f:(fun send ->
+      fun fd buf ->
+        Fd.with_file_descr_exn fd ~nonblocking:true
+          (fun desc -> send buf desc))
 ;;
 
 (** [ready_iter fd ~stop ~max_ready ~f] iterates [f] over [fd], handling [EINTR] by
@@ -60,7 +63,7 @@ let sendto_sync () =
     @raise Unix.Unix_error on errors other than [EINTR] and [EWOULDBLOCK]/[EAGAIN]. *)
 module Ready_iter = struct
   module Ok = struct
-    type t = Poll_again | User_stopped with sexp_of, enumerate, compare
+    type t = Poll_again | User_stopped [@@deriving sexp_of, enumerate, compare]
 
     let of_int_exn =
       function
@@ -73,16 +76,16 @@ module Ready_iter = struct
       | Poll_again   -> 0
       | User_stopped -> 1
 
-    TEST_UNIT =
+    let%test_unit _ =
       List.iter all ~f:(fun t ->
         let i = to_int t in
-        <:test_result< t   >> ~expect:t (of_int_exn i);
-        <:test_result< int >> ~expect:i (to_int     t);
+        [%test_result: t] ~expect:t (of_int_exn i);
+        [%test_result: int] ~expect:i (to_int     t);
         List.iter all ~f:(fun u ->
           let j = to_int u in
           if Bool.(<>) (compare u t = 0) (j = i) then
             failwiths "overlapping representations" (t, i, u, j)
-              <:sexp_of< t * int * t * int >>
+              [%sexp_of: t * int * t * int]
         )
       )
   end
@@ -137,14 +140,29 @@ let sendto () =
           ~f:(fun file_descr ->
             match Unix.Syscall_result.Unit.to_result (sendto buf file_descr addr) with
             | Ok () -> Ready_iter.user_stopped
-            | Error e -> Ready_iter.create_error e
-          )
+            | Error e -> Ready_iter.create_error e)
         >>= function
         | `Interrupted -> Deferred.unit
         | (`Bad_fd | `Closed | `Unsupported) as error ->
           fail buf "Udp.sendto" (error, addr)
-            <:sexp_of< [ `Bad_fd | `Closed | `Unsupported ] * Core.Std.Unix.sockaddr >>
-    )
+            [%sexp_of: [ `Bad_fd | `Closed | `Unsupported ] * Core.Std.Unix.sockaddr])
+;;
+
+let send () =
+  Or_error.map (Iobuf.send_nonblocking_no_sigpipe ())
+    ~f:(fun send ->
+      fun fd buf ->
+        let stop = Ivar.create () in
+        ready_iter fd ~max_ready:default_retry ~stop `Write ~syscall_name:"send"
+          ~f:(fun file_descr ->
+            match Unix.Syscall_result.Unit.to_result (send buf file_descr) with
+            | Ok () -> Ready_iter.user_stopped
+            | Error e -> Ready_iter.create_error e)
+        >>= function
+        | `Interrupted -> Deferred.unit
+        | (`Bad_fd | `Closed | `Unsupported) as error ->
+          fail buf "Udp.send" error
+            [%sexp_of: [ `Bad_fd | `Closed | `Unsupported ]])
 ;;
 
 let bind ?ifname addr =
@@ -153,11 +171,17 @@ let bind ?ifname addr =
     Unix.Cidr.does_match Unix.Cidr.multicast (Socket.Address.Inet.addr a)
   in
   if is_multicast addr
-  then
-    (* We do not treat [mcast_join] as a blocking operation because it only instructs the
-       kernel to send an IGMP message, which the kernel then handles asynchronously. *)
-    Core.Std.Unix.mcast_join ?ifname (Fd.file_descr_exn (Socket.fd socket))
-      (Socket.Address.to_sockaddr addr);
+  then (
+    try
+      (* We do not treat [mcast_join] as a blocking operation because it only instructs
+         the kernel to send an IGMP message, which the kernel handles asynchronously. *)
+      Core.Std.Unix.mcast_join ?ifname (Fd.file_descr_exn (Socket.fd socket))
+        (Socket.Address.to_sockaddr addr)
+    with exn ->
+      raise_s [%message "Udp.bind unable to join multicast group"
+                          (addr : Socket.Address.Inet.t)
+                          (ifname : string option)
+                          (exn : Exn.t)]);
   Socket.bind socket addr
 ;;
 
@@ -180,17 +204,17 @@ let recvfrom_loop_with_buffer_replacement ?(config = Config.create ()) fd f =
       match Iobuf.recvfrom_assume_fd_is_nonblocking !buf file_descr with
       | exception Unix.Unix_error (e, _, _) -> Ready_iter.create_error e
       | ADDR_UNIX dom ->
-        fail !buf "Unix domain socket addresses not supported" dom <:sexp_of< string >>
+        fail !buf "Unix domain socket addresses not supported" dom [%sexp_of: string]
       | ADDR_INET (host, port) ->
-        Config.before config !buf;
+        Iobuf.flip_lo !buf;
         buf := f !buf (`Inet (host, port));
-        Config.after  config !buf;
+        Iobuf.reset !buf;
         Ready_iter.poll_again
     )
   >>| function
   | (`Bad_fd | `Unsupported) as error ->
     fail !buf "Udp.recvfrom_loop_without_buffer_replacement" (error, fd)
-      <:sexp_of< [ `Bad_fd | `Unsupported ] * Fd.t >>
+      [%sexp_of: [ `Bad_fd | `Unsupported ] * Fd.t]
   | `Closed | `Interrupted -> !buf
 ;;
 let recvfrom_loop ?config fd f =
@@ -209,9 +233,9 @@ let read_loop_with_buffer_replacement ?(config = Config.create ()) fd f =
       let result = Iobuf.read_assume_fd_is_nonblocking !buf file_descr in
       if Unix.Syscall_result.Unit.is_ok result then
         begin
-          Config.before config !buf;
+          Iobuf.flip_lo !buf;
           buf := f !buf;
-          Config.after  config !buf;
+          Iobuf.reset !buf;
           Ready_iter.poll_again
         end
       else Unix.Syscall_result.Unit.reinterpret_error_exn result
@@ -219,7 +243,7 @@ let read_loop_with_buffer_replacement ?(config = Config.create ()) fd f =
   >>| function
   | (`Bad_fd | `Unsupported) as error ->
     fail !buf "Udp.read_loop_with_buffer_replacement" (error, fd)
-      <:sexp_of< [ `Bad_fd | `Unsupported ] * Fd.t >>
+      [%sexp_of: [ `Bad_fd | `Unsupported ] * Fd.t]
   | `Closed | `Interrupted -> !buf
 ;;
 
@@ -229,34 +253,36 @@ let read_loop ?config fd f =
 ;;
 
 let recvmmsg_loop =
+  let create_buffers ~max_count config =
+    let len = Config.capacity config in
+    if len <= 2048 then
+      let bstr = Bigstring.create (2048 * max_count) in
+      Array.init max_count ~f:(fun index ->
+        Iobuf.of_bigstring ~pos:(index * 2048) ~len bstr)
+    else
+      Array.init max_count ~f:(function
+        | 0 -> Config.init config
+        | _ -> Iobuf.create ~len:(Iobuf.length (Config.init config)))
+  in
   Or_error.map Iobuf.recvmmsg_assume_fd_is_nonblocking ~f:(fun recvmmsg ->
     (fun
       ?(config = Config.create ())
-      ?(create_srcs = false)
-      (* There's a 64kB threshold for the total buffer size before releasing the lock in
-         ../../core/src/recvmmsg.c.  This is a good number to stay below. *)
-      ?(max_count = 64 * 1024 / Config.capacity config)
-      ?(bufs =
-        Array.init max_count ~f:(function
-          | 0 -> Config.init config
-          | _ -> Iobuf.create ~len:(Iobuf.length (Config.init config))))
+      (* Too small a [max_count] here negates the value of [recvmmsg], while too large
+         risks starvation of other ready file descriptors. 32 was chosen empircally to
+         stay below ~64kb of data, assuming a standard ethernet MTU. *)
+      ?(max_count = 32)
       ?(on_wouldblock = (fun () -> ()))
       fd
       f
       ->
-        let srcs : Unix.sockaddr array option =
-          if create_srcs
-          then Some
-                 (Array.create ~len:(Array.length bufs)
-                    (Socket.Address.to_sockaddr (`Inet (Unix.Inet_addr.bind_any, 0))))
-          else None
-        in
+        let bufs = create_buffers ~max_count config in
+        let context = Iobuf.Recvmmsg_context.create bufs in
         let stop = Ivar.create () in
         Config.stop config
         >>> Ivar.fill_if_empty stop;
         ready_iter ~stop ~max_ready:config.max_ready fd `Read ~syscall_name:"recvmmsg"
           ~f:(fun file_descr ->
-            let result = recvmmsg ?srcs file_descr bufs in
+            let result = recvmmsg file_descr context in
             if Unix.Syscall_result.Int.is_ok result
             then
               begin
@@ -272,9 +298,9 @@ let recvmmsg_loop =
                     ()
                 else
                   begin
-                    for i = 0 to count - 1 do Config.before config bufs.(i) done;
-                    f ?srcs bufs ~count;
-                    for i = 0 to count - 1 do Config.after  config bufs.(i) done;
+                    (* [recvmmsg_assume_fd_is_nonblocking] implicitly calls [flip_lo]
+                       before and [reset] after the call, so we mustn't. *)
+                    f bufs ~count;
                     Ready_iter.poll_again
                   end
               end
@@ -289,62 +315,7 @@ let recvmmsg_loop =
         >>| function
         | (`Bad_fd | `Unsupported) as error ->
           failwiths "Udp.recvmmsg_loop" (error, fd)
-            <:sexp_of< [ `Bad_fd | `Unsupported ] * Fd.t >>
-        | `Closed | `Interrupted -> ())
-  )
-;;
-
-let recvmmsg_no_sources_loop =
-  Or_error.map Iobuf.recvmmsg_assume_fd_is_nonblocking_no_options ~f:(fun recvmmsg ->
-    (fun
-      ?(config = Config.create ())
-      fd
-      ?(max_count = 64 * 1024 / Config.capacity config)
-      ?(bufs =
-        Array.init max_count ~f:(function
-          | 0 -> Config.init config
-          | _ -> Iobuf.create ~len:(Iobuf.length (Config.init config))))
-      ?(on_wouldblock = (fun () -> ()))
-      callback
-      ->
-        let stop = Ivar.create () in
-        Config.stop config
-        >>> Ivar.fill_if_empty stop;
-        ready_iter ~stop ~max_ready:config.max_ready fd `Read ~syscall_name:"recvmmsg"
-          ~f:(fun file_descr ->
-            let result = recvmmsg file_descr ~count:max_count bufs in
-            if Unix.Syscall_result.Int.is_ok result then
-              begin
-                let count = Unix.Syscall_result.Int.ok_exn result in
-                if count > Array.length bufs
-                then
-                  failwithf
-                    "Unexpected result from \
-                     Iobuf.recvmmsg_assume_fd_is_nonblocking_no_options: \
-                     count (%d) > Array.length bufs (%d)"
-                    count
-                    (Array.length bufs)
-                    ()
-                else
-                  begin
-                    for i = 0 to count - 1 do Config.before config bufs.(i) done;
-                    callback bufs ~count;
-                    for i = 0 to count - 1 do Config.after  config bufs.(i) done;
-                    Ready_iter.poll_again
-                  end
-              end
-            else
-              begin
-                (match Unix.Syscall_result.Int.error_exn result with
-                 | EWOULDBLOCK | EAGAIN -> on_wouldblock ()
-                 | _ -> ());
-                Unix.Syscall_result.Int.reinterpret_error_exn result
-              end
-          )
-        >>| function
-        | (`Bad_fd | `Unsupported) as error ->
-          failwiths "Udp.recvmmsg_no_sources_loop" (error, fd)
-            <:sexp_of< [ `Bad_fd | `Unsupported ] * Fd.t >>
+            [%sexp_of: [ `Bad_fd | `Unsupported ] * Fd.t]
         | `Closed | `Interrupted -> ())
   )
 ;;

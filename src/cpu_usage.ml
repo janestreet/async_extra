@@ -6,7 +6,7 @@ let debug = false
 let sample_every = sec 1.
 
 module Sampler : sig
-  type t with sexp_of
+  type t [@@deriving sexp_of]
 
   val create : unit -> t
 
@@ -16,7 +16,7 @@ end = struct
     { mutable last_usage : Time.Span.t
     ; mutable last_time  : Time.t
     }
-  with sexp_of
+  [@@deriving sexp_of]
 
   let time_used () =
     let r = Core.Std.Unix.Resource_usage.get `Self in
@@ -54,12 +54,12 @@ end = struct
     { sampler     : Sampler.t
     ; subscribers : Percent.t Pipe.Writer.t Bag.t
     }
-  with sexp_of
+  [@@deriving sexp_of]
 
   let take_sample t =
     let sample = Sampler.take_sample t.sampler in
     Bag.iter t.subscribers ~f:(fun w ->
-      if not (Pipe.is_closed w) then Pipe.write_without_pushback w sample);
+      Pipe.write_without_pushback_if_open w sample);
   ;;
 
   let subscribe t =
@@ -86,7 +86,7 @@ module Summary = struct
     ; max : Percent.t
     ; avg : Percent.t
     }
-  with bin_io, sexp
+  [@@deriving bin_io, sexp]
 end
 
 module Summaries : sig
@@ -109,10 +109,10 @@ end = struct
       ; window_duration    : Time.Span.t
       ; num_samples        : int
       }
-    with fields, sexp_of
+    [@@deriving fields, sexp_of]
 
     let invariant t =
-      Invariant.invariant _here_ t <:sexp_of< t >> (fun () ->
+      Invariant.invariant [%here] t [%sexp_of: t] (fun () ->
         let check f = Invariant.check_field t f in
         Fields.iter
           ~write_summaries_to:(check Pipe.Writer.invariant)
@@ -125,7 +125,7 @@ end = struct
         Float.iround_up_exn (Time.Span.( // ) window_duration sample_every)
       in
       if num_samples <= 0
-      then failwiths "invalid window duration" window_duration <:sexp_of< Time.Span.t >>;
+      then failwiths "invalid window duration" window_duration [%sexp_of: Time.Span.t];
       let window_duration = sec (Int.to_float num_samples) in
       { write_summaries_to; window_duration; num_samples }
     ;;
@@ -147,10 +147,10 @@ end = struct
        more efficient. *)
     ; mutable subscribers     : Subscriber.t list
     }
-  with fields, sexp_of
+  [@@deriving fields, sexp_of]
 
   let invariant t =
-    Invariant.invariant _here_ t <:sexp_of< t >> (fun () ->
+    Invariant.invariant [%here] t [%sexp_of: t] (fun () ->
       let check f = Invariant.check_field t f in
       Fields.iter
         ~max_num_samples:(check (fun max_num_samples ->
@@ -260,9 +260,9 @@ end = struct
     end
   ;;
 
-  TEST_MODULE = struct
+  let%test_module _ = (module struct
     (* Check correct sample sizes and removal of dead clients *)
-    TEST_UNIT =
+    let%test_unit _ =
       let windows1 = [ sec 5. ; sec 8. ; sec 10. ] in
       let windows2 = [ sec 4. ; sec 3. ; sec 6.  ] in
       Async_unix.Thread_safe.block_on_async_exn (fun () ->
@@ -286,7 +286,7 @@ end = struct
         assert (t.max_num_samples = 0))
 
     (* Check that summary computation is correct *)
-    TEST_UNIT =
+    let%test_unit _ =
       let robustly_test_eq pct1 pct2 =
         assert (0 = Float.robustly_compare (Percent.to_mult pct1) (Percent.to_mult pct2))
       in
@@ -313,7 +313,7 @@ end = struct
             robustly_test_eq summary.max (List.nth_exn max i);
             robustly_test_eq summary.min (List.nth_exn min i);
           | _ -> assert false))
-  end
+  end)
 end
 
 let samples =

@@ -4,7 +4,7 @@ open Import
 
 include Versioned_typed_tcp_intf
 
-exception Bigsubstring_allocator_got_invalid_requested_size of int with sexp
+exception Bigsubstring_allocator_got_invalid_requested_size of int [@@deriving sexp]
 
 let bigsubstring_allocator ?(initial_size = 512) () =
   let buf = ref (Bigstring.create initial_size) in
@@ -20,7 +20,7 @@ let bigsubstring_allocator ?(initial_size = 512) () =
 let protocol_version : [ `Prod | `Test ] ref = ref `Test
 
 module Dont_care_about_mode = struct
-  type t = Dont_care_about_mode with bin_io, sexp
+  type t = Dont_care_about_mode [@@deriving bin_io, sexp]
 
 
   let current () = Dont_care_about_mode
@@ -76,7 +76,7 @@ module Make (Z : Arg) = struct
       ; recv_version : Version.t
       ; credentials  : string
       }
-    with bin_io, sexp
+    [@@deriving bin_io, sexp]
 
     let create ~name ~send_version ~recv_version ~credentials =
       { name
@@ -94,7 +94,7 @@ module Make (Z : Arg) = struct
       { time_stamp  : Time.t
       ; body_length : int
       }
-    with bin_io, sexp
+    [@@deriving bin_io, sexp]
   end
 
   module Connection = struct
@@ -137,9 +137,9 @@ module Make (Z : Arg) = struct
       ; exn       : exn
       ; backtrace : string;
       }
-    with sexp_of
+    [@@deriving sexp_of]
 
-    exception E of t with sexp
+    exception E of t [@@deriving sexp]
   end
 
   let wrap_write_bin_prot ~sexp ~tc ~writer ~name m =
@@ -232,8 +232,8 @@ module Make (Z : Arg) = struct
         end
   ;;
 
-  exception Eof with sexp
-  exception Unconsumed_data of string with sexp
+  exception Eof [@@deriving sexp]
+  exception Unconsumed_data of string [@@deriving sexp]
 
   let dummy_bigsubstring = Bigsubstring.of_string ""
 
@@ -367,8 +367,12 @@ module Make (Z : Arg) = struct
       val fold
         : t
         -> init:'a
-        -> f:(name:Client_name.t -> conn:Connection.t -> 'a-> 'a)
+        -> f:(name:Client_name.t -> conn:Connection.t -> 'a -> 'a)
         -> 'a
+
+      val kill_all
+        : t
+        -> unit
 
       val send_to_all
         :  t
@@ -421,6 +425,15 @@ module Make (Z : Arg) = struct
       let fold t ~init ~f =
         Hashtbl.fold t.by_name ~init ~f:(fun ~key ~data:(_, bag_elt) acc ->
           f ~name:key ~conn:(Bag.Elt.value bag_elt) acc)
+      ;;
+
+      let kill_all t =
+        (* We don't use [iter] here as [kill] mutates the structure we are iterating
+           over. *)
+        let connections =
+          fold t ~init:[] ~f:(fun ~name:_ ~conn acc -> conn :: acc)
+        in
+        List.iter connections ~f:Connection.kill
       ;;
 
       let mem t name = Hashtbl.mem t.by_name name
@@ -611,6 +624,12 @@ module Make (Z : Arg) = struct
 
     let shutdown t = Tcp.Server.close t.tcp_server
 
+    let shutdown_and_disconnect_clients t =
+      shutdown t
+      >>| fun () ->
+      Connections.kill_all t.connections
+    ;;
+
     let send t name d =
       match Connections.find t.connections name with
       | None -> return `Dropped
@@ -800,7 +819,7 @@ module Make (Z : Arg) = struct
       let handler = Set_once.create () in
       Tcp.Server.create
         ~max_connections:max_clients
-        ~max_pending_connections:(min 1_000 max_clients)
+        ~backlog:(min 1_000 max_clients)
         (Tcp.on_port listen_port)
         (fun addr reader writer ->
            match Set_once.get handler with
@@ -930,7 +949,7 @@ module Make (Z : Arg) = struct
                    then
                      Or_error.error "Hello name is not expected remote name"
                        (h.name, expected_remote_name)
-                       <:sexp_of<string * string>>
+                       [%sexp_of: string * string]
                    else begin
                      let server_name = Server_name.of_string h.name in
                      let close =
@@ -1475,7 +1494,7 @@ struct
                 | Error control_error ->
                   let e =
                     Error.create "error while accepting client connection"
-                      control_error <:sexp_of<Client_name.t Server_msg.Control.t>>
+                      control_error [%sexp_of: Client_name.t Server_msg.Control.t]
                   in
                   error_connecting e
                 | Ok (repeater_to_client_conn, client_ip) ->
@@ -1563,7 +1582,7 @@ end
     to 5 versions (easily extensible to more) *)
 module Datumable_of_binable = struct
   module type T = sig type t end
-  module type T_bin = sig type t with bin_io end
+  module type T_bin = sig type t [@@deriving bin_io] end
 
   module V (V : T) (T : T) = struct
     module type S = sig

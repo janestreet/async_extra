@@ -7,16 +7,16 @@ let input_closed_in_the_middle_of_data_error =
   Error.of_string "input closed in the middle of data"
 ;;
 
-let unpack_error error = Error.create "unpack error" error <:sexp_of< Error.t >>
+let unpack_error error = Error.create "unpack error" error [%sexp_of: Error.t]
 
 module Unpack_iter_result = struct
-  type ('a, 'b) t =
+  type 'a t =
     | Input_closed
-    | Input_closed_in_the_middle_of_data of ('a, 'b) Unpack_buffer.t
+    | Input_closed_in_the_middle_of_data of 'a Unpack_buffer.t
     | Unpack_error                       of Error.t
-  with sexp_of
+  [@@deriving sexp_of]
 
-  let to_error : (_, _) t -> Error.t = function
+  let to_error : _ t -> Error.t = function
     | Input_closed -> input_closed_error
     | Input_closed_in_the_middle_of_data _ -> input_closed_in_the_middle_of_data_error
     | Unpack_error error -> unpack_error error
@@ -24,14 +24,14 @@ module Unpack_iter_result = struct
 end
 
 module Unpack_result = struct
-  type ('a, 'b) t =
+  type 'a t =
     | Input_closed
-    | Input_closed_in_the_middle_of_data of ('a, 'b) Unpack_buffer.t
+    | Input_closed_in_the_middle_of_data of 'a Unpack_buffer.t
     | Output_closed
     | Unpack_error                       of Error.t
-  with sexp_of
+  [@@deriving sexp_of]
 
-  let to_error : (_, _) t -> Error.t =
+  let to_error : _ t -> Error.t =
     function
     | Input_closed -> input_closed_error
     | Input_closed_in_the_middle_of_data _ -> input_closed_in_the_middle_of_data_error
@@ -46,7 +46,7 @@ module Unpack_result = struct
     | Ok false    -> Input_closed_in_the_middle_of_data unpack_buffer
   ;;
 
-  let of_unpack_iter_result : (_, _) Unpack_iter_result.t -> (_, _) t = function
+  let of_unpack_iter_result : _ Unpack_iter_result.t -> _ t = function
     | Input_closed                         -> Input_closed
     | Input_closed_in_the_middle_of_data x -> Input_closed_in_the_middle_of_data x
     | Unpack_error e                       -> Unpack_error e
@@ -63,7 +63,7 @@ module Unpack_to = struct
   type 'a t =
     | Iter of ('a -> unit)
     | Pipe of 'a Pipe.Writer.t
-  with sexp_of
+  [@@deriving sexp_of]
 end
 
 let unpack_all ~(from : Unpack_from.t) ~(to_ : _ Unpack_to.t) ~using:unpack_buffer =
@@ -161,14 +161,14 @@ let unpack_iter ~from ~using ~f =
   | Unpack_error x                       -> Unpack_error x
   | Output_closed as t ->
     failwiths "Unpack_sequence.unpack_iter got unexpected value"
-      t <:sexp_of< (_, _) Unpack_result.t >>
+      t [%sexp_of: _ Unpack_result.t]
 ;;
 
-TEST_MODULE = struct
+let%test_module _ = (module struct
   module Unpack_result = struct
     include Unpack_result
 
-    let compare _compare_a _compare_b t1 t2 =
+    let compare _compare_a t1 t2 =
       match t1, t2 with
       | Input_closed, Input_closed -> 0
       | Input_closed_in_the_middle_of_data _, Input_closed_in_the_middle_of_data _ -> 0
@@ -201,8 +201,8 @@ TEST_MODULE = struct
     loop 0
   ;;
 
-  TEST_UNIT =
-    <:test_result< string list >>
+  let%test_unit _ =
+    [%test_result: string list]
       (break_into_pieces "foobarx" ~of_size:2)
       ~expect:[ "fo"; "ob"; "ar"; "x" ]
   ;;
@@ -212,7 +212,7 @@ TEST_MODULE = struct
       { a : string
       ; b : int
       }
-    with bin_io, compare, sexp
+    [@@deriving bin_io, compare, sexp]
 
     let unpack_buffer () = Unpack_buffer.create_bin_prot bin_reader_t
 
@@ -238,7 +238,7 @@ TEST_MODULE = struct
       Bigstring.to_string buf
     ;;
 
-    TEST_UNIT =
+    let%test_unit _ =
       let unpack_buffer = unpack_buffer () in
       ok_exn (Unpack_buffer.feed_string unpack_buffer bogus_data);
       let q = Queue.create () in
@@ -255,7 +255,7 @@ TEST_MODULE = struct
       String.create 1
     ;;
 
-    TEST_UNIT =
+    let%test_unit _ =
       let unpack_buffer = unpack_buffer () in
       ok_exn (Unpack_buffer.feed_string unpack_buffer partial_data);
       let q = Queue.create () in
@@ -329,7 +329,7 @@ TEST_MODULE = struct
           test_fn input output finished))
   ;;
 
-  TEST_UNIT "test various full reads" =
+  let%test_unit "test various full reads" =
     run_tests (fun input output finished ->
       Deferred.repeat_until_finished (values test_size) (fun values ->
         match values with
@@ -337,7 +337,7 @@ TEST_MODULE = struct
           Pipe.close input;
           finished
           >>= fun result ->
-          <:test_result< (Value.t, unit) Unpack_result.t >> result
+          [%test_result: Value.t Unpack_result.t] result
             ~expect:Unpack_result.Input_closed;
           return (`Finished ())
         | _ :: rest ->
@@ -352,13 +352,13 @@ TEST_MODULE = struct
               >>| function
               | `Eof | `Fewer _ -> assert false
               | `Exactly queue ->
-                <:test_result< Value.t list >> (Queue.to_list queue) ~expect:values;
+                [%test_result: Value.t list] (Queue.to_list queue) ~expect:values;
                 `Repeat (of_size + 1))
           >>= fun () ->
           return (`Repeat rest)))
   ;;
 
-  TEST_UNIT "input closed in middle of read" =
+  let%test_unit "input closed in middle of read" =
     run_tests (fun input output finished ->
       let values = values test_size in
       let buffer = Value.pack values ^ Value.partial_data in
@@ -367,17 +367,17 @@ TEST_MODULE = struct
       >>= function
       | `Eof | `Fewer _ -> assert false
       | `Exactly queue ->
-        <:test_result< Value.t list >> (Queue.to_list queue) ~expect:values;
+        [%test_result: Value.t list] (Queue.to_list queue) ~expect:values;
         Pipe.close input;
         finished
         >>= fun result ->
-        <:test_result< (Value.t, unit) Unpack_result.t >>
+        [%test_result: Value.t Unpack_result.t]
           result
           ~expect:(Input_closed_in_the_middle_of_data (Value.unpack_buffer ()));
         Deferred.unit)
   ;;
 
-  TEST_UNIT "output pipe closed" =
+  let%test_unit "output pipe closed" =
     (* This test relies on detecting that the output pipe has been closed. *)
     run_tests ~only_supports_output_to_pipe:true (fun _input output finished ->
       Pipe.close_read output;
@@ -387,11 +387,11 @@ TEST_MODULE = struct
       | `Eof ->
         finished
         >>= fun result ->
-        <:test_result< (Value.t, unit) Unpack_result.t >> result ~expect:Output_closed;
+        [%test_result: Value.t Unpack_result.t] result ~expect:Output_closed;
         Deferred.unit)
   ;;
 
-  TEST_UNIT "bad bin-io data" =
+  let%test_unit "bad bin-io data" =
     run_tests (fun input output finished ->
       let values = values test_size in
       let buffer = Value.pack values ^ Value.bogus_data in
@@ -400,10 +400,10 @@ TEST_MODULE = struct
       >>= function
       | `Eof | `Fewer _ -> assert false
       | `Exactly queue ->
-        <:test_result< Value.t list >> (Queue.to_list queue) ~expect:values;
+        [%test_result: Value.t list] (Queue.to_list queue) ~expect:values;
         finished
         >>| function
         | Unpack_error _ -> ()
         | _ -> assert false)
   ;;
-end
+end)

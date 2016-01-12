@@ -13,7 +13,7 @@ type t =
   ; monitor        : Monitor.t
   ; mutable failed : bool
   }
-with sexp_of
+[@@deriving sexp_of]
 
 let monitor t = t.monitor
 
@@ -42,13 +42,18 @@ let write_bigsubstring t ss =
     Writer.write_bigsubstring t.writer ss
 ;;
 
+let write_bigstring t ?pos ?len bigstring =
+  if not t.failed then
+    Writer.write_bigstring t.writer ?pos ?len bigstring
+;;
+
 let schedule_bigstring t ss =
   if not t.failed then
     Writer.schedule_bigstring t.writer ss
 
 let create ?(append = true) file =
   let monitor =
-    Monitor.create ~info:(Info.create "Async.File_writer" file <:sexp_of< string >>) ()
+    Monitor.create ~info:(Info.create "Async.File_writer" file [%sexp_of: string]) ()
   in
   within' ~monitor (fun () ->
     Deferred.create

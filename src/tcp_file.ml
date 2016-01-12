@@ -9,27 +9,27 @@ module Protocol = struct
       type t =
         | Read
         | Tail
-      with bin_io, sexp
+      [@@deriving bin_io, sexp]
     end
 
     module Error = struct
       type t =
         | File_not_found of string
         | Unknown        of string
-      with bin_io, sexp
+      [@@deriving bin_io, sexp]
 
       let to_string t = Sexp.to_string_hum (sexp_of_t t)
     end
 
     module Query = struct
-      type t = Open of string * Mode.t with bin_io, sexp
+      type t = Open of string * Mode.t [@@deriving bin_io, sexp]
     end
 
     module Message : sig
       type t =
         | String    of string
         | Bigstring of Bigstring.t
-      with bin_io, sexp_of
+      [@@deriving bin_io, sexp_of]
 
       val length        : t -> int
       val to_string     : t -> string option
@@ -39,7 +39,7 @@ module Protocol = struct
       type t =
         | String    of string
         | Bigstring of Bigstring.t
-      with bin_io
+      [@@deriving bin_io]
 
       let length t =
         match t with
@@ -70,7 +70,7 @@ module Protocol = struct
     end
 
     module Response = struct
-      type t = (Message.t, Error.t) Result.t with bin_io
+      type t = (Message.t, Error.t) Result.t [@@deriving bin_io]
     end
 
     let rpc ?client_pushes_back () =
@@ -86,6 +86,7 @@ module Protocol = struct
 end
 
 let canonicalize filename =
+  (* Remove multiple slashes in [filename]. *)
   let non_empty s = String.length s > 0 in
   let reform remainder = String.concat (List.filter remainder ~f:non_empty) ~sep:"/" in
   match String.split filename ~on:'/' with
@@ -108,7 +109,7 @@ module Server = struct
                                                           | `Closed
                                                           ]
       }
-    with sexp_of
+    [@@deriving sexp_of]
   end
 
   module Atomic_operations : sig
@@ -201,7 +202,7 @@ module Server = struct
       { files              : File.t String.Table.t
       ; mutable serving_on : Serving_on.t
       }
-    with sexp_of
+    [@@deriving sexp_of]
 
     let global =
       { files      = String.Table.create ()
@@ -232,7 +233,7 @@ module Server = struct
 
   exception Unexpected_eof_when_reading_lines
     of string * [ `Wanted_to_read of int ] * [ `But_only_managed of int ]
-  with sexp
+  [@@deriving sexp]
 
   let read (t : File.t) w aborted =
     Atomic_operations.snapshot_state t
@@ -319,7 +320,7 @@ module Server = struct
       server
   ;;
 
-  exception File_is_already_open_in_tcp_file of string with sexp
+  exception File_is_already_open_in_tcp_file of string [@@deriving sexp]
 
   let count_lines filename =
     Sys.file_exists filename
@@ -391,7 +392,7 @@ module Server = struct
       Ivar.read close_notification;
   ;;
 
-  exception Attempt_to_flush_static_tcp_file of string with sexp
+  exception Attempt_to_flush_static_tcp_file of string [@@deriving sexp]
 
   let flushed (t : File.t) =
     match t.writer with
@@ -399,8 +400,8 @@ module Server = struct
     | `This_is_a_static_file -> raise (Attempt_to_flush_static_tcp_file t.filename)
   ;;
 
-  exception Attempt_to_write_message_to_closed_tcp_file of string with sexp
-  exception Attempt_to_write_message_to_static_tcp_file of string with sexp
+  exception Attempt_to_write_message_to_closed_tcp_file of string [@@deriving sexp]
+  exception Attempt_to_write_message_to_static_tcp_file of string [@@deriving sexp]
 
   let gen_message (t : File.t) f =
     match t.writer with
@@ -494,17 +495,17 @@ module Client = struct
     let rpc = Protocol.Open_file.rpc ?client_pushes_back () in
     let filename = canonicalize filename in
     Rpc.Pipe_rpc.dispatch_exn rpc t (Open (filename, Read))
-    >>| fun (pipe_r, id) ->
+    >>| fun (pipe_r, md) ->
     Pipe.closed pipe_r >>> (fun () ->
-      Rpc.Pipe_rpc.abort rpc t id);
+      Rpc.Pipe_rpc.abort rpc t (Rpc.Pipe_rpc.Metadata.id md));
     pipe_r
 
   let tail ?client_pushes_back t filename =
     let filename = canonicalize filename in
     let rpc = Protocol.Open_file.rpc ?client_pushes_back () in
     Rpc.Pipe_rpc.dispatch_exn rpc t (Open (filename, Tail))
-    >>| fun (pipe_r, id) ->
+    >>| fun (pipe_r, md) ->
     Pipe.closed pipe_r >>> (fun () ->
-      Rpc.Pipe_rpc.abort rpc t id);
+      Rpc.Pipe_rpc.abort rpc t (Rpc.Pipe_rpc.Metadata.id md));
     pipe_r
 end

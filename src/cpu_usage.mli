@@ -35,7 +35,7 @@ module Summary : sig
     ; max : Percent.t
     ; avg : Percent.t
     }
-  with bin_io, sexp
+  [@@deriving bin_io, sexp]
 end
 
 (** Get summarized cpu usage.  Each window is the duration over which the summary should

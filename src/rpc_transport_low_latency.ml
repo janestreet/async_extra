@@ -5,6 +5,7 @@ module Kernel_transport = Rpc_kernel.Transport
 
 module Header         = Kernel_transport.Header
 module Handler_result = Kernel_transport.Handler_result
+module Send_result    = Kernel_transport.Send_result
 
 external writev2
   :  Core.Std.Unix.File_descr.t
@@ -37,14 +38,14 @@ module Config = struct
   let default_buffering_threshold_in_bytes = 32 * 1024
 
   type t =
-    { max_message_size                  : int            with default(default_max_message_size                 )
-    ; initial_buffer_size               : int            with default(default_initial_buffer_size              )
-    ; max_buffer_size                   : int            with default(default_max_buffer_size                  )
-    ; write_timeout                     : Time_ns.Span.t with default(default_write_timeout                    )
-    ; buffering_threshold_in_bytes      : int            with default(default_buffering_threshold_in_bytes     )
-    ; start_batching_after_num_messages : int            with default(default_start_batching_after_num_messages)
+    { max_message_size                  : int            [@default default_max_message_size                 ]
+    ; initial_buffer_size               : int            [@default default_initial_buffer_size              ]
+    ; max_buffer_size                   : int            [@default default_max_buffer_size                  ]
+    ; write_timeout                     : Time_ns.Span.t [@default default_write_timeout                    ]
+    ; buffering_threshold_in_bytes      : int            [@default default_buffering_threshold_in_bytes     ]
+    ; start_batching_after_num_messages : int            [@default default_start_batching_after_num_messages]
     }
-  with sexp
+  [@@deriving sexp]
 
   let validate t =
     if t.initial_buffer_size               <= 0                 ||
@@ -82,25 +83,29 @@ module Config = struct
 
   let default = create ()
 
-  let check_message_size t ~total_len =
-    if total_len < Header.length || total_len > t.max_message_size then
-      <:raise_structural_sexp<
-        "Rpc_transport_low_latency: message too small or too big"
-        { message_size = (total_len : int)
+  let message_size_ok t ~payload_len =
+    payload_len >= 0 && payload_len <= t.max_message_size
+  ;;
+
+  let check_message_size t ~payload_len =
+    if not (message_size_ok t ~payload_len) then
+      raise_s [%sexp
+        "Rpc_transport_low_latency: message too small or too big",
+        { message_size = (payload_len : int)
         ; config       = (t : t)
         }
-      >>
+      ]
   ;;
 
   let grow_buffer t buf ~new_size_request =
     assert (new_size_request > Bigstring.length buf);
     if new_size_request > t.max_buffer_size then
-      <:raise_structural_sexp<
-        "Rpc_transport_low_latency: cannot grow buffer"
+      raise_s [%sexp
+        "Rpc_transport_low_latency: cannot grow buffer",
         { new_size_request = (new_size_request : int)
         ; config           = (t : t)
         }
-      >>;
+      ];
     let new_size = Int.min t.max_buffer_size (Int.ceil_pow2 new_size_request) in
     realloc buf ~new_size;
   ;;
@@ -118,7 +123,7 @@ module Reader_internal = struct
     ; buf             : Bigstring.t
     ; mutable pos     : int (* Start of unconsumed data. *)
     ; mutable max     : int (* End   of unconsumed data. *)
-    } with sexp_of, fields
+    } [@@deriving sexp_of, fields]
 
   let create fd config =
     set_nonblocking fd;
@@ -164,6 +169,7 @@ module Reader_internal = struct
       match Unix.Syscall_result.Int.error_exn result with
       | EAGAIN | EWOULDBLOCK | EINTR ->
         `Nothing_available
+      | EPIPE  | ECONNRESET | ENETDOWN | ENETRESET | ENETUNREACH | ETIMEDOUT -> `Eof
       | error ->
         raise (Unix.Unix_error (error, "read", ""))
   ;;
@@ -201,7 +207,7 @@ module Reader_internal = struct
     if available >= Header.length then begin
       let payload_len = Header.unsafe_get_payload_length t.buf ~pos in
       let total_len = payload_len + Header.length in
-      Config.check_message_size t.config ~total_len;
+      Config.check_message_size t.config ~payload_len;
       if total_len <= available then
         Message_len.create_exn payload_len
       else begin
@@ -291,7 +297,7 @@ module Reader_internal = struct
         }
       in
       let monitor =
-        Monitor.create ~here:_here_
+        Monitor.create ~here:[%here]
           ~name:"Rpc_transport_low_latency.Reader_internal.Dispatcher.run"
           ()
       in
@@ -341,7 +347,7 @@ module Reader_internal = struct
     if t.reading then
       failwith "Rpc_transport_low_latency.Reader: already reading";
     t.reading <- true;
-    Monitor.protect ~here:_here_
+    Monitor.protect ~here:[%here]
       ~name:"Rpc_transport_low_latency.Reader_internal.read_forever"
       ~finally:(fun () -> t.reading <- false; Deferred.unit)
       (fun () -> Dispatcher.run t ~on_message ~on_end_of_batch)
@@ -362,7 +368,7 @@ module Writer_internal = struct
   type flush =
     { pos  : Int63.t
     ; ivar : unit Ivar.t
-    } with sexp_of
+    } [@@deriving sexp_of]
 
   let get_job_number () =
     Async_kernel.Scheduler.(num_jobs_run (t ()))
@@ -373,7 +379,7 @@ module Writer_internal = struct
       | Running
       | Final_flush
       | Closed
-    with sexp_of
+    [@@deriving sexp_of]
   end
 
   type t =
@@ -392,7 +398,7 @@ module Writer_internal = struct
     (* the job number of the job when we last sent data *)
     ; mutable last_send_job     : int
     ; mutable sends_in_this_job : int
-    } with sexp_of, fields
+    } [@@deriving sexp_of, fields]
 
   let create fd config =
     set_nonblocking fd;
@@ -537,12 +543,12 @@ module Writer_internal = struct
         | `Result `Ready -> write_everything t
         | `Timeout -> failwith "Rpc_transport_low_latency.Writer: timeout"
         | `Result (`Bad_fd | `Closed as result) ->
-          <:raise_structural_sexp<
-            "Rpc_transport_low_latency.Writer: fd changed"
+          raise_s [%sexp
+            "Rpc_transport_low_latency.Writer: fd changed",
             { t               = (t : t)
             ; ready_to_result = (result : [ `Bad_fd | `Closed ])
             }
-          >>
+          ]
   ;;
 
   let flush t =
@@ -613,15 +619,20 @@ module Writer_internal = struct
   ;;
 
   let slow_write_bin_prot_and_bigstring t (writer : _ Bin_prot.Type_class.writer) msg
-        ~buf ~pos ~len =
+        ~buf ~pos ~len : _ Send_result.t =
     let payload_len = writer.size msg + len in
     let total_len = Header.length + payload_len in
-    ensure_at_least t ~needed:total_len;
-    Header.unsafe_set_payload_length t.buf ~pos:t.pos payload_len;
-    let stop = writer.write t.buf ~pos:(t.pos + Header.length) msg in
-    assert (stop + len = t.pos + total_len);
-    Bigstring.blit ~src:buf ~dst:t.buf ~src_pos:pos ~dst_pos:stop  ~len;
-    t.pos <- stop + len;
+    if Config.message_size_ok t.config ~payload_len then begin
+      ensure_at_least t ~needed:total_len;
+      Header.unsafe_set_payload_length t.buf ~pos:t.pos payload_len;
+      let stop = writer.write t.buf ~pos:(t.pos + Header.length) msg in
+      assert (stop + len = t.pos + total_len);
+      Bigstring.blit ~src:buf ~dst:t.buf ~src_pos:pos ~dst_pos:stop  ~len;
+      t.pos <- stop + len;
+      Sent ()
+    end else
+      Message_too_big { size             = payload_len
+                      ; max_message_size = t.config.max_message_size }
   ;;
 
   let should_send_now t =
@@ -637,35 +648,49 @@ module Writer_internal = struct
   ;;
 
   let send_bin_prot_and_bigstring t (writer : _ Bin_prot.Type_class.writer) msg ~buf ~pos
-        ~len =
+        ~len : _ Send_result.t =
     if is_closed t then
-      failwith "Rpc_transport_low_latency.Writer: writer closed";
-    Ordered_collection_common.check_pos_len_exn ~pos ~len
-      ~length:(Bigstring.length buf);
-    if connection_alive t then begin
-      let send_now = should_send_now t in
-      if Bigstring.length t.buf - t.pos < Header.length then
-        slow_write_bin_prot_and_bigstring t writer msg ~buf ~pos ~len
-      else begin
-        match writer.write t.buf ~pos:(t.pos + Header.length) msg with
-        | exception Bin_prot.Common.Buffer_short ->
-          slow_write_bin_prot_and_bigstring t writer msg ~buf ~pos ~len
-        | stop ->
-          let payload_len = stop - (t.pos + Header.length) + len in
-          Header.unsafe_set_payload_length t.buf ~pos:t.pos payload_len;
-          t.pos <- stop;
-          if send_now then
-            unsafe_send_bytes t ~buf ~pos ~len
-          else
-            copy_bytes t ~buf ~pos ~len
-      end;
-      if send_now then flush t else schedule_flush t
+      Closed
+    else begin
+      Ordered_collection_common.check_pos_len_exn ~pos ~len
+        ~length:(Bigstring.length buf);
+      if connection_alive t then begin
+        let send_now = should_send_now t in
+        let result =
+          if Bigstring.length t.buf - t.pos < Header.length then
+            slow_write_bin_prot_and_bigstring t writer msg ~buf ~pos ~len
+          else begin
+            match writer.write t.buf ~pos:(t.pos + Header.length) msg with
+            | exception Bin_prot.Common.Buffer_short ->
+              slow_write_bin_prot_and_bigstring t writer msg ~buf ~pos ~len
+            | stop ->
+              let payload_len = stop - (t.pos + Header.length) + len in
+              if Config.message_size_ok t.config ~payload_len then begin
+                Header.unsafe_set_payload_length t.buf ~pos:t.pos payload_len;
+                t.pos <- stop;
+                if send_now then
+                  unsafe_send_bytes t ~buf ~pos ~len
+                else
+                  copy_bytes t ~buf ~pos ~len;
+                Sent ()
+              end else
+                Message_too_big { size             = payload_len
+                                ; max_message_size = t.config.max_message_size }
+          end
+        in
+        if send_now then flush t else schedule_flush t;
+        result
+      end else
+        Sent ()
     end
   ;;
 
+  let sent_deferred_unit = Send_result.Sent Deferred.unit
+
   let send_bin_prot_and_bigstring_non_copying t writer msg ~buf ~pos ~len =
-    send_bin_prot_and_bigstring t writer msg ~buf ~pos ~len;
-    Deferred.unit
+    match send_bin_prot_and_bigstring t writer msg ~buf ~pos ~len with
+    | Sent () -> sent_deferred_unit
+    | Closed | Message_too_big _ as r -> r
   ;;
 
   let dummy_buf = Bigstring.create 0
@@ -714,7 +739,7 @@ type t = Kernel_transport.t =
   { reader : Reader.t
   ; writer : Writer.t
   }
-with sexp_of
+[@@deriving sexp_of]
 
 let close = Kernel_transport.close
 
