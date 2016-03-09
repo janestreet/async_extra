@@ -10,8 +10,8 @@
    v}
 *)
 
-open Core.Std
-open Import
+open! Core.Std
+open! Import
 
 module Error : sig
   (** Errors are written to the pipe, and are nonrecoverable.  After an error, the pipe

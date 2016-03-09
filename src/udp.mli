@@ -14,8 +14,8 @@
 
     Instead, we use synchronous callbacks. *)
 
-open Core.Std
-open Import
+open! Core.Std
+open! Import
 
 type write_buffer = (read_write, Iobuf.seek) Iobuf.t
 
@@ -164,9 +164,11 @@ val read_loop_with_buffer_replacement
     [Config.init config] is used as a prototype for [bufs] and as one of the elements. *)
 val recvmmsg_loop
   : (?config           : Config.t       (** default is [Config.create ()] *)
-     -> ?max_count     : int
+     -> ?max_count     : int            (** default is [default_recvmmsg_loop_max_count],
+                                            which is 32 now *)
      -> ?on_wouldblock : (unit -> unit) (** callback if [recvmmsg] would block *)
      -> Fd.t
      -> (write_buffer array -> count : int -> unit)
      -> unit Deferred.t)
       Or_error.t
+val default_recvmmsg_loop_max_count : int

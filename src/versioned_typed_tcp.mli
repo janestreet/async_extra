@@ -1,5 +1,5 @@
-open Core.Std
-open Import
+open! Core.Std
+open! Import
 
 include module type of Versioned_typed_tcp_intf
 
@@ -112,6 +112,9 @@ sig
   (* Closes both the connection from the client to the repeater and the one from the
      repeater to the server. *)
   val close_connection_from_client : t -> Client_name.t -> unit
+
+  val drop_new_clients   : t -> unit
+  val accept_new_clients : t -> unit
 
   val shutdown : t -> unit Deferred.t
 end

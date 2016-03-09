@@ -19,8 +19,8 @@
     consumer meanwhile waits on [value_available].  This way the natural batch
     size is passed between the two sub-systems with minimal overhead. *)
 
-open Core.Std
-open Import
+open! Core.Std
+open! Import
 
 type ('a, 'phantom) t [@@deriving sexp_of]
 

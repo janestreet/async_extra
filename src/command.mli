@@ -1,6 +1,6 @@
 (** [Async.Command] is [Core.Command] with additional Async functions. *)
 
-open Import
+open! Import
 
 include module type of Core.Std.Command
   with type t      = Core.Std.Command.t

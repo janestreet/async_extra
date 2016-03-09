@@ -85,10 +85,38 @@ module Connection = struct
   ;;
 
   type transport_maker = Fd.t -> max_message_size:int -> Transport.t
+  type on_handshake_error = [ `Raise | `Ignore | `Call of (Exn.t -> unit) ]
 
   let default_transport_maker fd ~max_message_size =
     Transport.of_fd fd ~max_message_size
   ;;
+
+  let serve_with_transport
+        ~handshake_timeout
+        ~heartbeat_config
+        ~implementations
+        ~description
+        ~connection_state
+        ~on_handshake_error
+        transport =
+    collect_errors transport ~f:(fun () ->
+      Rpc_kernel.Connection.create
+        ?handshake_timeout:(Option.map handshake_timeout ~f:Time_ns.Span.of_span)
+        ?heartbeat_config
+        ~implementations ~description ~connection_state transport
+      >>= function
+      | Ok t -> close_finished t
+      | Error handshake_error ->
+        begin match on_handshake_error with
+        | `Call f -> f handshake_error
+        | `Raise  -> raise handshake_error
+        | `Ignore -> ()
+        end;
+        Deferred.unit)
+    >>= fun res ->
+    Transport.close transport
+    >>| fun () ->
+    Result.ok_exn res
 
   let serve
         ~implementations
@@ -115,25 +143,14 @@ module Connection = struct
                Socket.Address.sexp_of_t
            in
            let connection_state = initial_connection_state inet in
-           let transport = make_transport ~max_message_size (Socket.fd socket) in
-           collect_errors transport ~f:(fun () ->
-             Rpc_kernel.Connection.create
-               ?handshake_timeout:(Option.map handshake_timeout ~f:Time_ns.Span.of_span)
-               ?heartbeat_config
-               ~implementations ~description ~connection_state transport
-             >>= function
-             | Ok t -> close_finished t
-             | Error handshake_error ->
-               begin match on_handshake_error with
-               | `Call f -> f handshake_error
-               | `Raise  -> raise handshake_error
-               | `Ignore -> ()
-               end;
-               Deferred.unit)
-           >>= fun res ->
-           Transport.close transport
-           >>| fun () ->
-           Result.ok_exn res
+           serve_with_transport
+             ~handshake_timeout
+             ~heartbeat_config
+             ~implementations
+             ~description
+             ~connection_state
+             ~on_handshake_error
+             (make_transport ~max_message_size (Socket.fd socket))
          end)
   ;;
 
@@ -175,8 +192,7 @@ module Connection = struct
         Info.tag_arg desc "via TCP" (host, port) [%sexp_of: string * int]
     in
     let handshake_timeout = Time_ns.diff finish_handshake_by (Time_ns.now ()) in
-    let transport = make_transport (Socket.fd sock) ~max_message_size in
-    begin
+    let transport = make_transport (Socket.fd sock) ~max_message_size in begin
       match implementations with
       | None ->
         let { Client_implementations. connection_state; implementations } =

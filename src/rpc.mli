@@ -3,8 +3,8 @@
     For documentation, see [Rpc] and [Connection_intf] in the [Async_rpc_kernel] library.
 *)
 
-open Core.Std
-open Import
+open! Core.Std
+open! Import
 
 module Transport = Rpc_transport
 module Low_latency_transport = Rpc_transport_low_latency
@@ -74,6 +74,7 @@ module Connection : sig
       ]}
   *)
   type transport_maker = Fd.t -> max_message_size:int -> Transport.t
+  type on_handshake_error = [ `Raise | `Ignore | `Call of (Exn.t -> unit) ]
 
   (** [serve implementations ~port ?on_handshake_error ()] starts a server with the given
       implementation on [port].  The optional auth function will be called on all incoming
@@ -94,9 +95,19 @@ module Connection : sig
     -> ?heartbeat_config        : Heartbeat_config.t
     -> ?auth                    : ('address -> bool)
     (** default is [`Ignore] *)
-    -> ?on_handshake_error : [ `Raise | `Ignore | `Call of (Exn.t -> unit) ]
+    -> ?on_handshake_error : on_handshake_error
     -> unit
     -> ('address, 'listening_on) Tcp.Server.t Deferred.t
+
+  val serve_with_transport
+    : handshake_timeout   : Time.Span.t option
+    -> heartbeat_config   : Heartbeat_config.t option
+    -> implementations    : 's Implementations.t
+    -> description        : Info.t
+    -> connection_state   : (t -> 's)
+    -> on_handshake_error : on_handshake_error
+    -> Transport.t
+    -> unit Deferred.t
 
   module Client_implementations : sig
     type nonrec 's t =

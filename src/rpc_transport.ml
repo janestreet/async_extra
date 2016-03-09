@@ -6,23 +6,23 @@ module Async_writer = Writer
 
 module Kernel_transport = Rpc_kernel.Transport
 
-module Header         = Kernel_transport.Header
+module Header = Kernel_transport.Header
 module Handler_result = Kernel_transport.Handler_result
-module Send_result    = Kernel_transport.Send_result
+module Send_result = Kernel_transport.Send_result
 
 module With_limit : sig
   type 'a t = private
-    { t                : 'a
+    { t : 'a
     ; max_message_size : int
     }
   [@@deriving sexp_of]
 
   val create : 'a -> max_message_size:int -> 'a t
-  val message_size_ok    : _ t -> payload_len:int -> bool
+  val message_size_ok : _ t -> payload_len:int -> bool
   val check_message_size : _ t -> payload_len:int -> unit
 end = struct
   type 'a t =
-    { t                : 'a
+    { t : 'a
     ; max_message_size : int
     }
   [@@deriving sexp_of]
@@ -55,13 +55,13 @@ module Unix_reader = struct
     With_limit.create reader ~max_message_size
   ;;
 
-  let close     t = Reader.close          t.t
-  let is_closed t = Reader.is_closed      t.t
+  let close t = Reader.close t.t
+  let is_closed t = Reader.is_closed t.t
 
   let all_unit_then_return l ret_val =
     match l with
     | [] -> return ret_val (* avoid deferred operations in the common case *)
-    | _  -> Deferred.all_unit l >>| fun () -> ret_val
+    | _ -> Deferred.all_unit l >>| fun () -> ret_val
   ;;
 
   let read_forever t ~on_message ~on_end_of_batch =
@@ -123,9 +123,9 @@ module Unix_writer = struct
     With_limit.create writer ~max_message_size
   ;;
 
-  let close          t = Writer.close          t.t
-  let is_closed      t = Writer.is_closed      t.t
-  let monitor        t = Writer.monitor        t.t
+  let close t = Writer.close t.t
+  let is_closed t = Writer.is_closed t.t
+  let monitor t = Writer.monitor t.t
   let bytes_to_write t = Writer.bytes_to_write t.t
 
   let stopped t = Deferred.any [ Writer.close_started t.t; Writer.consumer_left t.t ]
@@ -150,7 +150,7 @@ module Unix_writer = struct
           bin_writer.write x;
         Sent ()
       end else
-        Message_too_big { size             = payload_len
+        Message_too_big { size = payload_len
                         ; max_message_size = t.max_message_size }
     end else
       Closed

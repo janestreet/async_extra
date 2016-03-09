@@ -207,18 +207,19 @@ module Server = struct
   end
 
   type ('address, 'listening_on)  t =
-    { socket                    : ([ `Passive ], 'address) Socket.t
-    ; listening_on              : 'listening_on
-    ; on_handler_error          : [ `Raise
-                                  | `Ignore
-                                  | `Call of ('address -> exn -> unit)
-                                  ]
-    ; handle_client             : 'address
-                                -> ([ `Active ], 'address) Socket.t
-                                -> (unit, exn) Result.t Deferred.t
-    ; max_connections           : int
-    ; connections               : 'address Connection.t Bag.t
-    ; mutable accept_is_pending : bool
+    { socket                            : ([ `Passive ], 'address) Socket.t
+    ; listening_on                      : 'listening_on
+    ; on_handler_error                  : [ `Raise
+                                          | `Ignore
+                                          | `Call of ('address -> exn -> unit)
+                                          ]
+    ; handle_client                     : ('address
+                                           -> ([ `Active ], 'address) Socket.t
+                                           -> (unit, exn) Result.t Deferred.t)
+    ; max_connections                   : int
+    ; connections                       : 'address Connection.t Bag.t
+    ; mutable accept_is_pending         : bool
+    ; mutable drop_incoming_connections : bool
     }
   [@@deriving fields, sexp_of]
 
@@ -258,6 +259,7 @@ module Server = struct
           assert (num_connections >= 0);
           assert (num_connections <= t.max_connections)))
         ~accept_is_pending:ignore
+        ~drop_incoming_connections:ignore
     with exn ->
       failwiths "invariant failed" (exn, t) [%sexp_of: exn * (_, _) t]
   ;;
@@ -294,7 +296,7 @@ module Server = struct
       | `Ok (client_socket, client_address) ->
         (* It is possible that someone called [close t] after the [accept] returned but
            before we got here.  In that case, we just close the client. *)
-        if is_closed t
+        if is_closed t || t.drop_incoming_connections
         then don't_wait_for (Fd.close (Socket.fd client_socket))
         else begin
           let connection = Connection.create ~client_socket ~client_address in
@@ -342,12 +344,13 @@ module Server = struct
     >>| fun socket ->
     let t =
       { socket
-      ; listening_on      = where_to_listen.listening_on (Socket.getsockname socket)
+      ; listening_on              = where_to_listen.listening_on (Socket.getsockname socket)
       ; on_handler_error
       ; handle_client
       ; max_connections
-      ; connections       = Bag.create ()
-      ; accept_is_pending = false
+      ; connections               = Bag.create ()
+      ; accept_is_pending         = false
+      ; drop_incoming_connections = false
       }
     in
     maybe_accept t;

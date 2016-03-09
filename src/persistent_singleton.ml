@@ -14,6 +14,19 @@ module type S = sig
   val load
     :  string
     -> default:persistent_singleton
+    -> persistent_singleton Or_error.t Deferred.t
+
+  val load'
+    :  string
+    -> default:persistent_singleton
+    -> [ `Ok of persistent_singleton
+       | `Can_not_load_due_to_unclean_shutdown
+       | `Can_not_determine_whether_file_exists
+       ] Deferred.t
+
+  val load_exn
+    :  string
+    -> default:persistent_singleton
     -> persistent_singleton Deferred.t
 
   val save
@@ -29,25 +42,32 @@ module Make (Z : Arg) : S with type persistent_singleton = Z.t = struct
     Writer.save_sexp file (Option.sexp_of_t Z.sexp_of_t option)
   ;;
 
-  exception Can_not_determine_whether_file_exists of string [@@deriving sexp]
-  exception Can_not_load_due_to_unclean_shutdown of string [@@deriving sexp]
+  let load' file ~default =
+    Sys.file_exists file
+    >>= function
+    | `Unknown -> return `Can_not_determine_whether_file_exists
+    | `No      -> return (`Ok default)
+    | `Yes     ->
+      Reader.load_sexp_exn file (Option.t_of_sexp Z.t_of_sexp)
+      >>= fun res ->
+      save_sexp file None
+      >>| fun () ->
+      match res with
+      | Some res -> `Ok res
+      | None     -> `Can_not_load_due_to_unclean_shutdown
+  ;;
 
   let load file ~default =
-    let res =
-      Sys.file_exists file
-      >>= function
-      | `Yes -> Reader.load_sexp_exn file (Option.t_of_sexp Z.t_of_sexp)
-      | `No -> return (Some default)
-      | `Unknown -> raise (Can_not_determine_whether_file_exists file)
-    in
-    res
-    >>= fun res ->
-    save_sexp file None
-    >>| fun () ->
-    match res with
-    | None -> raise (Can_not_load_due_to_unclean_shutdown file)
-    | Some res -> res
+    load' file ~default
+    >>| function
+    | `Ok x -> Ok x
+    | `Can_not_load_due_to_unclean_shutdown ->
+      error_s [%message [%here] "can not load due to unclean shutdown" (file : string)]
+    | `Can_not_determine_whether_file_exists ->
+      error_s [%message [%here] "can not determine whether file exists" (file : string)]
   ;;
+
+  let load_exn file ~default = load file ~default >>| ok_exn
 
   let save file ~value = save_sexp file (Some value)
 end

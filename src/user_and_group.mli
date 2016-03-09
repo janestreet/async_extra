@@ -1,5 +1,5 @@
-open Core.Std
-open Import
+open! Core.Std
+open! Import
 
 (** Wrapper around Core.Std.User_and_group with a deferred [for_this_process] /
     [for_this_process_exn]. *)

@@ -252,6 +252,10 @@ let read_loop ?config fd f =
   >>| (ignore : (_, _) Iobuf.t -> unit)
 ;;
 
+(* Too small a [max_count] here negates the value of [recvmmsg], while too large risks
+   starvation of other ready file descriptors.  32 was chosen empirically to stay below
+   ~64kb of data, assuming a standard Ethernet MTU. *)
+let default_recvmmsg_loop_max_count = 32
 let recvmmsg_loop =
   let create_buffers ~max_count config =
     let len = Config.capacity config in
@@ -267,10 +271,7 @@ let recvmmsg_loop =
   Or_error.map Iobuf.recvmmsg_assume_fd_is_nonblocking ~f:(fun recvmmsg ->
     (fun
       ?(config = Config.create ())
-      (* Too small a [max_count] here negates the value of [recvmmsg], while too large
-         risks starvation of other ready file descriptors. 32 was chosen empircally to
-         stay below ~64kb of data, assuming a standard ethernet MTU. *)
-      ?(max_count = 32)
+      ?(max_count = default_recvmmsg_loop_max_count)
       ?(on_wouldblock = (fun () -> ()))
       fd
       f

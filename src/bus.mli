@@ -9,7 +9,7 @@ include module type of struct include Core_kernel.Bus end
 (** [pipe1_exn t] returns a pipe of updates from [t].  If the pipe is closed you
     will be unsubscribed.  [pipe1_exn] raises in the same circumstances as
     [subscribe_exn]. *)
-val pipe1_exn : ('a -> unit) Read_only.t -> 'a Pipe.Reader.t
+val pipe1_exn : ('a -> unit) Read_only.t -> Source_code_position.t -> 'a Pipe.Reader.t
 
 module First_arity : sig
   type (_, _, _) t =

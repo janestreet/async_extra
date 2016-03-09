@@ -1572,6 +1572,16 @@ struct
     Server.send_to_all_ignore_errors t.server msg
   ;;
 
+  let tcp_server t = t.server.tcp_server
+
+  let drop_new_clients t =
+    Tcp.Server.set_drop_incoming_connections (tcp_server t) true
+  ;;
+
+  let accept_new_clients t =
+    Tcp.Server.set_drop_incoming_connections (tcp_server t) false
+  ;;
+
   let shutdown t =
     Server.shutdown t.server >>| fun () ->
     Hashtbl.iter_vals t.clients ~f:Client.close_connection

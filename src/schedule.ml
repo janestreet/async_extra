@@ -197,7 +197,7 @@ module Every = struct
     Deferred.join (choose [ stop_choice ; start_choice ])
   ;;
 
-  let enter t
+  let enter_without_pushback t
         ?(start                   = Time.now ())
         ?(stop                    = Deferred.never ())
         ?(continue_on_error       = true)
@@ -214,7 +214,7 @@ module Every = struct
     |> don't_wait_for
   ;;
 
-  let tag_change t
+  let tag_change_without_pushback t
         ?(start                   = Time.now ())
         ?(stop                    = Deferred.never ())
         ?(continue_on_error       = true)
@@ -233,8 +233,88 @@ module Every = struct
 
 end
 
-let every_enter = Every.enter
-let every_tag_change = Every.tag_change
+type 'a every_enter_callback = enter:Time.t -> leave:Time.t Deferred.t -> 'a
+
+let every_enter_without_pushback = Every.enter_without_pushback
+let every_tag_change_without_pushback = Every.tag_change_without_pushback
+
+let do_nothing_on_pushback ~enter:_ ~leave:_ = ()
+
+let every_enter
+      t
+      ?start
+      ?stop
+      ?(continue_on_error = true)
+      ?(start_in_range_is_enter = true)
+      ?(on_pushback=do_nothing_on_pushback)
+      on_enter
+  =
+  let prior_event_finished = ref (return ()) in
+  every_enter_without_pushback
+    t
+    ?start
+    ?stop
+    ~continue_on_error
+    ~start_in_range_is_enter
+    (fun ~enter ~leave ->
+       if Deferred.is_determined !prior_event_finished
+       then begin
+         if not continue_on_error
+         then prior_event_finished := on_enter ~enter ~leave
+         else
+           don't_wait_for (
+             try_with (fun () ->
+               let finished = on_enter ~enter ~leave in
+               prior_event_finished := finished;
+               finished)
+             >>| function
+             | Ok () -> ()
+             | Error e ->
+               prior_event_finished := Deferred.unit;
+               raise e)
+       end
+       else on_pushback ~enter ~leave)
+;;
+
+let do_nothing_on_tag_change_pushback ~tags:_ ~enter:_ ~leave:_ = ()
+
+let every_tag_change
+      t
+      ?start
+      ?stop
+      ?(continue_on_error = true)
+      ?(start_in_range_is_enter = true)
+      ?(on_pushback=do_nothing_on_tag_change_pushback)
+      ~tag_equal
+      on_tag_change
+  =
+  let prior_event_finished = ref (return ()) in
+  every_tag_change_without_pushback
+    t
+    ?start
+    ?stop
+    ~continue_on_error
+    ~start_in_range_is_enter
+    ~tag_equal
+    (fun ~tags ~enter ~leave ->
+       if Deferred.is_determined !prior_event_finished
+       then begin
+         if not continue_on_error
+         then prior_event_finished := on_tag_change ~tags ~enter ~leave
+         else
+           don't_wait_for (
+             try_with (fun () ->
+               let finished = on_tag_change ~tags ~enter ~leave in
+               prior_event_finished := finished;
+               finished)
+             >>| function
+             | Ok () -> ()
+             | Error e ->
+               prior_event_finished := Deferred.unit;
+               raise e)
+       end
+       else on_pushback ~tags ~enter ~leave)
+;;
 
 let%test_module "test run loop semenatics" = (module struct
   let async_unit_test = Thread_safe.block_on_async_exn

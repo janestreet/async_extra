@@ -3,8 +3,8 @@
     upacked values or iterate a user-supplied function over the unpacked values.
 *)
 
-open Core.Std
-open Import
+open! Core.Std
+open! Import
 
 module Unpack_iter_result : sig
   type 'a t =
@@ -53,9 +53,9 @@ val unpack_into_pipe
   -> using : 'a Unpack_buffer.t
   -> 'a Pipe.Reader.t * 'a Unpack_result.t Deferred.t
 
-(* [unpack_iter] is a more efficient version of [unpack_into_pipe] that calls [f] on each
-   value as it is unpacked, rather than putting the value into a pipe.  If [f] raises,
-   then the result will be [Unpack_error]. *)
+(** [unpack_iter] is a more efficient version of [unpack_into_pipe] that calls [f] on each
+    value as it is unpacked, rather than putting the value into a pipe.  If [f] raises,
+    then the result will be [Unpack_error]. *)
 val unpack_iter
   :  from  : Unpack_from.t
   -> using : 'a Unpack_buffer.t

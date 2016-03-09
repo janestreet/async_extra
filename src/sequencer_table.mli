@@ -32,8 +32,8 @@
     ~key None].
 *)
 
-open Core.Std
-open Import
+open! Core.Std
+open! Import
 
 module Make (Key : Hashable) : sig
 

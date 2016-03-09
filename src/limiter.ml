@@ -189,6 +189,19 @@ module Expert = struct
           fail_job t job "requested job size (%g) exceeds the possible size (%g)"
             amount bucket_limit;
         | Taken  ->
+          (* These semantics are copied from the current Throttle, and it was
+             important enough there to add a specific unit test.  If you have
+
+             do_f ();
+             enqueue thing_to_do_later;
+             do_g ();
+
+             it is surprising if any portion of the closure thing_to_do_later happens, so
+             we always schedule the work for later on the Async queue.
+
+             This isn't as efficient as it could be for immediate jobs and can be avoided
+             with [run_or_enqueue].
+          *)
           if allow_immediate_run
           then run_job_now t job ~return_after:(Some amount)
           else Async_kernel.Scheduler.enqueue

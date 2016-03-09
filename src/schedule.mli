@@ -1,5 +1,5 @@
-open Core.Std
-open Import
+open! Core.Std
+open! Import
 
 include module type of struct include Core.Std.Schedule end
 
@@ -43,9 +43,11 @@ val next_event
   -> unit
   -> Time.t Deferred.t
 
-(** [every_enter t ~start ~stop ~continue_on_error ~start_in_range_is_enter f] calls [f]
-    for each contiguous block of time in [t] starting at [start] and continuing until
-    [stop] becomes determined.
+type 'a every_enter_callback = enter:Time.t -> leave:Time.t Deferred.t -> 'a
+
+(** [every_enter_without_pushback t ~start ~stop ~continue_on_error ~start_in_range_is_enter f]
+    calls [f] for each contiguous block of time in [t] starting at [start] and continuing
+    until [stop] becomes determined.
 
     For each block of time with start time [enter] and end time [leave_time], [f] is
     called with [f ~enter ~leave], where [leave] is a deferred that becomes determined at
@@ -61,13 +63,26 @@ val next_event
 
     If [stop] is fulfilled then no further calls to [f] will be made and all undetermined
     [leave] deferreds will remain unfulfilled. *)
+val every_enter_without_pushback
+  :  (zoned, _) t
+  -> ?start:Time.t                  (** defaults to [Time.now ()] *)
+  -> ?stop:unit Deferred.t          (** defaults to [Deferred.never ()] *)
+  -> ?continue_on_error:bool        (** defaults to [true] *)
+  -> ?start_in_range_is_enter:bool  (** defaults to [true] *)
+  -> unit every_enter_callback
+  -> unit
+
+(** Like [every_enter_without_pushback], except allows at most one call of [f] to be in
+    flight at a time. If the schedule would cause [f] to be invoked again before the prior
+    call has finished, then it invokes [on_pushback] instead (if provided). *)
 val every_enter
   :  (zoned, _) t
   -> ?start:Time.t                  (** defaults to [Time.now ()] *)
   -> ?stop:unit Deferred.t          (** defaults to [Deferred.never ()] *)
   -> ?continue_on_error:bool        (** defaults to [true] *)
   -> ?start_in_range_is_enter:bool  (** defaults to [true] *)
-  -> (enter:Time.t -> leave:Time.t Deferred.t -> unit)
+  -> ?on_pushback:unit every_enter_callback (** defaults to doing nothing *)
+  -> unit Deferred.t every_enter_callback
   -> unit
 
 (** [every_tag_change t f] calls [f] for each contiguous block of time in [t] where the
@@ -82,12 +97,26 @@ val every_enter
 
     [stop], [continue_on_error], and [start_in_range_is_enter] act as documented in
     [every_enter]. *)
-val every_tag_change
+val every_tag_change_without_pushback
   :  (zoned, 'tag) t
   -> ?start:Time.t                  (** defaults to [Time.now ()] *)
   -> ?stop:unit Deferred.t          (** defaults to [Deferred.never ()] *)
   -> ?continue_on_error:bool        (** defaults to [true] *)
   -> ?start_in_range_is_enter:bool  (** defaults to [true] *)
   -> tag_equal:('tag -> 'tag -> bool)
-  -> (tags:'tag list -> enter:Time.t -> leave:Time.t Deferred.t -> unit)
+  -> (tags:'tag list -> unit every_enter_callback)
   -> unit
+
+(** Like [every_tag_change_without_pushback], but pushes back in the same manner as
+    [every_enter]. *)
+val every_tag_change
+  :  (zoned, 'tag) t
+  -> ?start:Time.t                  (** defaults to [Time.now ()] *)
+  -> ?stop:unit Deferred.t          (** defaults to [Deferred.never ()] *)
+  -> ?continue_on_error:bool        (** defaults to [true] *)
+  -> ?start_in_range_is_enter:bool  (** defaults to [true] *)
+  -> ?on_pushback:(tags:'tag list -> unit every_enter_callback) (** defaults to doing nothing *)
+  -> tag_equal:('tag -> 'tag -> bool)
+  -> (tags:'tag list -> unit Deferred.t every_enter_callback)
+  -> unit
+

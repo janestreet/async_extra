@@ -1,3 +1,20 @@
+## 113.33.00
+
+- Rename `Async.Std.Schedule.every_{enter,tag_change}` to
+  `Async.Std.Schedule.every_{enter,tag_change}_without_pushback` and introduce
+  `Async.Std.Schedule.every_{enter,tag_change}` with pushback behavior.
+
+  The resulting functions are analogous to `Pipe.iter_without_pushback` and
+  `Pipe.iter`.
+
+- Replaced `Persistent_rpc_client` with a successor `Persistent_connection`
+  for maintaining persistent connections to all manner of services, not
+  just rpc servers.
+
+- Make `Bus.pipe1_exn` take a `Source_position.t` to be more consistent with
+  `first_exn` and `iter_exn`.  This also shows better debug sexps on `Bus` when
+  multiple pipes are subscribed to the bus.
+
 ## 113.24.00
 
 N.B. some changes happening for this release are not listed in this changelog

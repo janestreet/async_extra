@@ -54,8 +54,8 @@
     ]}
 *)
 
-open Core.Std
-open Import
+open! Core.Std
+open! Import
 
 type t [@@deriving bin_io, sexp]
 

@@ -1,49 +1,7 @@
 open Core.Std
 open Import
 
-module type S = sig
-  type t
-  type address
-  type conn
-
-  module Event : sig
-    type t =
-      | Attempting_to_connect
-      | Obtained_address      of address
-      | Failed_to_connect     of Error.t
-      | Connected             of Rpc.Connection.t sexp_opaque
-      | Disconnected
-    [@@deriving sexp_of]
-  end
-
-  val create
-    :  server_name : string
-    -> ?log        : Log.t
-    -> ?on_event   : (Event.t -> unit)
-    -> connect     : (address -> conn Or_error.t Deferred.t)
-    -> (unit -> address Or_error.t Deferred.t)
-    -> t
-
-  val connected : t -> conn Deferred.t
-
-  val current_connection : t -> conn option
-
-  val close : t -> unit Deferred.t
-
-  val is_closed      : t -> bool
-
-  val close_finished : t -> unit Deferred.t
-end
-
-module type T = sig
-  module Address : sig
-    type t [@@deriving sexp_of]
-    val equal : t -> t -> bool
-  end
-
-  type t
-  val rpc_connection : t -> Rpc.Connection.t
-end
+include Persistent_connection_intf
 
 module Make (Conn : T) = struct
   type address = Conn.Address.t [@@deriving sexp_of]
@@ -54,7 +12,7 @@ module Make (Conn : T) = struct
       | Attempting_to_connect
       | Obtained_address      of address
       | Failed_to_connect     of Error.t
-      | Connected             of Rpc.Connection.t sexp_opaque
+      | Connected             of conn sexp_opaque
       | Disconnected
     [@@deriving sexp_of]
 
@@ -75,13 +33,18 @@ module Make (Conn : T) = struct
     let handle t { Handler. server_name ; log ; on_event } =
       on_event t;
       Option.iter log ~f:(fun log ->
-        Log.sexp log t sexp_of_t ~level:(log_level t)
-          ~tags:[("persistent-connection-to", server_name)])
+        if Log.would_log log (Some (log_level t))
+        then
+          Log.sexp
+            log
+            ~tags:[("persistent-connection-to", server_name)]
+            ~level:(log_level t) (sexp_of_t t))
   end
 
   type t =
     { get_address    : unit -> address Or_error.t Deferred.t
     ; connect        : address -> Conn.t Or_error.t Deferred.t
+    ; retry_delay    : unit -> unit Deferred.t
     ; mutable conn   : [`Ok of Conn.t | `Close_started] Ivar.t
     ; event_handler  : Event.Handler.t
     ; close_started  : unit Ivar.t
@@ -90,10 +53,6 @@ module Make (Conn : T) = struct
   [@@deriving fields]
 
   let handle_event t event = Event.handle event t.event_handler
-
-  (* How long to wait between connection attempts.  This value is randomized to avoid all
-     clients hitting the server at the same time. *)
-  let retry_delay () = Time.Span.randomize ~percent:0.3 (sec 10.)
 
   (* This function focuses in on the the error itself, discarding information about which
      monitor caught the error, if any.
@@ -138,19 +97,22 @@ module Make (Conn : T) = struct
           in
           previous_error := Some err;
           if not same_as_previous_error then handle_event t (Failed_to_connect err);
-          after (retry_delay ())
+          t.retry_delay ()
           >>= fun () ->
           loop ()
       end
     in
     loop ()
 
-  let create ~server_name ?log ?(on_event = ignore) ~connect get_address =
+  let create ~server_name ?log ?(on_event = ignore) ?(retry_delay = const (sec 10.))
+        ~connect get_address =
     let event_handler = { Event.Handler. server_name; log; on_event } in
+    let retry_delay () = after (Time.Span.randomize ~percent:0.3 (retry_delay ())) in
     let t =
       { event_handler
       ; get_address
       ; connect
+      ; retry_delay
       ; conn           = Ivar.create ()
       ; close_started  = Ivar.create ()
       ; close_finished = Ivar.create ()
@@ -160,15 +122,15 @@ module Make (Conn : T) = struct
        leave [t.conn] filled with [`Close_started]. *)
     don't_wait_for @@ Deferred.repeat_until_finished () (fun () ->
       handle_event t Attempting_to_connect;
-      let ready_to_retry_connecting = after (retry_delay ()) in
+      let ready_to_retry_connecting = t.retry_delay () in
       try_connecting_until_successful t
       >>= fun maybe_conn ->
       Ivar.fill t.conn maybe_conn;
       match maybe_conn with
       | `Close_started -> return (`Finished ())
       | `Ok conn ->
-        handle_event t (Connected (Conn.rpc_connection conn));
-        Rpc.Connection.close_finished (Conn.rpc_connection conn)
+        handle_event t (Connected conn);
+        Conn.close_finished conn
         >>= fun () ->
         t.conn <- Ivar.create ();
         handle_event t Disconnected;
@@ -188,14 +150,14 @@ module Make (Conn : T) = struct
     (* Take care not to return a connection that is known to be closed at the time
        [connected] was called.  This could happen in client code that behaves like
        {[
-         Persistent_rpc_client.connected t
+         Persistent_connection.Rpc.connected t
          >>= fun c1 ->
          ...
            Rpc.Connection.close_finished c1
          (* at this point we are in a race with the same call inside
             persistent_client.ml *)
          >>= fun () ->
-         Persistent_rpc_client.connected t
+         Persistent_connection.Rpc.connected t
          (* depending on how the race turns out, we don't want to get a closed connection
             here *)
          >>= fun c2 ->
@@ -214,10 +176,9 @@ module Make (Conn : T) = struct
         end
       | Some `Close_started -> Deferred.never ()
       | Some (`Ok conn) ->
-        let rpc_conn = Conn.rpc_connection conn in
-        if Rpc.Connection.is_closed rpc_conn then
+        if Conn.is_closed conn then
           (* give the reconnection loop a chance to overwrite the ivar *)
-          Rpc.Connection.close_finished rpc_conn >>= loop
+          Conn.close_finished conn >>= loop
         else
           return conn
     in
@@ -242,36 +203,43 @@ module Make (Conn : T) = struct
       begin
         match conn_opt with
         | `Close_started -> Deferred.unit
-        | `Ok conn -> Rpc.Connection.close (Conn.rpc_connection conn)
+        | `Ok conn -> Conn.close conn
       end
       >>| fun () ->
       Ivar.fill t.close_finished ()
     end
 end
 
-module Versioned = Make (struct
+module Versioned_rpc = Make (struct
     module Address = Host_and_port
     type t = Versioned_rpc.Connection_with_menu.t
     let rpc_connection = Versioned_rpc.Connection_with_menu.connection
+    let close          t = Rpc.Connection.close          (rpc_connection t)
+    let is_closed      t = Rpc.Connection.is_closed      (rpc_connection t)
+    let close_finished t = Rpc.Connection.close_finished (rpc_connection t)
   end)
 
-include Make (struct
-    module Address = Host_and_port
-    type t = Rpc.Connection.t
-    let rpc_connection = Fn.id
-  end)
+module Rpc = struct
 
-(* convenience wrapper *)
-let create ~server_name ?log ?on_event ?via_local_interface ?implementations
-      ?max_message_size ?make_transport ?handshake_timeout
-      ?heartbeat_config get_address =
-  let connect host_and_port =
-    let (host, port) = Host_and_port.tuple host_and_port in
-    Rpc.Connection.client ~host ~port ?via_local_interface ?implementations
-      ?max_message_size ?make_transport ?handshake_timeout
-      ?heartbeat_config
-      ~description:(Info.of_string ("persistent connection to " ^ server_name)) ()
-    >>| Or_error.of_exn_result
-  in
-  create ~server_name ?log ?on_event ~connect get_address
+  include Make (struct
+      module Address = Host_and_port
+      type nonrec t = Rpc.Connection.t
+      let close          t = Rpc.Connection.close          t
+      let is_closed      t = Rpc.Connection.is_closed      t
+      let close_finished t = Rpc.Connection.close_finished t
+    end)
 
+  (* convenience wrapper *)
+  let create' ~server_name ?log ?on_event ?retry_delay ?via_local_interface ?implementations
+        ?max_message_size ?make_transport ?handshake_timeout
+        ?heartbeat_config get_address =
+    let connect host_and_port =
+      let (host, port) = Host_and_port.tuple host_and_port in
+      Rpc.Connection.client ~host ~port ?via_local_interface ?implementations
+        ?max_message_size ?make_transport ?handshake_timeout
+        ?heartbeat_config
+        ~description:(Info.of_string ("persistent connection to " ^ server_name)) ()
+      >>| Or_error.of_exn_result
+    in
+    create ~server_name ?log ?on_event ?retry_delay ~connect get_address
+end

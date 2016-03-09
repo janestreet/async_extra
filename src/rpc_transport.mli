@@ -1,5 +1,5 @@
-open Core.Std
-open Import
+open! Core.Std
+open! Import
 
 (** The [Reader] and [Writer] modules from [Async.Std], renamed to avoid conflicting with
     [Reader] and [Writer] below. *)

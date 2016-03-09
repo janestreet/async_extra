@@ -1,7 +1,7 @@
 (** This module implements a RPC transport optimized for low-latency. *)
 
-open Core.Std
-open Import
+open! Core.Std
+open! Import
 
 module Config : sig
   type t [@@deriving sexp]

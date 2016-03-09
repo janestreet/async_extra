@@ -4,10 +4,10 @@ open! Import
 module Bus = Core_kernel.Bus
 include Bus
 
-let pipe1_exn (t : ('a -> unit) Read_only.t) =
+let pipe1_exn (t : ('a -> unit) Read_only.t) here =
   let r, w = Pipe.create () in
   let subscription =
-    subscribe_exn t [%here] ~f:(function v ->
+    subscribe_exn t here ~f:(function v ->
       Pipe.write_without_pushback_if_open w v)
   in
   upon (Pipe.closed w) (fun () -> unsubscribe t subscription);

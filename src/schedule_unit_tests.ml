@@ -48,11 +48,11 @@ let%test_module _ = (module (struct
     [ `Eof | `Fewer of 'a Queue.t | `Exactly of 'a Queue.t ]
   [@@deriving sexp_of, compare]
 
-  let%test_unit "every_enter" =
+  let%test_unit "every_enter_without_pushback" =
     async_unit_test (fun () ->
       let enter_reader, enter_writer = Pipe.create () in
       let leave_reader, leave_writer = Pipe.create () in
-      every_enter run_schedule ~start:after (fun ~enter ~leave ->
+      every_enter_without_pushback run_schedule ~start:after (fun ~enter ~leave ->
         don't_wait_for
           (Pipe.write enter_writer enter
            >>= fun () ->
@@ -74,20 +74,20 @@ let%test_module _ = (module (struct
   let wait_for_deferred_errors () =
     Clock.after Time.Span.millisecond
 
-  let%test_unit "every_enter, immediate stop" =
+  let%test_unit "every_enter_without_pushback, immediate stop" =
     async_unit_test (fun () ->
-      every_enter run_schedule ~start:after ~stop:Deferred.unit
+      every_enter_without_pushback run_schedule ~start:after ~stop:Deferred.unit
         (fun ~enter:_ ~leave:_ ->
            assert false);
       wait_for_deferred_errors ())
   ;;
 
-  let%test_unit "every_enter, stop between enter and leave" =
+  let%test_unit "every_enter_without_pushback, stop between enter and leave" =
     async_unit_test (fun () ->
       let has_been_called = ref false in
       let stop_ivar = Ivar.create () in
       let stop = Ivar.read stop_ivar in
-      every_enter run_schedule ~start:after ~stop (fun ~enter:_ ~leave ->
+      every_enter_without_pushback run_schedule ~start:after ~stop (fun ~enter:_ ~leave ->
         if !has_been_called
         then assert false
         else
@@ -100,23 +100,23 @@ let%test_module _ = (module (struct
       >>= fun () ->
       wait_for_deferred_errors ())
 
-  let%test_unit "every_enter, stop after leave" =
+  let%test_unit "every_enter_without_pushback, stop after leave" =
     async_unit_test (fun () ->
       let stop_ivar = Ivar.create () in
       let stop = Ivar.read stop_ivar in
-      every_enter run_schedule ~start:after ~stop (fun ~enter:_ ~leave ->
+      every_enter_without_pushback run_schedule ~start:after ~stop (fun ~enter:_ ~leave ->
         upon leave (fun _ -> Ivar.fill_if_empty stop_ivar ()));
       stop
       >>= fun () ->
       wait_for_deferred_errors ())
 
-  let%test_unit "every_enter, continue after exceptions" =
+  let%test_unit "every_enter_without_pushback, continue after exceptions" =
     async_unit_test (fun () ->
       let enter_reader, enter_writer = Pipe.create () in
       let monitor = Monitor.create () in
       Monitor.detach monitor;
       within ~monitor (fun () ->
-        every_enter run_schedule ~start:after ~continue_on_error:true
+        every_enter_without_pushback run_schedule ~start:after ~continue_on_error:true
           (fun ~enter ~leave:_ ->
              Pipe.write_without_pushback enter_writer enter;
              failwith "fail"));
@@ -127,14 +127,14 @@ let%test_module _ = (module (struct
         ~expect:(`Exactly (Queue.of_list [ expected_enter ; expected_enter2 ])))
   ;;
 
-  let%test_unit "every_enter, fail immediately" =
+  let%test_unit "every_enter_without_pushback, fail immediately" =
     async_unit_test (fun () ->
       let monitor0 = Monitor.current () in
       let enter_reader, enter_writer = Pipe.create () in
       let monitor = Monitor.create () in
       Monitor.detach monitor;
       within ~monitor (fun () ->
-        every_enter run_schedule ~start:after ~continue_on_error:false
+        every_enter_without_pushback run_schedule ~start:after ~continue_on_error:false
           (fun ~enter ~leave ->
              Pipe.write_without_pushback enter_writer enter;
              upon leave (fun _ -> within ~monitor:monitor0 (fun () -> assert false));
@@ -148,11 +148,82 @@ let%test_module _ = (module (struct
       wait_for_deferred_errors ())
   ;;
 
-  let%test_unit "every_tag_change" =
+  let%test_unit "every_enter, pushback" =
+    async_unit_test (fun  () ->
+      let stop = Ivar.create () in
+      every_enter run_schedule
+        ~start:after
+        ~stop:(Ivar.read stop)
+        ~continue_on_error:true
+        ~on_pushback:(fun ~enter:_ ~leave:_ -> Ivar.fill_if_empty stop ())
+        (fun ~enter:_ ~leave:_ -> Deferred.never ());
+      choose [ choice (Clock.after (sec 1.)) (fun () -> `timeout)
+             ; choice (Ivar.read stop) (fun () -> `stopped)
+             ]
+      >>| function
+      | `stopped -> ()
+      | `timeout -> assert false
+    )
+  ;;
+
+  let%test_unit "every_enter, exn + continue_on_error => no pushback" =
+    async_unit_test (fun  () ->
+      let enter_count = ref 0 in
+      let pushback_count = ref 0 in
+      don't_wait_for (
+        Monitor.handle_errors (fun () ->
+          every_enter run_schedule
+            ~start:after
+            ~continue_on_error:true
+            ~on_pushback:(fun ~enter:_ ~leave:_ ->
+              Int.incr pushback_count
+            )
+            (fun ~enter:_ ~leave:_ ->
+              Int.incr enter_count;
+              failwith "blowing up on purpose"
+            );
+          Deferred.unit)
+          (fun (_:exn) -> ()));
+      Clock.after (sec 1.)
+      >>= fun () ->
+      [%test_result: int] ~expect:0 !pushback_count;
+      [%test_pred: int] (fun c -> c >= 1) !enter_count;
+      Deferred.unit
+    )
+  ;;
+
+  let%test_unit "every_tag_change, exn + continue_on_error => no pushback" =
+    async_unit_test (fun  () ->
+      let enter_count = ref 0 in
+      let pushback_count = ref 0 in
+      don't_wait_for (
+        Monitor.handle_errors (fun () ->
+          every_tag_change run_schedule
+            ~tag_equal:Float.equal
+            ~start:after
+            ~continue_on_error:true
+            ~on_pushback:(fun ~tags:_ ~enter:_ ~leave:_ ->
+              Int.incr pushback_count
+            )
+            (fun ~tags:_ ~enter:_ ~leave:_ ->
+              Int.incr enter_count;
+              failwith "blowing up on purpose"
+            );
+          Deferred.unit)
+          (fun (_:exn) -> ()));
+      Clock.after (sec 1.)
+      >>= fun () ->
+      [%test_result: int] ~expect:0 !pushback_count;
+      [%test_pred: int] (fun c -> c >= 1) !enter_count;
+      Deferred.unit
+    )
+  ;;
+
+  let%test_unit "every_tag_change_without_pushback" =
     async_unit_test (fun () ->
       let enter_reader, enter_writer = Pipe.create () in
       let leave_reader, leave_writer = Pipe.create () in
-      every_tag_change run_schedule ~start:after ~tag_equal:Float.equal
+      every_tag_change_without_pushback run_schedule ~start:after ~tag_equal:Float.equal
         (fun ~tags ~enter ~leave ->
            don't_wait_for
              (Pipe.write enter_writer (List.sort tags ~cmp:Float.compare, enter)
@@ -186,11 +257,25 @@ let%test_module _ = (module (struct
                 ])))
   ;;
 
-  let%test_unit "every_tag_change, enter in-range" =
+  let%test_unit "every_tag_change, pushback" =
+    async_unit_test (fun () ->
+      let stop = Ivar.create () in
+      every_tag_change run_schedule ~start:after ~stop:(Ivar.read stop) ~tag_equal:Float.equal
+        ~on_pushback:(fun ~tags:_ ~enter:_ ~leave:_ -> Ivar.fill_if_empty stop ())
+        (fun ~tags:_ ~enter:_ ~leave:_ -> Deferred.never ());
+      choose [ choice (Clock.after (sec 1.)) (fun () -> `timeout)
+             ; choice (Ivar.read stop) (fun () -> `stopped)
+             ]
+      >>| function
+      | `timeout -> assert false
+      | `stopped -> ())
+  ;;
+
+  let%test_unit "every_tag_change_without_pushback, enter in-range" =
     async_unit_test (fun () ->
       let enter_reader, enter_writer = Pipe.create () in
       let leave_reader, leave_writer = Pipe.create () in
-      every_tag_change run_schedule ~start:mid ~tag_equal:Float.equal
+      every_tag_change_without_pushback run_schedule ~start:mid ~tag_equal:Float.equal
         ~start_in_range_is_enter:true
         (fun ~tags ~enter ~leave ->
            don't_wait_for
@@ -221,11 +306,11 @@ let%test_module _ = (module (struct
                 ])))
   ;;
 
-  let%test_unit "every_tag_change, don't enter in-range" =
+  let%test_unit "every_tag_change_without_pushback, don't enter in-range" =
     async_unit_test (fun () ->
       let enter_reader, enter_writer = Pipe.create () in
       let leave_reader, leave_writer = Pipe.create () in
-      every_tag_change run_schedule ~start:mid ~tag_equal:Float.equal
+      every_tag_change_without_pushback run_schedule ~start:mid ~tag_equal:Float.equal
         ~start_in_range_is_enter:false
         (fun ~tags ~enter ~leave ->
            don't_wait_for
@@ -258,13 +343,14 @@ let%test_module _ = (module (struct
     async_unit_test (fun () ->
       let start = Time.add (Time.now ()) Time.Span.day in
       every_enter Schedule.Always ~start
+        ~on_pushback:(fun ~enter:_ ~leave:_ -> assert false)
         (fun ~enter:_ ~leave:_ -> assert false);
       wait_for_deferred_errors ())
 
-  let%test_unit "every_tag_change, don't start too early" =
+  let%test_unit "every_tag_change_without_pushback, don't start too early" =
     async_unit_test (fun () ->
       let start = Time.add (Time.now ()) Time.Span.day in
-      every_tag_change Schedule.Always ~start ~tag_equal:Pervasives.(=)
+      every_tag_change_without_pushback Schedule.Always ~start ~tag_equal:Pervasives.(=)
         (fun ~tags:_ ~enter:_ ~leave:_ -> assert false);
       wait_for_deferred_errors ())
 
@@ -421,7 +507,10 @@ let%test_module _ = (module (struct
   let includes = includes
   let compare = compare
   let to_string_zoned = to_string_zoned
+  type nonrec 'a every_enter_callback = 'a every_enter_callback
   let every_enter = every_enter
+  let every_tag_change_without_pushback = every_tag_change_without_pushback
+  let every_enter_without_pushback = every_enter_without_pushback
   let every_tag_change = every_tag_change
 
   module Stable = struct

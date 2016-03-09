@@ -472,7 +472,7 @@ module Writer_internal = struct
     if remaining > 0 then
       Bigstring.blit ~src:t.buf ~dst:t.buf ~src_pos:n ~dst_pos:0 ~len:remaining;
     t.pos <- remaining;
-    t.bytes_written <- Int63.(+) t.bytes_written (Int63.of_int t.pos);
+    t.bytes_written <- Int63.(+) t.bytes_written (Int63.of_int n);
     dequeue_flushes t;
   ;;
 

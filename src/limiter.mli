@@ -9,8 +9,8 @@
     (in a deferred manner) instead.
 
     Jobs are always executed in FIFO order. *)
-open Core.Std
-open Import
+open! Core.Std
+open! Import
 
 (** The outcome of a job *)
 module Outcome : sig

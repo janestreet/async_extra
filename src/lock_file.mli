@@ -1,8 +1,8 @@
 (** [Async.Lock_file] is a wrapper that provides Async equivalents for
     [Core.Lock_file]. *)
 
-open Core.Std
-open Import
+open! Core.Std
+open! Import
 
 (** [create ?message path] tries to create a file at [path] containing the text [message],
     pid if none provided.  It returns true on success, false on failure.  Note: there is

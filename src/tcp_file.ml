@@ -264,11 +264,10 @@ module Server = struct
 
   let tail (t : File.t) w aborted = tail (Tail.collect t.tail) w aborted
 
-  let handle_open_file state query ~aborted =
+  let handle_open_file state query =
     let module Open_file = Protocol.Open_file in
     let Open_file.Query.Open (filename, mode) = query in
     let pipe_r, pipe_w = Pipe.create () in
-    aborted >>> (fun () -> Pipe.close pipe_w);
     Monitor.try_with (fun () ->
       let dispatch filename f =
         match String.Table.find state.State.files (canonicalize filename) with
@@ -277,7 +276,7 @@ module Server = struct
             (Error (Open_file.Error.File_not_found filename))
           >>| fun () ->
           Pipe.close pipe_w
-        | Some file -> f file pipe_w aborted
+        | Some file -> f file pipe_w (Pipe.closed pipe_w)
       in
       match mode with
       | Read -> dispatch filename read

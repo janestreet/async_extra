@@ -1,5 +1,5 @@
-open Core.Std
-open Import
+open! Core.Std
+open! Import
 
 (** [Tcp] supports connection to [inet] sockets and [unix] sockets.  These are two
     different types.  We use ['a where_to_connect] to specify a socket to connect to,
@@ -195,4 +195,20 @@ module Server : sig
   val listening_socket : ('address, _) t -> ([ `Passive ], 'address) Socket.t
 
   val num_connections : (_, _) t -> int
+
+  (** [set_drop_incoming_connections] configures whether each incoming connection will be
+      immediately dropped or not.  This is a hack to effectively get a "pause listening"
+      feature.  We can't reliably use [backlog] and [max_num_connections] to reject
+      incoming connections.  For example, if we reach [max_num_connections], we won't call
+      [accept] but OS might still establish TCP connection.  The client will see the
+      connection as established but no data will be exchanged and we'd have to rely on TCP
+      retransmit timeouts to close the connection.  In many cases we would prefer to
+      accept and then immediately close the connection.  This is an intermediate solution
+      until we do a more principled solution (but much more complicated) when we close the
+      listening socket and then later [bind] and [listen] again when we decide to unpause
+      the server.
+
+      [drop_incoming_connections] is set to false.
+  *)
+  val set_drop_incoming_connections : (_, _) t -> bool -> unit
 end

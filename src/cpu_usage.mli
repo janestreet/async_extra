@@ -10,8 +10,8 @@
     That is, each sample is the average cpu usage of the program over the last second.
 *)
 
-open Core.Std
-open Import
+open! Core.Std
+open! Import
 
 module Sampler : sig
   type t
