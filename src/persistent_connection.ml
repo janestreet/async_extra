@@ -97,7 +97,7 @@ module Make (Conn : T) = struct
           in
           previous_error := Some err;
           if not same_as_previous_error then handle_event t (Failed_to_connect err);
-          t.retry_delay ()
+          Deferred.any [t.retry_delay (); Ivar.read t.close_started]
           >>= fun () ->
           loop ()
       end

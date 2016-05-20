@@ -116,10 +116,9 @@ module Client : sig
     type t = (Message.t, Error.t) Result.t
   end
 
-  (** [connect ~host ~port] connect to the server at ([host],[port]) *)
   val connect : host:string -> port:int -> (t, Exn.t) Result.t Deferred.t
 
-  (** [disconnect t] disconnect from t.  Pipes delivered by read/tail will be closed. *)
+  (** Pipes delivered by read/tail will be closed. *)
   val disconnect : t -> unit Deferred.t
 
   (** [read ?client_pushes_back t filename] provides a pipe that will be filled with

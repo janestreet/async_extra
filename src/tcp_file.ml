@@ -87,6 +87,8 @@ end
 
 let canonicalize filename =
   (* Remove multiple slashes in [filename]. *)
+  (* It would be nice to use [realpath] for this, but I think it's problematic on
+     occasion, since it seems to insist the file exists. *)
   let non_empty s = String.length s > 0 in
   let reform remainder = String.concat (List.filter remainder ~f:non_empty) ~sep:"/" in
   match String.split filename ~on:'/' with

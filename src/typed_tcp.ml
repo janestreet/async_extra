@@ -254,7 +254,7 @@ module Make (Arg : Arg) () = struct
   ;;
 
   let send_to_all t m =
-    Hashtbl.iter_vals t.clients
+    Hashtbl.iter t.clients
       ~f:(fun client -> Transport.write client.transport m)
   ;;
 

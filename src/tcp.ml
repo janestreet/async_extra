@@ -5,42 +5,47 @@ module Host = Unix.Host
 module Socket = Unix.Socket
 
 type 'addr where_to_connect =
-  { socket_type         : 'addr Socket.Type.t
-  ; address             : unit -> 'addr Deferred.t
-  ; via_local_interface : 'addr option
+  { socket_type    : 'addr Socket.Type.t
+  ; remote_address : unit -> 'addr Deferred.t
+  ; local_address  : 'addr option
   }
 
-let to_host_and_port ?via_local_interface host port =
-  { socket_type = Socket.Type.tcp
-  ; address     =
+let create_local_address ~via_local_interface ~via_local_port =
+  let port = Option.value via_local_port ~default:0 in
+  match via_local_interface with
+  | None           -> Socket.Address.Inet.create_bind_any ~port
+  | Some inet_addr -> Socket.Address.Inet.create          ~port inet_addr
+;;
+
+let to_host_and_port ?via_local_interface ?via_local_port host port =
+  { socket_type    = Socket.Type.tcp
+  ; remote_address =
       (fun () ->
          Unix.Inet_addr.of_string_or_getbyname host
          >>| fun inet_addr->
          Socket.Address.Inet.create inet_addr ~port)
-  ; via_local_interface =
-      Option.map via_local_interface ~f:(Socket.Address.Inet.create ~port:0)
+  ; local_address  = Some (create_local_address ~via_local_interface ~via_local_port)
   }
 ;;
 
 let to_file file =
-  { socket_type = Socket.Type.unix
-  ; address     = (fun () -> return (Socket.Address.Unix.create file))
-  ; via_local_interface = None
+  { socket_type    = Socket.Type.unix
+  ; remote_address = (fun () -> return (Socket.Address.Unix.create file))
+  ; local_address  = None
   }
 ;;
 
-let to_inet_address ?via_local_interface address =
-  { socket_type = Socket.Type.tcp
-  ; address     = (fun () -> return address)
-  ; via_local_interface =
-      Option.map via_local_interface ~f:(Socket.Address.Inet.create ~port:0)
+let to_inet_address ?via_local_interface ?via_local_port address =
+  { socket_type    = Socket.Type.tcp
+  ; remote_address = (fun () -> return address)
+  ; local_address  = Some (create_local_address ~via_local_interface ~via_local_port)
   }
 ;;
 
 let to_unix_address address =
-  { socket_type = Socket.Type.unix
-  ; address     = (fun () -> return address)
-  ; via_local_interface = None
+  { socket_type    = Socket.Type.unix
+  ; remote_address = (fun () -> return address)
+  ; local_address  = None
   }
 ;;
 
@@ -68,8 +73,18 @@ let reader_writer_of_sock ?buffer_age_limit ?reader_buffer_size s =
    Writer.create ?buffer_age_limit fd)
 ;;
 
-let connect_sock ?interrupt ?(timeout = sec 10.) where_to_connect =
-  where_to_connect.address ()
+let connect_sock
+      ?socket
+      ?interrupt
+      ?(timeout = sec 10.)
+      where_to_connect
+  =
+  let s =
+    match socket with
+    | Some s -> s
+    | None   -> create_socket where_to_connect.socket_type
+  in
+  where_to_connect.remote_address ()
   >>= fun address ->
   let timeout = after timeout in
   let interrupt =
@@ -81,9 +96,8 @@ let connect_sock ?interrupt ?(timeout = sec 10.) where_to_connect =
     Socket.connect_interruptible s address ~interrupt
   in
   Deferred.create (fun result ->
-    let s = create_socket where_to_connect.socket_type in
     close_sock_on_error s (fun () ->
-      match where_to_connect.via_local_interface with
+      match where_to_connect.local_address with
       | None -> connect_interruptible s
       | Some local_interface ->
         Socket.bind s local_interface
@@ -106,8 +120,8 @@ type 'a with_connect_options
   -> ?timeout            : Time.Span.t
   -> 'a
 
-let connect ?buffer_age_limit ?interrupt ?reader_buffer_size ?timeout where_to_connect =
-  connect_sock ?interrupt ?timeout where_to_connect
+let connect ?socket ?buffer_age_limit ?interrupt ?reader_buffer_size ?timeout where_to_connect =
+  connect_sock ?socket ?interrupt ?timeout where_to_connect
   >>| fun s ->
   let r, w = reader_writer_of_sock ?buffer_age_limit ?reader_buffer_size s in
   s, r, w
@@ -165,16 +179,43 @@ module Where_to_listen = struct
   ;;
 end
 
-let on_port port =
+module Bind_to_address = struct
+  type t =
+    | Address of Unix.Inet_addr.t
+    | All_addresses
+    | Localhost
+  [@@deriving sexp_of]
+end
+
+module Bind_to_port = struct
+  type t =
+    | On_port of int
+    | On_port_chosen_by_os
+  [@@deriving sexp_of]
+end
+
+let bind_to (bind_to_address : Bind_to_address.t) (bind_to_port : Bind_to_port.t) =
+  let port =
+    match bind_to_port with
+    | On_port port         -> port
+    | On_port_chosen_by_os -> 0
+  in
+  let address =
+    match bind_to_address with
+    | All_addresses -> Socket.Address.Inet.create_bind_any                 ~port
+    | Address addr  -> Socket.Address.Inet.create addr                     ~port
+    | Localhost     -> Socket.Address.Inet.create Unix.Inet_addr.localhost ~port
+  in
   { Where_to_listen.
     socket_type  = Socket.Type.tcp
-  ; address      = Socket.Address.Inet.create_bind_any ~port
+  ; address
   ; listening_on = function `Inet (_, port) -> port
   }
 ;;
 
-let on_port_chosen_by_os = on_port 0
-;;
+let on_port port = bind_to All_addresses (On_port port)
+
+let on_port_chosen_by_os = bind_to All_addresses On_port_chosen_by_os
 
 let on_file path =
   { Where_to_listen.
@@ -232,6 +273,7 @@ module Server = struct
                            | `Ignore
                            | `Call of ('address -> exn -> unit)
                            ]
+    -> ?socket           : ([ `Unconnected ], 'address) Socket.t
     -> ('address, 'listening_on) Where_to_listen.t
     -> 'callback
     -> ('address, 'listening_on) t Deferred.t
@@ -331,14 +373,20 @@ module Server = struct
         ?(max_connections = 10_000)
         ?backlog
         ?(on_handler_error = `Raise)
+        ?socket
         (where_to_listen : _ Where_to_listen.t)
-        handle_client =
+        handle_client
+    =
     if max_connections <= 0
     then failwiths "Tcp.Server.creater got negative [max_connections]" max_connections
            sexp_of_int;
-    let socket = create_socket where_to_listen.socket_type in
+    let socket, should_set_reuseaddr =
+      match socket with
+      | Some socket -> socket, false
+      | None -> create_socket where_to_listen.socket_type, true
+    in
     close_sock_on_error socket (fun () ->
-      Socket.setopt socket Socket.Opt.reuseaddr true;
+      if should_set_reuseaddr then Socket.setopt socket Socket.Opt.reuseaddr true;
       Socket.bind socket where_to_listen.address
       >>| Socket.listen ?backlog)
     >>| fun socket ->
@@ -361,12 +409,14 @@ module Server = struct
         ?max_connections
         ?backlog
         ?on_handler_error
+        ?socket
         where_to_listen
         handle_client =
     create_sock_internal
       ?max_connections
       ?backlog
       ?on_handler_error
+      ?socket
       where_to_listen
       (fun client_address client_socket ->
          try_with ~name:"Tcp.Server.create_sock"
@@ -378,12 +428,14 @@ module Server = struct
         ?max_connections
         ?backlog
         ?on_handler_error
+        ?socket
         where_to_listen
         handle_client =
     create_sock_internal
       ?max_connections
       ?backlog
       ?on_handler_error
+      ?socket
       where_to_listen
       (fun client_address client_socket ->
          let r, w = reader_writer_of_sock ?buffer_age_limit client_socket in
@@ -400,7 +452,8 @@ module Server = struct
       let multi how f = Deferred.List.iter ~how ~f (units 10) in
       let close_connection r w () = Reader.close r >>= fun () -> Writer.close w in
       let multi_close_connection r w () = multi `Parallel (close_connection r w) in
-      create on_port_chosen_by_os (fun _address r w -> multi_close_connection r w ())
+      create on_port_chosen_by_os
+        (fun _address r w -> multi_close_connection r w ())
       >>= fun t ->
       multi `Parallel (fun () ->
         with_connection (to_host_and_port "localhost" t.listening_on)

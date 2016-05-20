@@ -18,6 +18,8 @@ module Pipe_rpc        = Rpc_kernel.Pipe_rpc
 module Rpc             = Rpc_kernel.Rpc
 module State_rpc       = Rpc_kernel.State_rpc
 
+module Pipe_close_reason = Rpc_kernel.Pipe_close_reason
+
 module Connection : sig
   include module type of struct include Rpc_kernel.Connection end
 

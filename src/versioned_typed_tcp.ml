@@ -1486,7 +1486,7 @@ struct
             in
             Client.connect new_client ~handler:(function
               | Error e ->
-                error_connecting (Error.tag e "error connecting repeater to server")
+                error_connecting (Error.tag e ~tag:"error connecting repeater to server")
               | Ok (repeater_to_server_conn, _) ->
                 Server.maybe_accept_client t.server addr reader writer
                   ~received_hello:client_hello ()
@@ -1499,7 +1499,7 @@ struct
                   error_connecting e
                 | Ok (repeater_to_client_conn, client_ip) ->
                   match on_connect client_name with
-                  | Error e -> error_connecting (Error.tag e "application on_connect error")
+                  | Error e -> error_connecting (Error.tag e ~tag:"application on_connect error")
                   | Ok state ->
                     Hashtbl.set t.clients ~key:client_name ~data:new_client;
                     let handle_incoming conn_side ~conn ~paired_conn filter ip =
@@ -1542,7 +1542,7 @@ struct
             >>= function
             | `Connect_error e ->
               error_connecting
-                (Error.tag (Error.of_exn e) "error connecting repeater to server")
+                (Error.tag (Error.of_exn e) ~tag:"error connecting repeater to server")
             | `Handler_error e ->
               (* exception raised by our handler. just reraise *)
               raise e
@@ -1565,7 +1565,7 @@ struct
   ;;
 
   let send_from_all_clients t msg =
-    Hashtbl.iter_vals t.clients ~f:(fun client -> Client.send_ignore_errors client msg)
+    Hashtbl.iter t.clients ~f:(fun client -> Client.send_ignore_errors client msg)
   ;;
 
   let send_to_all_clients t msg =
@@ -1584,7 +1584,7 @@ struct
 
   let shutdown t =
     Server.shutdown t.server >>| fun () ->
-    Hashtbl.iter_vals t.clients ~f:Client.close_connection
+    Hashtbl.iter t.clients ~f:Client.close_connection
   ;;
 end
 

@@ -30,8 +30,11 @@ module Config = struct
   let default_max_buffer_size  = Int.max_value
 
   (* In general we'll send 1 message per job, if we send 2 there is a good chance we are
-     sending a batch. *)
-  let default_start_batching_after_num_messages = 1
+     sending a batch.
+
+     Default should actually be 1, but there was a bug that made it 2 in practice, so we
+     keep 2 as a default. *)
+  let default_start_batching_after_num_messages = 2
 
   (* Arbitrary choices. *)
   let default_initial_buffer_size          = 64 * 1024
@@ -641,7 +644,7 @@ module Writer_internal = struct
       t.sends_in_this_job <- t.sends_in_this_job + 1
     else begin
       t.last_send_job <- current_job;
-      t.sends_in_this_job <- 0;
+      t.sends_in_this_job <- 1;
     end;
     t.pos >= t.config.buffering_threshold_in_bytes ||
     t.sends_in_this_job <= t.config.start_batching_after_num_messages
@@ -669,6 +672,12 @@ module Writer_internal = struct
                 Header.unsafe_set_payload_length t.buf ~pos:t.pos payload_len;
                 t.pos <- stop;
                 if send_now then
+                  let len =
+                    if len < 128 then
+                      (copy_bytes t ~buf ~pos ~len; 0)
+                    else
+                      len
+                  in
                   unsafe_send_bytes t ~buf ~pos ~len
                 else
                   copy_bytes t ~buf ~pos ~len;

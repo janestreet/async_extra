@@ -35,7 +35,7 @@ module Config : sig
     -> ?max_buffer_size                   : int            (* default Int.max_value                  *)
     -> ?write_timeout                     : Time_ns.Span.t (* default 2 minutes                      *)
     -> ?buffering_threshold_in_bytes      : int            (* default 32 KB                          *)
-    -> ?start_batching_after_num_messages : int            (* default 1                              *)
+    -> ?start_batching_after_num_messages : int            (* default 2                              *)
     -> unit
     -> t
 end

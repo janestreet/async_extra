@@ -27,31 +27,34 @@ let shutdown exit_code =
   end;
 ;;
 
-let in_async param on_result =
+let maybe_print_error_and_shutdown = function
+  | Ok () -> shutdown 0
+  | Error e ->
+    prerr_endline (Error.to_string_hum e);
+    shutdown 1
+;;
+
+let in_async ?extract_exn param on_result =
   Param.map param ~f:(fun main () ->
-    upon (main ()) on_result;
+    upon (Deferred.Or_error.try_with ?extract_exn main) on_result;
     (never_returns (Scheduler.go ()) : unit)
   )
 ;;
 
-let async' ~summary ?readme param =
-  let on_result () = shutdown 0 in
-  basic' ~summary ?readme (in_async param on_result)
+let async' ?extract_exn ~summary ?readme param =
+  let on_result = maybe_print_error_and_shutdown in
+  basic' ~summary ?readme (in_async ?extract_exn param on_result)
 ;;
 
-let async ~summary ?readme spec main = async' ~summary ?readme (Spec.to_param spec main)
+let async ?extract_exn ~summary ?readme spec main =
+  async' ?extract_exn ~summary ?readme (Spec.to_param spec main)
 
-let async_or_error' ~summary ?readme param =
-  let on_result = function
-    | Ok () -> shutdown 0
-    | Error error ->
-      prerr_endline (Error.to_string_hum error);
-      shutdown 1
-  in
-  basic' ~summary ?readme (in_async param on_result)
+let async_or_error' ?extract_exn ~summary ?readme param =
+  let on_result res = maybe_print_error_and_shutdown (Or_error.join res) in
+  basic' ~summary ?readme (in_async ?extract_exn param on_result)
 ;;
 
-let async_or_error ~summary ?readme spec main =
-  async_or_error' ~summary ?readme (Spec.to_param spec main)
+let async_or_error ?extract_exn ~summary ?readme spec main =
+  async_or_error' ?extract_exn ~summary ?readme (Spec.to_param spec main)
 
 let async_basic = async

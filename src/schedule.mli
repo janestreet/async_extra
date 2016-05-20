@@ -18,6 +18,7 @@ val to_pipe
   : (zoned, 'tag) t
   -> start_time:Time.t
   -> emit:('tag, 'output) pipe_emit
+  -> ?time_source:Time_source.t (** defaults to [Time_source.wall_clock ()] *)
   -> unit
   -> [ `Started_in_range of 'tag list * 'output Pipe.Reader.t
      | `Started_out_of_range of 'output Pipe.Reader.t ]
@@ -39,7 +40,8 @@ val next_event
   :  (zoned, 'tag) t
   -> event:[`Enter | `Leave]
   -> stop:unit Deferred.t
-  -> ?after:Time.t  (** defaults to [Time.now ()] *)
+  -> ?time_source:Time_source.t (** defaults to [Time_source.wall_clock ()] *)
+  -> ?after:Time.t              (** defaults to [Time_source.now time_source] *)
   -> unit
   -> Time.t Deferred.t
 
@@ -65,7 +67,8 @@ type 'a every_enter_callback = enter:Time.t -> leave:Time.t Deferred.t -> 'a
     [leave] deferreds will remain unfulfilled. *)
 val every_enter_without_pushback
   :  (zoned, _) t
-  -> ?start:Time.t                  (** defaults to [Time.now ()] *)
+  -> ?time_source:Time_source.t     (** defaults to [Time_source.wall_clock ()] *)
+  -> ?start:Time.t                  (** defaults to [Time_source.now time_source] *)
   -> ?stop:unit Deferred.t          (** defaults to [Deferred.never ()] *)
   -> ?continue_on_error:bool        (** defaults to [true] *)
   -> ?start_in_range_is_enter:bool  (** defaults to [true] *)
@@ -77,7 +80,8 @@ val every_enter_without_pushback
     call has finished, then it invokes [on_pushback] instead (if provided). *)
 val every_enter
   :  (zoned, _) t
-  -> ?start:Time.t                  (** defaults to [Time.now ()] *)
+  -> ?time_source:Time_source.t     (** defaults to [Time_source.wall_clock ()] *)
+  -> ?start:Time.t                  (** defaults to [Time_source.now time_source] *)
   -> ?stop:unit Deferred.t          (** defaults to [Deferred.never ()] *)
   -> ?continue_on_error:bool        (** defaults to [true] *)
   -> ?start_in_range_is_enter:bool  (** defaults to [true] *)
@@ -99,7 +103,8 @@ val every_enter
     [every_enter]. *)
 val every_tag_change_without_pushback
   :  (zoned, 'tag) t
-  -> ?start:Time.t                  (** defaults to [Time.now ()] *)
+  -> ?time_source:Time_source.t     (** defaults to [Time_source.wall_clock ()] *)
+  -> ?start:Time.t                  (** defaults to [Time_source.now time_source] *)
   -> ?stop:unit Deferred.t          (** defaults to [Deferred.never ()] *)
   -> ?continue_on_error:bool        (** defaults to [true] *)
   -> ?start_in_range_is_enter:bool  (** defaults to [true] *)
@@ -111,7 +116,8 @@ val every_tag_change_without_pushback
     [every_enter]. *)
 val every_tag_change
   :  (zoned, 'tag) t
-  -> ?start:Time.t                  (** defaults to [Time.now ()] *)
+  -> ?time_source:Time_source.t     (** defaults to [Time_source.wall_clock ()] *)
+  -> ?start:Time.t                  (** defaults to [Time_source.now time_source] *)
   -> ?stop:unit Deferred.t          (** defaults to [Deferred.never ()] *)
   -> ?continue_on_error:bool        (** defaults to [true] *)
   -> ?start_in_range_is_enter:bool  (** defaults to [true] *)

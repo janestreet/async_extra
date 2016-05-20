@@ -1,19 +1,22 @@
-open! Core.Std
-open! Import
-
 (** [Tcp] supports connection to [inet] sockets and [unix] sockets.  These are two
     different types.  We use ['a where_to_connect] to specify a socket to connect to,
     where the ['a] identifies the type of socket. *)
+
+open! Core.Std
+open! Import
+
 type 'a where_to_connect constraint 'a = [< Socket.Address.t ]
 
 val to_host_and_port
-  :  ?via_local_interface : Unix.Inet_addr.t  (** default is chosen by OS *)
+  :  ?via_local_interface : Unix.Inet_addr.t (** default is chosen by OS *)
+  -> ?via_local_port      : int              (** default is chosen by OS *)
   -> string
   -> int
   -> Socket.Address.Inet.t where_to_connect
 
 val to_inet_address
   :  ?via_local_interface : Unix.Inet_addr.t  (** default is chosen by OS *)
+  -> ?via_local_port      : int               (** default is chosen by OS *)
   -> Socket.Address.Inet.t
   -> Socket.Address.Inet.t where_to_connect
 
@@ -45,13 +48,12 @@ val with_connection
       -> 'a Deferred.t
     ) with_connect_options
 
-(** [connect_sock ~host ~port] opens a TCP connection to the specified hostname
-    and port, returning the socket.
-
-    Any errors in the connection will be reported to the monitor that was current
-    when connect was called. *)
+(** [connect_sock where_to_connect] creates a socket and opens a TCP connection.  To use
+    an existing socket, supply [~socket].  Any errors in the connection will be reported
+    to the monitor that was current when [connect_sock] was called. *)
 val connect_sock
-  :  ?interrupt : unit Deferred.t
+  :  ?socket    : ([ `Unconnected ], 'addr) Socket.t
+  -> ?interrupt : unit Deferred.t
   -> ?timeout   : Time.Span.t
   -> 'addr where_to_connect
   -> ([ `Active ], 'addr) Socket.t Deferred.t
@@ -68,9 +70,11 @@ val connect_sock
     If possible, use [with_connection], which automatically handles closing.
 
     It is fine to ignore the returned socket and just use the reader and writer.  The
-    socket is there to make it convenient to call [Socket] functions. *)
+    socket is there to make it convenient to call [Socket] functions.
+*)
 val connect
-  : ( 'addr where_to_connect
+  :  ?socket : ([ `Unconnected ], 'addr) Socket.t
+  -> ( 'addr where_to_connect
       -> (([ `Active ], 'addr) Socket.t * Reader.t * Writer.t) Deferred.t
     ) with_connect_options
 
@@ -91,8 +95,31 @@ module Where_to_listen : sig
   val address : ('address, _) t -> 'address
 end
 
+module Bind_to_address : sig
+  type t =
+    | Address of Unix.Inet_addr.t
+    | All_addresses
+    | Localhost (** equivalent to [Address Unix.Inet_addr.localhost] *)
+  [@@deriving sexp_of]
+end
+
+module Bind_to_port : sig
+  type t =
+    | On_port of int
+    | On_port_chosen_by_os
+  [@@deriving sexp_of]
+end
+
+(** Listen on the specified port on the specified addresses *)
+val bind_to : Bind_to_address.t -> Bind_to_port.t -> Where_to_listen.inet
+
+(** [on_port port] is [bind_to All_addresses (On_port port)]*)
 val on_port              : int ->    Where_to_listen.inet
+
+(** [on_port_chosen_by_os port] is [bind_to All_addresses On_port_chosen_by_os] ]*)
 val on_port_chosen_by_os :           Where_to_listen.inet
+
+(** Listen on a unix domain socket using the specified path *)
 val on_file              : string -> Where_to_listen.unix
 
 (** A [Server.t] represents a TCP server listening on a socket. *)
@@ -148,7 +175,11 @@ module Server : sig
       [on_handler_error] determines what happens if the handler throws an exception.  The
       default is [`Raise].  If an exception is raised by on_handler_error (either
       explicitely via [`Raise], or in the closure passed to [`Call]) no further
-      connections will be accepted.  *)
+      connections will be accepted.
+
+      Supplying [socket] causes the server to use [socket] rather than create a new
+      socket.  In this usage, creation does not set [Socket.Opt.reuseaddr] to [true]; if
+      you want that, you must set [reuseaddr] before creation. *)
   type ('address, 'listening_on, 'callback) create_options
     =  ?max_connections  : int
     -> ?backlog          : int
@@ -156,13 +187,14 @@ module Server : sig
                            | `Ignore
                            | `Call of ('address -> exn -> unit)
                            ]
+    -> ?socket           : ([ `Unconnected ], 'address) Socket.t
     -> ('address, 'listening_on) Where_to_listen.t
     -> 'callback
     -> ('address, 'listening_on) t Deferred.t
 
-  (** [create where_to_listen handler] starts a server listening to a socket as specified
-      by [where_to_listen].  It returns a server once the socket is ready to accept
-      connections.  The server calls [handler address socket] for each client that
+  (** [create_sock where_to_listen handler] starts a server listening to a socket as
+      specified by [where_to_listen].  It returns a server once the socket is ready to
+      accept connections.  The server calls [handler address socket] for each client that
       connects.  If the deferred returned by [handler] is ever determined, or [handler]
       raises an exception, then [socket] is closed.
 
@@ -171,9 +203,9 @@ module Server : sig
       called. *)
   val create_sock
     : ('address,
-       'listening_on,
-       'address -> ([ `Active ], 'address) Socket.t -> unit Deferred.t
-      ) create_options
+        'listening_on,
+        'address -> ([ `Active ], 'address) Socket.t -> unit Deferred.t
+       ) create_options
 
   (** [create where_to_listen handler] is a convenience wrapper around [create_sock] that
       pass a reader and writer for the client socket to the callback.  If the deferred
