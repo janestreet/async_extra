@@ -1,3 +1,105 @@
+## 113.43.00
+
+- Add the ability to specify the local source port to Async_extra.Tcp.
+
+- Name the non-`t` arguments to `Error.tag` and similar functions to allow
+  easier partial application.
+
+- Name the non-`t` arguments to `Error.tag` and similar functions to allow
+  easier partial application.
+
+- Switched from:
+
+    (** This signature is deliberately empty. *)
+
+  to:
+
+    (*_ This signature is deliberately empty. *)
+
+  This causes the comment to *not* appear in documentation.  We did not use:
+
+    (* This signature is deliberately empty. *)
+
+  because single-star comments, `(* *)`, will be disallowed in signatures.
+  We plan to disallow single-star comments to force the use of `(** *)` to
+  indicate a doc comment and `(*_ *)` to indicate a non-doc comment.
+
+- Update `Async.Std.Schedule` to allow use of `Time_source.t` other than `wall_clock ()`.
+
+  `Time_source` is a new abstraction for time progression that provides `Clock` and `Time.now`
+  functionality driven by a time source other than the wall-clock.  This can be useful for
+  offline playback of historical events.
+
+  `Schedule` was updatedso it can be used in these kinds of historical playback situations.
+
+- Add functions to make it easy to start a tcp server that only listens on localhost
+  The intention of this change is to make it both easy to bind to localhost and to make it clear in the mli
+  that you bind to any with `on_port`.
+
+- Allow passing in a socket to the tcp functions so that you can set socket options before a connection is established
+
+- Make async_extra unit tests pass in 32bit
+
+- Improve errors on exceptions raised inside `Command.async'`.
+
+  A trivial use of Command.async' that raises:
+
+  Before:
+
+    (((pid 7781) (thread_id 0))
+     ((human_readable 2016-04-22T19:11:26-0400)
+      (int63_ns_since_epoch 1461366686545371364))
+     "unhandled exception in Async scheduler"
+     ("unhandled exception"
+      ((monitor.ml.Error_
+        ((exn (Failure "as;dfkj"))
+         (backtrace
+          ("Raised at file \"pervasives.ml\", line 30, characters 22-33"
+           "Called from file \"deferred1.ml\", line 14, characters 63-68"
+           "Called from file \"job_queue.ml\", line 160, characters 6-47" ""))
+         (monitor
+          (((name main) (here ()) (id 1) (has_seen_error true)
+            (is_detached false))))))
+       ((pid 7781) (thread_id 0)))))
+
+  After:
+
+    $ ./a.exe
+    (monitor.ml.Error_
+     ((exn (Failure "as;dfkj"))
+      (backtrace
+       ("Raised at file \"pervasives.ml\", line 30, characters 22-33"
+        "Called from file \"monitor.ml\", line 214, characters 42-51"
+        "Called from file \"job_queue.ml\", line 160, characters 6-47" ""))
+      (monitor
+       (((name Async.Std.Deferred.Or_error.try_with) (here ()) (id 2)
+         (has_seen_error true) (is_detached true))))))
+
+  After with `~extract_exn:true`:
+
+    $ ./a.exe
+    (Failure "as;dfkj")
+
+  The default can be changed for a project this way:
+
+    module Command = struct
+      include Command
+      let async' = async' ~extract_exn:true
+      let async_or_error' = async_or_error' ~extract_exn:true
+    end
+
+- Added module `Async.Std.Require_explicit_time_source`, so that one can
+  require code to be explicit about what time source is used and not
+  unintentionally use the wall clock.  The idiom is to do:
+
+    open! Require_explicit_time_source
+
+  or, in an import.ml:
+
+    include Require_explicit_time_source
+
+- Don't wait for the full `retry_delay` before detecting `close`.
+
 ## 113.33.00
 
 - Rename `Async.Std.Schedule.every_{enter,tag_change}` to
@@ -809,4 +911,3 @@ since they appear only as a consequence of changes in core or async\_kernel.
   `unit Deferred.t`, instead of `unit`.  `async_basic` will also start the
   async scheduler before the wrapped function is run, and will stop the
   scheduler when the wrapped function returns.
-
