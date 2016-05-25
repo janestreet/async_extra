@@ -79,11 +79,6 @@ let connect_sock
       ?(timeout = sec 10.)
       where_to_connect
   =
-  let s =
-    match socket with
-    | Some s -> s
-    | None   -> create_socket where_to_connect.socket_type
-  in
   where_to_connect.remote_address ()
   >>= fun address ->
   let timeout = after timeout in
@@ -96,6 +91,11 @@ let connect_sock
     Socket.connect_interruptible s address ~interrupt
   in
   Deferred.create (fun result ->
+    let s =
+      match socket with
+      | Some s -> s
+      | None   -> create_socket where_to_connect.socket_type
+    in
     close_sock_on_error s (fun () ->
       match where_to_connect.local_address with
       | None -> connect_interruptible s
