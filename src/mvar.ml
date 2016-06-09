@@ -98,6 +98,9 @@ let set t v =
   Ivar.fill_if_empty t.value_available ();
 ;;
 
+let update     t ~f = set t (f (peek     t))
+let update_exn t ~f = set t (f (peek_exn t))
+
 let taken t = Ivar.read t.taken
 let is_empty  = is_empty
 

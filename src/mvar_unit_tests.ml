@@ -54,6 +54,8 @@ let%test_module _ =
     let take_exn        = take_exn
     let taken           = taken
     let value_available = value_available
+    let update          = update
+    let update_exn      = update_exn
 
     let%test_unit "is_empty" =
       let t = create () in
@@ -119,6 +121,20 @@ let%test_module _ =
       set t 1;
       set t 2;
       assert (take (read_only t) = Some 2);
+    ;;
+
+    let%test_unit "update, update_exn" =
+      let t = create () in
+      assert (does_raise (fun () -> update_exn t ~f:(fun x -> x + 1)));
+      [%test_result: int option] (peek t) ~expect:None;
+      let f o =
+        Option.value_map o ~f:(fun x -> x + 1) ~default:0 in
+      update t ~f;
+      [%test_result: int] (peek_exn t) ~expect:0;
+      update t ~f;
+      [%test_result: int] (peek_exn t) ~expect:1;
+      update_exn t ~f:(fun x -> x + 3);
+      [%test_result: int] (peek_exn t) ~expect:4
     ;;
 
     let%test_unit "put waits" =

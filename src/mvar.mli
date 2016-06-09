@@ -49,6 +49,12 @@ val put : 'a Read_write.t -> 'a -> unit Deferred.t
     you want takers to have last-value semantics. *)
 val set : 'a Read_write.t -> 'a -> unit
 
+(** [update t ~f] applies [f] to the value in [t] and [set]s [t] to the result.  This is
+    useful if you want takers to have accumulated-value semantics.  [update_exn] is like
+    [update], except it raises if [is_empty t]. *)
+val update     : ('a, read_write) t -> f:('a option -> 'a) -> unit
+val update_exn : ('a, read_write) t -> f:('a        -> 'a) -> unit
+
 val read_only : 'a Read_write.t -> 'a Read_only.t
 
 (** [value_available t] returns a deferred [d] that becomes determined when a value is in
