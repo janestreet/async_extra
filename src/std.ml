@@ -6,7 +6,6 @@ module File_tail             = File_tail
 module File_writer           = File_writer
 module Limiter               = Limiter
 module Lock_file             = Lock_file
-module Mvar                  = Mvar
 module Persistent_connection = Persistent_connection
 module Persistent_singleton  = Persistent_singleton
 module Rpc                   = Rpc
