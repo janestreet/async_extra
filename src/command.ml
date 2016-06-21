@@ -3,28 +3,51 @@ open Import
 
 include Core.Std.Command
 
-let shutdown exit_code =
-  don't_wait_for begin
-    (* Although [Writer.std{out,err}] have [at_shutdown] handlers that flush them, those
-       handlers have a 5s timeout that proceeds even if the data hasn't made it to the OS.
-       And, there is a 10s timeout in [Shutdown.shutdown] that causes it to proceed even
-       if the [at_shutdown] handlers don't finish.  Those timeouts don't play well with
-       applications that output a bunch of data to std{out,err} and then exit, when the
-       data consumer (e.g. less) hasn't read all the data.  So, before we call
-       [Shutdown.shutdown], we ensure that stdout and stderr are flushed with no timeout,
-       or that their consumer has left. *)
-    Deferred.List.iter ~how:`Parallel
-      Writer.([ force stdout; force stderr ])
-      ~f:(fun writer ->
-        if Writer.is_closed writer
-        then return ()
-        else Deferred.any_unit [ Writer.close_finished writer
-                               ; Writer.consumer_left writer
-                               ; Writer.flushed writer
-                               ])
-    >>| fun () ->
-    Shutdown.shutdown exit_code
-  end;
+(* For command line applications, we want the following behavior: [async-command-exe |
+   less] should never truncate the output of the exe.
+
+   Two behaviors in async prevent that from happening:
+   1. the at_shutdown handlers in writer.ml that waits for pipes to be flushed at most 5s
+      even if the data hasn't made it to the OS
+   2. the default 10s timeout before forced shutdown in shutdown.ml
+
+   Here is what we do about it:
+   1. Changing writer.ml might be ok, but only for stdout/stderr, not in general: if the
+      process has pipes connecting it to other processes it spawned, we most likely don't
+      want to block shutdown until they stop (could deadlock if there is a pipe in the
+      other direction and the other one process waits for it to die).
+      So instead, we wait for stdout and stderr to be flushed with no timeout, or that
+      their consumer has left.
+   2. We don't force shutdown until stdout/stderr is flushed.
+      That wait can be bypassed by redefining [Shutdown.default_force], or passing
+      [~force] to [shutdown], which looks like the desired behavior.
+
+   These two behavior changes seem fine for servers as well (where stdout/stderr should
+   contain almost nothing, or even be /dev/null), so we make them all the time.
+*)
+let in_async ?extract_exn param on_result =
+  Param.map param ~f:(fun main () ->
+    let before_shutdown () =
+      Deferred.List.iter ~how:`Parallel
+        Writer.[ force stdout; force stderr ]
+        ~f:(fun writer ->
+          Deferred.any_unit
+            [ Writer.close_finished writer
+            ; Writer.consumer_left writer
+            ; Writer.flushed writer
+            ])
+    in
+    Shutdown.at_shutdown before_shutdown;
+    Shutdown.set_default_force
+      (let prev = Shutdown.default_force () in
+       fun () ->
+         Deferred.all_unit
+           (* The 1s gives a bit of time to the process to stop silently rather than with
+              a "shutdown forced" message and exit 1 if [prev ()] finished first. *)
+           [ prev (); (before_shutdown () >>= fun () -> after (sec 1.)) ]);
+    upon (Deferred.Or_error.try_with ?extract_exn main) on_result;
+    (never_returns (Scheduler.go ()) : unit)
+  )
 ;;
 
 let maybe_print_error_and_shutdown = function
@@ -32,13 +55,6 @@ let maybe_print_error_and_shutdown = function
   | Error e ->
     prerr_endline (Error.to_string_hum e);
     shutdown 1
-;;
-
-let in_async ?extract_exn param on_result =
-  Param.map param ~f:(fun main () ->
-    upon (Deferred.Or_error.try_with ?extract_exn main) on_result;
-    (never_returns (Scheduler.go ()) : unit)
-  )
 ;;
 
 let async' ?extract_exn ~summary ?readme param =
