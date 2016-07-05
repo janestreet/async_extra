@@ -12,14 +12,18 @@ let create_exn ?message ?close_on_exec ?unlink_on_exit path =
   if not b then failwiths "Lock_file.create" path [%sexp_of: string]
 ;;
 
+let random = lazy (Random.State.make_self_init ())
+;;
+
 let repeat_with_abort ~abort ~f =
   Deferred.repeat_until_finished () (fun () ->
     f ()
     >>= function
     | true  -> return (`Finished `Ok)
     | false ->
-      choose [ choice (after (sec 1.)) (fun () -> `Repeat)
-             ; choice abort            (fun () -> `Abort)
+      let delay = sec (Random.State.float (Lazy.force random) 0.3) in
+      choose [ choice (after delay) (fun () -> `Repeat)
+             ; choice abort         (fun () -> `Abort)
              ]
       >>| function
       | `Abort -> `Finished `Aborted
