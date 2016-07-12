@@ -16,7 +16,7 @@ external writev2
   -> pos2:int
   -> len2:int
   -> Unix.Syscall_result.Int.t
-  = "async_extra_rpc_writev2_byte" "noalloc" "async_extra_rpc_writev2"
+  = "async_extra_rpc_writev2_byte" "async_extra_rpc_writev2" [@@noalloc]
 
 external realloc : Bigstring.t -> new_size:int -> unit
   = "async_extra_rpc_realloc"
