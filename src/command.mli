@@ -1,33 +1,64 @@
 (** [Async.Command] is [Core.Command] with additional Async functions. *)
 
+open! Core.Std
 open! Import
 
 include module type of Core.Std.Command
   with type t      = Core.Std.Command.t
   with module Spec = Core.Std.Command.Spec
 
+type 'a with_options
+  =  ?extract_exn : bool
+  -> 'a
+
 (** [async] is like [Core.Command.basic], except that the main function it expects returns
     [unit Deferred.t], instead of [unit].  [async] will also start the Async scheduler
     before main is run, and will stop the scheduler when main returns.
 
-    [async] also handles top-level exceptions by wrapping the user-supplied function in
-    a [Monitor.try_with]. If an exception is raised, it will print it to stderr and call
+    [async] also handles top-level exceptions by wrapping the user-supplied function in a
+    [Monitor.try_with]. If an exception is raised, it will print it to stderr and call
     [shutdown 1]. The [extract_exn] argument is passed along to [Monitor.try_with]; by
     default it is [false].
 *)
-val async  : ?extract_exn:bool -> ('a, unit Deferred.t) basic_command
-val async' : ?extract_exn:bool -> unit Deferred.t basic_command'
+val async  : ('a, unit Deferred.t) basic_command  with_options
+val async' :      unit Deferred.t  basic_command' with_options
 
 (** [async_basic] is a deprecated synonym for [async] that will eventually go away.  It is
     here to give code outside jane street a chance to switch over before we delete it. *)
-val async_basic : ?extract_exn:bool -> ('a, unit Deferred.t) basic_command
+val async_basic : ('a, unit Deferred.t) basic_command with_options
   [@@deprecated "[since 2015-10] Use async instead"]
 
 (** [async_or_error] is like [async], except that the main function it expects may
     return an error, in which case it prints out the error message and shuts down with
     exit code 1. *)
-val async_or_error  : ?extract_exn:bool -> ('a, unit Deferred.Or_error.t) basic_command
-val async_or_error' : ?extract_exn:bool -> unit Deferred.Or_error.t basic_command'
+val async_or_error  : ('a, unit Deferred.Or_error.t) basic_command  with_options
+val async_or_error' :      unit Deferred.Or_error.t  basic_command' with_options
+
+(* staged functions allow the main function to be separated into two stages.  The first
+   part is guaranteed to run before the async scheduler is started, and the second part
+   will run after the async scheduler is started.  This is useful if the main function
+   runs code that relies on the fact that threads have not been created yet
+   (e.g. [Daemon.daemonize]).
+
+   As an example:
+   {[
+     let main () =
+       assert (not (Scheduler.is_running ()));
+       stage (fun `Scheduler_started ->
+         assert (Scheduler.is_running ());
+         Deferred.unit
+       )
+   ]}
+*)
+
+type 'r staged = ([`Scheduler_started] -> 'r) Staged.t
+
+module Staged : sig
+  val async           : ('a, unit Deferred.t          staged) basic_command  with_options
+  val async'          :      unit Deferred.t          staged  basic_command' with_options
+  val async_or_error  : ('a, unit Deferred.Or_error.t staged) basic_command  with_options
+  val async_or_error' :      unit Deferred.Or_error.t staged  basic_command' with_options
+end
 
 (** To create an [Arg_type.t] that uses auto-completion and uses Async to compute the
     possible completions, one should use
