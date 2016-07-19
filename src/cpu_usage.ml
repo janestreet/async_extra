@@ -251,7 +251,7 @@ end = struct
       let subscribers =
         List.map windows ~f:(fun window_duration ->
           Subscriber.create ~write_summaries_to ~window_duration)
-        |! List.sort ~cmp:Subscriber.compare_num_samples
+        |> List.sort ~cmp:Subscriber.compare_num_samples
       in
       t.subscribers <-
         List.merge subscribers t.subscribers ~cmp:Subscriber.compare_num_samples;

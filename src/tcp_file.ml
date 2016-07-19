@@ -310,7 +310,7 @@ module Server = struct
     | `Not_yet_serving ->
       let implementations =
         Rpc.Implementations.create ~implementations ~on_unknown_rpc:`Close_connection
-        |! function
+        |> function
         | Ok s -> State.global.serving_on <- `Serving_started; s
         | Error (`Duplicate_implementations _) -> assert false
       in
