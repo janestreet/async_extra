@@ -6,7 +6,10 @@ include Core.Std.Command
 type 'a with_options = ?extract_exn:bool -> 'a
 
 let shutdown_with_error e =
-  prerr_endline (Error.to_string_hum e);
+  (* We use [Core] printing rather than [Async] printing, because the program may already
+     be shutting down, which could cause the error to be omitted.  We want to make sure
+     the error is seen. *)
+  Core.Std.prerr_endline (Error.to_string_hum e);
   shutdown 1
 ;;
 
