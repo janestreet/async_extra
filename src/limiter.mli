@@ -50,13 +50,13 @@ module Token_bucket : sig
   type t [@@deriving sexp_of]
 
   val create_exn
-    :  burst_size:float
+    :  burst_size:int
     -> sustained_rate_per_sec:float
     -> continue_on_error:bool (** If false, then the token bucket is [kill]ed if there's
                                   an unhandled exception in any job *)
-    -> ?in_flight_limit:float (** default to infinite. This can be used for concurrency
+    -> ?in_flight_limit:int (** default to infinite. This can be used for concurrency
                                   control *)
-    -> ?initial_burst_size:float (** Defaults to zero *)
+    -> ?initial_burst_size:int (** Defaults to zero *)
     -> unit
     -> t
 
@@ -74,11 +74,11 @@ module Token_bucket : sig
       number of reasons, including [f] throws an exception, the limiter is killed, or the
       number of tokens requested is larger than the burst size.
   *)
-  val enqueue_exn : t -> ?allow_immediate_run:bool -> float -> ('a -> unit) -> 'a -> unit
+  val enqueue_exn : t -> ?allow_immediate_run:bool -> int -> ('a -> unit) -> 'a -> unit
 
   (** [enqueue' t x f a] enqueues a deferred job consuming [x] tokens, running [f] on
       input [a].  No part of f is run before [enqueue'] returns. *)
-  val enqueue'    : t -> float -> ('a -> 'b Deferred.t) -> 'a -> 'b Outcome.t Deferred.t
+  val enqueue'    : t -> int -> ('a -> 'b Deferred.t) -> 'a -> 'b Outcome.t Deferred.t
 
   (* Include [Common], with the hack to remove the type parameter *)
   type 'a u = t
@@ -178,7 +178,7 @@ module Expert : sig
 
   (** returns the total cost of all jobs that have been enqueued but have not yet
       started. *)
-  val cost_of_jobs_waiting_to_start : t -> float
+  val cost_of_jobs_waiting_to_start : t -> int
 
   (** returns the underlying limiter.  It is an error to do anything with the limiter that
       isn't a read-only operation. *)

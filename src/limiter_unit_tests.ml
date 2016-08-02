@@ -39,7 +39,7 @@ let%test_module _ = (module (struct
       async_unit_test (fun () ->
         let rate_per_second = 1000. in
         let t =
-          create_exn ~burst_size:1. ~sustained_rate_per_sec:rate_per_second
+          create_exn ~burst_size:1 ~sustained_rate_per_sec:rate_per_second
             ~continue_on_error:false ()
         in
         let job_count          = rate_per_second /. 2. in
@@ -48,7 +48,7 @@ let%test_module _ = (module (struct
         let jobs_remaining     = ref (Float.to_int job_count) in
         let finished           = Ivar.create () in
         for _ = 1 to !jobs_remaining do
-          enqueue_exn t 1. (fun () -> fill_if_zero jobs_remaining finished) ();
+          enqueue_exn t 1 (fun () -> fill_if_zero jobs_remaining finished) ();
         done;
         Ivar.read finished
         >>| fun () ->
@@ -60,7 +60,6 @@ let%test_module _ = (module (struct
         let rate_per_second = 1000. in
         let burst_size = 100 in
         let t =
-          let burst_size = Float.of_int burst_size in
           create_exn
             ~burst_size:burst_size
             ~sustained_rate_per_sec:rate_per_second
@@ -73,7 +72,7 @@ let%test_module _ = (module (struct
         let current_job_count = ref 0 in
         let finished          = Ivar.create () in
         for _ = 1 to !job_count do
-          enqueue' t 1. (fun () ->
+          enqueue' t 1 (fun () ->
             incr current_job_count;
             if !current_job_count = burst_size
             then hit_burst_rate := true;
@@ -93,13 +92,13 @@ let%test_module _ = (module (struct
 
     let%test_unit "allow_immediate_run is honored" =
       let t =
-        create_exn ~burst_size:1. ~sustained_rate_per_sec:(1. /. 100.)
-          ~continue_on_error:false ~initial_burst_size:1. ()
+        create_exn ~burst_size:1 ~sustained_rate_per_sec:(1. /. 100.)
+          ~continue_on_error:false ~initial_burst_size:1 ()
       in
       let num_jobs_run = ref 0 in
       let job () = incr num_jobs_run in
-      enqueue_exn t ~allow_immediate_run:true 1. job ();
-      enqueue_exn t ~allow_immediate_run:true 1. job ();
+      enqueue_exn t ~allow_immediate_run:true 1 job ();
+      enqueue_exn t ~allow_immediate_run:true 1 job ();
       assert (!num_jobs_run = 1)
     ;;
   end

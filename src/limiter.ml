@@ -27,7 +27,7 @@ module Expert = struct
     (* Ivar that is filled the next time return_to_hopper is called. *)
     ; mutable hopper_filled : unit Ivar.t option
     ; limiter               : Limiter.t
-    ; throttle_queue        : (float * Job.t) Queue.t sexp_opaque }
+    ; throttle_queue        : (int * Job.t) Queue.t sexp_opaque }
   [@@deriving sexp_of]
 
   let to_jane_limiter t = t.limiter
@@ -42,7 +42,7 @@ module Expert = struct
     =
     let limiter =
       Limiter.Expert.create_exn
-        ~now:(Scheduler.cycle_start ())
+        ~now:(Scheduler.cycle_start_ns ())
         ~hopper_to_bucket_rate_per_sec
         ~bucket_limit
         ~in_flight_limit
@@ -103,12 +103,12 @@ module Expert = struct
         | e -> Monitor.send_exn monitor ~backtrace:`Get e
         end;
         Option.iter return_after ~f:(fun return_after ->
-          return_to_hopper t ~now:(Scheduler.cycle_start ()) return_after)
+          return_to_hopper t ~now:(Scheduler.cycle_start_ns ()) return_after)
       | Job.Deferred  (f, v, i) ->
         Monitor.try_with (fun () -> f v)
         >>> fun res ->
         Option.iter return_after ~f:(fun return_after ->
-          return_to_hopper t ~now:(Scheduler.cycle_start ()) return_after);
+          return_to_hopper t ~now:(Scheduler.cycle_start_ns ()) return_after);
         match res with
         | Error e ->
           Ivar.fill_if_empty i (Raised e);
@@ -137,22 +137,22 @@ module Expert = struct
     then ()
     else begin
       let amount, job = Queue.peek_exn t.throttle_queue in
-      let now         = Scheduler.cycle_start () in
+      let now         = Scheduler.cycle_start_ns () in
       match Limiter.Expert.try_take t.limiter ~now amount with
       | Asked_for_more_than_bucket_limit ->
-        fail_job t job "job asked for more tokens (%g) than possible (%g)"
+        fail_job t job !"job asked for more tokens (%i) than possible (%i)"
           amount (Limiter.bucket_limit t.limiter);
         run_throttled_jobs_until_empty t
       | Taken ->
         (* Safe, because we checked the length above.  And, we're guaranteed that
            dequeue_exn gets out the same job that peek_exn does.  *)
-        ignore (Queue.dequeue_exn t.throttle_queue : (float * Job.t));
+        ignore (Queue.dequeue_exn t.throttle_queue : (int * Job.t));
         run_job_now t job ~return_after:(Some amount);
         run_throttled_jobs_until_empty t
       | Unable ->
         begin match Limiter.Expert.tokens_may_be_available_when t.limiter ~now amount with
         | Never_because_greater_than_bucket_limit ->
-          fail_job t job "job asked for more tokens (%g) than possible (%g)"
+          fail_job t job !"job asked for more tokens (%i) than possible (%i)"
             amount (Limiter.bucket_limit t.limiter);
           run_throttled_jobs_until_empty t
         | When_return_to_hopper_is_called   ->
@@ -163,9 +163,9 @@ module Expert = struct
           (* we are comfortable using Time.now here because it's only ever called once
              per throttle/per full async cycle. *)
           let min_fill_time =
-            Time.add (Time.now ()) (Scheduler.event_precision ())
+            Time_ns.add (Time_ns.now ()) (Scheduler.event_precision_ns ())
           in
-          at (Time.max expected_fill_time min_fill_time)
+          at (Time_ns.to_time (Time_ns.max expected_fill_time min_fill_time))
           >>> fun () ->
           run_throttled_jobs_until_empty t
         end
@@ -175,7 +175,7 @@ module Expert = struct
   let enqueue_job_and_maybe_start_queue_runner t amount job ~allow_immediate_run =
     let bucket_limit = Limiter.bucket_limit t.limiter in
     if bucket_limit < amount
-    then fail_job t job "requested job size (%g) exceeds the possible size (%g)"
+    then fail_job t job !"requested job size (%i) exceeds the possible size (%i)"
            amount bucket_limit;
     if t.is_dead
     then kill_job job
@@ -183,10 +183,10 @@ module Expert = struct
       if Queue.length t.throttle_queue > 0
       then Queue.enqueue t.throttle_queue (amount, job)
       else begin
-        let now = Scheduler.cycle_start () in
+        let now = Scheduler.cycle_start_ns () in
         match Limiter.Expert.try_take t.limiter ~now amount with
         | Asked_for_more_than_bucket_limit ->
-          fail_job t job "requested job size (%g) exceeds the possible size (%g)"
+          fail_job t job !"requested job size (%i) exceeds the possible size (%i)"
             amount bucket_limit;
         | Taken  ->
           (* These semantics are copied from the current Throttle, and it was
@@ -229,7 +229,8 @@ module Expert = struct
   ;;
 
   let cost_of_jobs_waiting_to_start t =
-    Queue.fold t.throttle_queue ~init:0. ~f:(fun sum (cost, _) -> cost +. sum)
+    Queue.fold t.throttle_queue ~init:0
+      ~f:(fun sum (cost, _) -> cost + sum)
   ;;
 
 end
@@ -268,7 +269,7 @@ module Token_bucket = struct
         ~sustained_rate_per_sec:fill_rate
         ~continue_on_error
         ?in_flight_limit
-        ?(initial_burst_size = 0.)
+        ?(initial_burst_size = 0)
         ()
     =
     let in_flight_limit =
@@ -304,9 +305,9 @@ module Throttle = struct
         ()
     =
     if concurrent_jobs_target < 1
-    then failwithf "concurrent_jobs_target < 1 (%i) doesn't make sense"
+    then failwithf !"concurrent_jobs_target < 1 (%i) doesn't make sense"
            concurrent_jobs_target ();
-    let concurrent_jobs_target = Float.of_int concurrent_jobs_target in
+    let concurrent_jobs_target = concurrent_jobs_target in
     let hopper_to_bucket_rate_per_sec =
       match sustained_rate_per_sec with
       | None      -> Infinite
@@ -315,7 +316,7 @@ module Throttle = struct
     let bucket_limit =
       match burst_size with
       | None            -> concurrent_jobs_target
-      | Some burst_size -> Float.of_int burst_size
+      | Some burst_size -> burst_size
     in
     let initial_bucket_level = bucket_limit in
     Expert.create_exn
@@ -323,29 +324,27 @@ module Throttle = struct
       ~in_flight_limit:(Finite concurrent_jobs_target)
       ~hopper_to_bucket_rate_per_sec
       ~initial_bucket_level
-      ~initial_hopper_level:(Finite 0.)
+      ~initial_hopper_level:(Finite 0)
       ~continue_on_error
   ;;
 
   let enqueue_exn t ?allow_immediate_run f v =
-    Expert.enqueue_exn t ?allow_immediate_run 1. f v
+    Expert.enqueue_exn t ?allow_immediate_run 1 f v
   ;;
 
-  let enqueue' t f v = Expert.enqueue' t 1. f v
+  let enqueue' t f v = Expert.enqueue' t 1 f v
 
   let jlimiter = Expert.to_jane_limiter
 
   let concurrent_jobs_target t =
     jlimiter t
     |> Limiter.bucket_limit
-    |> Float.to_int
   ;;
 
   let num_jobs_waiting_to_start t = Queue.length t.throttle_queue
 
   let num_jobs_running t =
-    Limiter.in_flight (jlimiter t) ~now:(Scheduler.cycle_start ())
-    |> Float.to_int
+    Limiter.in_flight (jlimiter t) ~now:(Scheduler.cycle_start_ns ())
   ;;
 
   include Common
