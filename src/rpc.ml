@@ -140,9 +140,13 @@ module Connection = struct
            Deferred.unit
          else begin
            let description =
-             Info.create "TCP server listening on"
-               (Tcp.Where_to_listen.address where_to_listen :> Socket.Address.t)
-               Socket.Address.sexp_of_t
+             let server_addr = (Socket.getsockname socket :> Socket.Address.t) in
+             let client_addr = (Socket.getpeername socket :> Socket.Address.t) in
+             Info.create_s [%message
+               "TCP server"
+                 (server_addr : Socket.Address.t)
+                 (client_addr : Socket.Address.t)
+             ]
            in
            let connection_state = initial_connection_state inet in
            serve_with_transport
