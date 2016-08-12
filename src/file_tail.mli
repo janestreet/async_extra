@@ -1,13 +1,13 @@
-(* File_tail is useful for pulling data from a file that is being appended to by another
-   process.  Creating a file tail returns the reader half of a pipe whose writer half is
-   populated by a background process that roughly does the following loop.
+(** File_tail is useful for pulling data from a file that is being appended to by another
+    process.  Creating a file tail returns the reader half of a pipe whose writer half is
+    populated by a background process that roughly does the following loop.
 
-   {v
-     loop:
-       stat to find out if data is available
-       read data (repeatedly [ open, seek, read, close ] until all data is read)
-       wait for some time
-   v}
+    {v
+      loop:
+        stat to find out if data is available
+        read data (repeatedly [ open, seek, read, close ] until all data is read)
+        wait for some time
+    v}
 *)
 
 open! Core.Std

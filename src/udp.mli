@@ -70,7 +70,7 @@ end
     {!Iobuf.sendto_nonblocking_no_sigpipe} and
     {!Bigstring.sendto_nonblocking_no_sigpipe}.
 
-    @raise [Failure] on internal errors but return [Unix.error] via
+    @raise Failure on internal errors but return [Unix.error] via
     [Unix.Syscall_result.Unit.t] rather than raising [Unix_error]. *)
 val sendto_sync
   :  unit
@@ -87,7 +87,7 @@ val sendto_sync
     {!Iobuf.send_nonblocking_no_sigpipe} and
     {!Bigstring.send_nonblocking_no_sigpipe}.
 
-    @raise [Failure] on internal errors but return [Unix.error] via
+    @raise Failure on internal errors but return [Unix.error] via
     [Unix.Syscall_result.Unit.t] rather than raising [Unix_error]. *)
 val send_sync
   :  unit
@@ -96,7 +96,7 @@ val send_sync
 
 (** [sendto sock buf addr] retries if [sock] is not ready to write.
 
-    @raise [Unix_error] in the case of Unix output errors and [Failure] on internal
+    @raise Unix_error in the case of Unix output errors and [Failure] on internal
     errors. *)
 val sendto
   :  unit
@@ -108,7 +108,7 @@ val sendto
 
 (** [send sock buf] retries if [sock] is not ready to write.
 
-    @raise [Unix_error] in the case of Unix output errors and [Failure] on internal
+    @raise Unix_error in the case of Unix output errors and [Failure] on internal
     errors. *)
 val send
   :  unit
@@ -127,12 +127,13 @@ val bind
 
 val bind_any : unit -> ([ `Bound ], Socket.Address.Inet.t) Socket.t Deferred.t
 
-(* Loops, including [recvfrom_loop], terminate normally when the socket is closed. *)
+(** Loops, including [recvfrom_loop], terminate normally when the socket is closed. *)
 val recvfrom_loop
   :  ?config : Config.t
   -> Fd.t
   -> (write_buffer -> Socket.Address.Inet.t -> unit)
   -> unit Deferred.t
+
 (** [recvfrom_loop_with_buffer_replacement callback] calls [callback] synchronously on
     each message received.  [callback] returns the packet buffer for subsequent
     iterations, so it can replace the initial packet buffer when necessary.  This enables

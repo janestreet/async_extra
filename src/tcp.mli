@@ -116,7 +116,7 @@ val bind_to : Bind_to_address.t -> Bind_to_port.t -> Where_to_listen.inet
 (** [on_port port] is [bind_to All_addresses (On_port port)]*)
 val on_port              : int ->    Where_to_listen.inet
 
-(** [on_port_chosen_by_os port] is [bind_to All_addresses On_port_chosen_by_os] ]*)
+(** [on_port_chosen_by_os port] is [bind_to All_addresses On_port_chosen_by_os] *)
 val on_port_chosen_by_os :           Where_to_listen.inet
 
 (** Listen on a unix domain socket using the specified path *)

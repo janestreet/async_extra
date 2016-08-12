@@ -29,7 +29,7 @@ module type Versions = sig
   val test_version : Version.t
 end
 
-(* estokes tried changing the type of [marshal_fun] so that it returned a variant
+(*_ JS-only: estokes tried changing the type of [marshal_fun] so that it returned a variant
    indicating conversion failure, and decided it was too messy.  So, the plan is to use
    exceptions for conversion failure.  And that this is OK, because that case is usually a
    bug. *)
@@ -111,7 +111,7 @@ module Server_msg = struct
       | Duplicate        of 'name
       | Wrong_mode       of 'name
       | Too_many_clients of string
-      | Almost_full      of int (* number of free connections *)
+      | Almost_full      of int (** number of free connections *)
       | Connect          of ('name * [`credentials of string])
       | Disconnect       of 'name * Sexp.t
       | Parse_error      of 'name * string

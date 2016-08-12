@@ -105,6 +105,7 @@ module Client : sig
     [@@deriving bin_io]
 
     val length        : t -> int
+
     (** None is returned in cases where the message cannot fit into a string (original
         message was a very large Bigstring *)
     val to_string     : t -> string option

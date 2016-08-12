@@ -34,21 +34,21 @@ val async_basic : ('a, unit Deferred.t) basic_command with_options
 val async_or_error  : ('a, unit Deferred.Or_error.t) basic_command  with_options
 val async_or_error' :      unit Deferred.Or_error.t  basic_command' with_options
 
-(* staged functions allow the main function to be separated into two stages.  The first
-   part is guaranteed to run before the async scheduler is started, and the second part
-   will run after the async scheduler is started.  This is useful if the main function
-   runs code that relies on the fact that threads have not been created yet
-   (e.g. [Daemon.daemonize]).
+(** staged functions allow the main function to be separated into two stages.  The first
+    part is guaranteed to run before the async scheduler is started, and the second part
+    will run after the async scheduler is started.  This is useful if the main function
+    runs code that relies on the fact that threads have not been created yet
+    (e.g. [Daemon.daemonize]).
 
-   As an example:
-   {[
-     let main () =
-       assert (not (Scheduler.is_running ()));
-       stage (fun `Scheduler_started ->
-         assert (Scheduler.is_running ());
-         Deferred.unit
-       )
-   ]}
+    As an example:
+    {[
+      let main () =
+        assert (not (Scheduler.is_running ()));
+        stage (fun `Scheduler_started ->
+          assert (Scheduler.is_running ());
+          Deferred.unit
+        )
+    ]}
 *)
 
 type 'r staged = ([`Scheduler_started] -> 'r) Staged.t

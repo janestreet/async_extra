@@ -80,7 +80,7 @@ module Token_bucket : sig
       input [a].  No part of f is run before [enqueue'] returns. *)
   val enqueue'    : t -> int -> ('a -> 'b Deferred.t) -> 'a -> 'b Outcome.t Deferred.t
 
-  (* Include [Common], with the hack to remove the type parameter *)
+ (** Include [Common], with the hack to remove the type parameter *)
   type 'a u = t
   include Common with type 'a t := 'a u
 end
@@ -118,7 +118,7 @@ module Throttle : sig
   val enqueue_exn        : t -> ?allow_immediate_run:bool -> ('a -> unit) -> 'a -> unit
   val enqueue'           : t -> ('a -> 'b Deferred.t) -> 'a -> 'b Outcome.t Deferred.t
 
-  (* Include [Common], with the hack to remove the type parameter *)
+  (** Include [Common], with the hack to remove the type parameter *)
   type 'a u = t
   include Common with type 'a t := 'a u
 end
@@ -138,7 +138,7 @@ module Sequencer : sig
   val enqueue_exn        : t -> ?allow_immediate_run:bool -> ('a -> unit) -> 'a -> unit
   val enqueue'           : t -> ('a -> 'b Deferred.t) -> 'a -> 'b Outcome.t Deferred.t
 
-  (* Include [Common], with the hack to remove the type parameter *)
+  (** Include [Common], with the hack to remove the type parameter *)
   type 'a u = t
   include Common with type 'a t := 'a u
 end

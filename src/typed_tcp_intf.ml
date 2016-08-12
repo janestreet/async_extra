@@ -61,11 +61,12 @@ module type S = sig
     -> unit
     -> t Deferred.t
 
-  (* The server will not accept any connections until you call listen at least once. *)
+  (** The server will not accept any connections until you call listen at least once. *)
   val listen : t -> Server_read_result.t Pipe.Reader.t
   val listen_ignore_errors : t -> (Client_id.t * Client_message.t) Pipe.Reader.t
   val close : t -> Client_id.t -> unit
-  (* close all the clients and close the server *)
+
+  (** close all the clients and close the server *)
   val close_server : t -> unit Deferred.t
   val flushed_time
     : t -> Client_id.t -> [ `Client_not_found | `Flushed of Time.t Deferred.t ]
