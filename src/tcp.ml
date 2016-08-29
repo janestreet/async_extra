@@ -258,6 +258,7 @@ module Server = struct
                                            -> ([ `Active ], 'address) Socket.t
                                            -> (unit, exn) Result.t Deferred.t)
     ; max_connections                   : int
+    ; max_accepts_per_batch             : int
     ; connections                       : 'address Connection.t Bag.t
     ; mutable accept_is_pending         : bool
     ; mutable drop_incoming_connections : bool
@@ -268,6 +269,7 @@ module Server = struct
 
   type ('address, 'listening_on, 'callback) create_options
     =  ?max_connections  : int
+    -> ?max_accepts_per_batch : int
     -> ?backlog          : int
     -> ?on_handler_error : [ `Raise
                            | `Ignore
@@ -295,6 +297,8 @@ module Server = struct
         ~handle_client:ignore
         ~max_connections:(check (fun max_connections ->
           assert (max_connections >= 1)))
+        ~max_accepts_per_batch:(check (fun max_accepts_per_batch ->
+          assert (max_accepts_per_batch >= 1)))
         ~connections:(check (fun connections ->
           Bag.invariant (Connection.invariant ignore) connections;
           let num_connections = num_connections t in
@@ -325,52 +329,57 @@ module Server = struct
   (* [maybe_accept] is a bit tricky, but the idea is to avoid calling [accept] until we
      have an available slot (determined by [num_connections < max_connections]). *)
   let rec maybe_accept t =
+    let available_slots = t.max_connections - num_connections t in
     if not (is_closed t)
-    && num_connections t < t.max_connections
+    && available_slots > 0
     && not t.accept_is_pending
     then begin
       t.accept_is_pending <- true;
-      Socket.accept t.socket
+      Socket.accept_at_most ~limit:(min t.max_accepts_per_batch available_slots) t.socket
       >>> fun accept_result ->
       t.accept_is_pending <- false;
       match accept_result with
       | `Socket_closed -> ()
-      | `Ok (client_socket, client_address) ->
+      | `Ok conns ->
         (* It is possible that someone called [close t] after the [accept] returned but
-           before we got here.  In that case, we just close the client. *)
+           before we got here.  In that case, we just close the clients. *)
         if is_closed t || t.drop_incoming_connections
-        then don't_wait_for (Fd.close (Socket.fd client_socket))
-        else begin
-          let connection = Connection.create ~client_socket ~client_address in
-          let connections_elt = Bag.add t.connections connection in
-          (* immediately recurse to try to accept another client *)
-          maybe_accept t;
-          (* in parallel, handle this client *)
-          t.handle_client client_address client_socket
-          >>> fun res ->
-          Connection.close connection
-          >>> fun () ->
-          begin match res with
-          | Ok ()   -> ()
-          | Error e ->
-            try
-              match t.on_handler_error with
-              | `Ignore -> ()
-              | `Raise  -> raise e
-              | `Call f -> f client_address e
-            with
-            | e ->
-              don't_wait_for (close t);
-              raise e
-          end;
-          Bag.remove t.connections connections_elt;
-          maybe_accept t;
-        end
+        then (
+          List.iter conns ~f:(fun (sock, _) -> don't_wait_for (Fd.close (Socket.fd sock))))
+        else (
+          (* We first [handle_client] on all the connections, which increases
+             [num_connections], and then call [maybe_accept] to try to accept more
+             clients, which respects the just-increased [num_connections]. *)
+          List.iter conns ~f:(fun (sock, addr) -> handle_client t sock addr);
+          maybe_accept t)
     end
+  and handle_client t client_socket client_address =
+    let connection = Connection.create ~client_socket ~client_address in
+    let connections_elt = Bag.add t.connections connection in
+    t.handle_client client_address client_socket
+    >>> fun res ->
+    Connection.close connection
+    >>> fun () ->
+    begin match res with
+    | Ok ()   -> ()
+    | Error e ->
+      try
+        match t.on_handler_error with
+        | `Ignore -> ()
+        | `Raise  -> raise e
+        | `Call f -> f client_address e
+      with
+      | e ->
+        don't_wait_for (close t);
+        raise e
+    end;
+    Bag.remove t.connections connections_elt;
+    maybe_accept t;
   ;;
 
   let create_sock_internal
         ?(max_connections = 10_000)
+        ?(max_accepts_per_batch = 1)
         ?backlog
         ?(on_handler_error = `Raise)
         ?socket
@@ -396,6 +405,7 @@ module Server = struct
       ; on_handler_error
       ; handle_client
       ; max_connections
+      ; max_accepts_per_batch
       ; connections               = Bag.create ()
       ; accept_is_pending         = false
       ; drop_incoming_connections = false
@@ -407,6 +417,7 @@ module Server = struct
 
   let create_sock
         ?max_connections
+        ?max_accepts_per_batch
         ?backlog
         ?on_handler_error
         ?socket
@@ -414,6 +425,7 @@ module Server = struct
         handle_client =
     create_sock_internal
       ?max_connections
+      ?max_accepts_per_batch
       ?backlog
       ?on_handler_error
       ?socket
@@ -426,6 +438,7 @@ module Server = struct
   let create
         ?buffer_age_limit
         ?max_connections
+        ?max_accepts_per_batch
         ?backlog
         ?on_handler_error
         ?socket
@@ -433,6 +446,7 @@ module Server = struct
         handle_client =
     create_sock_internal
       ?max_connections
+      ?max_accepts_per_batch
       ?backlog
       ?on_handler_error
       ?socket

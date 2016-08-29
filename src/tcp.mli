@@ -164,30 +164,39 @@ module Server : sig
   (** Options for server creation:
 
       [backlog] is the number of clients that can have a connection pending, as with
-      {!Unix.Socket.listen}.  Additional connections may be rejected, ignored, or enqueued
+      {!Unix.listen}.  Additional connections may be rejected, ignored, or enqueued
       anyway, depending on OS, version, and configuration.
 
       [max_connections] is the maximum number of clients that can be connected
       simultaneously.  The server will not call [accept] unless the number of clients is
-      less than [max_connections], although of course potential clients can have a
-      connection pending.
+      less than [max_connections], although of course potential clients can have
+      a connection pending.
 
-      [on_handler_error] determines what happens if the handler throws an exception.  The
-      default is [`Raise].  If an exception is raised by on_handler_error (either
-      explicitely via [`Raise], or in the closure passed to [`Call]) no further
-      connections will be accepted.
+      [max_accepts_per_batch] is the maximum number of connections that the server will
+      retrieve per blocking {!Unix.accept} call.  Servers that must handle a large number
+      of connections tend to observe a stall in connection accept rates when under heavy
+      load.  Increasing [max_accepts_per_batch] will ameliorate this effect, increasing
+      connection accept rates and overall throughput at the cost of increased contention
+      for resources amongst connections.  Servers that are under light load or ones that
+      only service small number of connections at a times should see little to no
+      difference in behavior for different values of [max_accepts_per_branch].
+
+      [on_handler_error] determines what happens if the handler throws an exception. If an
+      exception is raised by on_handler_error (either explicitely via [`Raise], or in the
+      closure passed to [`Call]) no further connections will be accepted.
 
       Supplying [socket] causes the server to use [socket] rather than create a new
       socket.  In this usage, creation does not set [Socket.Opt.reuseaddr] to [true]; if
       you want that, you must set [reuseaddr] before creation. *)
   type ('address, 'listening_on, 'callback) create_options
-    =  ?max_connections  : int
-    -> ?backlog          : int
-    -> ?on_handler_error : [ `Raise
-                           | `Ignore
-                           | `Call of ('address -> exn -> unit)
-                           ]
-    -> ?socket           : ([ `Unconnected ], 'address) Socket.t
+    =  ?max_connections       : int  (** default is [10_000] *)
+    -> ?max_accepts_per_batch : int  (** default is [1] *)
+    -> ?backlog               : int  (** default is [10] *)
+    -> ?on_handler_error      : [ `Raise  (** default *)
+                                | `Ignore
+                                | `Call of ('address -> exn -> unit)
+                                ]
+    -> ?socket                : ([ `Unconnected ], 'address) Socket.t
     -> ('address, 'listening_on) Where_to_listen.t
     -> 'callback
     -> ('address, 'listening_on) t Deferred.t
@@ -203,9 +212,9 @@ module Server : sig
       called. *)
   val create_sock
     : ('address,
-        'listening_on,
-        'address -> ([ `Active ], 'address) Socket.t -> unit Deferred.t
-       ) create_options
+       'listening_on,
+       'address -> ([ `Active ], 'address) Socket.t -> unit Deferred.t
+      ) create_options
 
   (** [create where_to_listen handler] is a convenience wrapper around [create_sock] that
       pass a reader and writer for the client socket to the callback.  If the deferred
