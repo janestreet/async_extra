@@ -6,10 +6,13 @@ include Core.Std.Command
 type 'a with_options = ?extract_exn:bool -> 'a
 
 let shutdown_with_error e =
-  (* We use [Core] printing rather than [Async] printing, because the program may already
-     be shutting down, which could cause the error to be omitted.  We want to make sure
-     the error is seen. *)
-  Core.Std.prerr_endline (Error.to_string_hum e);
+  Caml.at_exit (fun () ->
+    (* We use [Core] printing rather than [Async] printing, because the program may
+       already be shutting down, which could cause the error to be omitted because
+       shutdown only waits for flush of the output written before [shutdown] was called.
+       We want to make sure the error is seen.  We delay it until [at_exit] to avoid
+       interleaving this with flushing of Async writers. *)
+    Core.Std.prerr_endline (Error.to_string_hum e));
   shutdown 1
 ;;
 
@@ -23,19 +26,19 @@ let maybe_print_error_and_shutdown = function
 
    Two behaviors in async prevent that from happening:
    1. the at_shutdown handlers in writer.ml that waits for pipes to be flushed at most 5s
-      even if the data hasn't made it to the OS
+   even if the data hasn't made it to the OS
    2. the default 10s timeout before forced shutdown in shutdown.ml
 
    Here is what we do about it:
    1. Changing writer.ml might be ok, but only for stdout/stderr, not in general: if the
-      process has pipes connecting it to other processes it spawned, we most likely don't
-      want to block shutdown until they stop (could deadlock if there is a pipe in the
-      other direction and the other one process waits for it to die).
-      So instead, we wait for stdout and stderr to be flushed with no timeout, or that
-      their consumer has left.
+   process has pipes connecting it to other processes it spawned, we most likely don't
+   want to block shutdown until they stop (could deadlock if there is a pipe in the
+   other direction and the other one process waits for it to die).
+   So instead, we wait for stdout and stderr to be flushed with no timeout, or that
+   their consumer has left.
    2. We don't force shutdown until stdout/stderr is flushed.
-      That wait can be bypassed by redefining [Shutdown.default_force], or passing
-      [~force] to [shutdown], which looks like the desired behavior.
+   That wait can be bypassed by redefining [Shutdown.default_force], or passing
+   [~force] to [shutdown], which looks like the desired behavior.
 
    These two behavior changes seem fine for servers as well (where stdout/stderr should
    contain almost nothing, or even be /dev/null), so we make them all the time.

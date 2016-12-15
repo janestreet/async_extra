@@ -7,8 +7,7 @@
       dt = elapsed "wall clock" time since last sample
     v}
 
-    That is, each sample is the average cpu usage of the program over the last second.
-*)
+    That is, each sample is the average cpu usage of the program over the last second. *)
 
 open! Core.Std
 open! Import

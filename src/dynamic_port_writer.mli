@@ -51,8 +51,7 @@
            Tcp.Server.create
                (Dynamic_port_writer.where_to_listen dynamic_port_writer)
                (fun _ reader writer -> ...))
-    ]}
-*)
+    ]} *)
 
 open! Core.Std
 open! Import

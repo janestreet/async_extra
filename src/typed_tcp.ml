@@ -279,8 +279,8 @@ module Make (Arg : Arg) () = struct
 end
 
 module Simple
-         (Client_to_server : Binable_t)
-         (Server_to_client : Binable_t) () =
+    (Client_to_server : Binable_t)
+    (Server_to_client : Binable_t) () =
   Make (struct
     module Client_message = Client_to_server
     module Server_message = Server_to_client

@@ -1,8 +1,0 @@
-version = "$(pkg_version)"
-description = "Monadic concurrency library"
-requires = "async_kernel async_rpc_kernel async_unix bin_prot core fieldslib ppx_assert.runtime-lib ppx_bench.runtime-lib ppx_expect.collector ppx_hash.runtime-lib ppx_inline_test.runtime-lib sexplib typerep variantslib"
-archive(byte  ) = "async_extra.cma"
-archive(native) = "async_extra.cmxa"
-plugin(byte  ) = "async_extra.cma"
-plugin(native) = "async_extra.cmxs"
-exists_if = "async_extra.cma"

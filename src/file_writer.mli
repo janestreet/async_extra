@@ -1,11 +1,11 @@
 (** [File_writer] is a thin wrapper around [Writer] with a couple of extra features:
 
-    - It keeps track of all the file writers that have been created so that it can
+    1. It keeps track of all the file writers that have been created so that it can
     iterate over them to find out how many bytes in total they have to write.
-    - It keeps track of whether the underlying writer has failed, and if so silently
+
+    2. It keeps track of whether the underlying writer has failed, and if so silently
     ignores future operations.  This can prevent pointlessly filling up a writer's
-    buffer with data that will never go anywhere.
-*)
+    buffer with data that will never go anywhere. *)
 
 
 open! Core.Std

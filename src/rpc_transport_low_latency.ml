@@ -9,7 +9,7 @@ module Send_result    = Kernel_transport.Send_result
 
 external writev2
   :  Core.Std.Unix.File_descr.t
-  -> buf1:Bigstring.t
+    -> buf1:Bigstring.t
   -> pos1:int
   -> len1:int
   -> buf2:Bigstring.t
@@ -172,7 +172,8 @@ module Reader_internal = struct
       match Unix.Syscall_result.Int.error_exn result with
       | EAGAIN | EWOULDBLOCK | EINTR ->
         `Nothing_available
-      | EPIPE  | ECONNRESET | ENETDOWN | ENETRESET | ENETUNREACH | ETIMEDOUT -> `Eof
+      | EPIPE  | ECONNRESET | EHOSTUNREACH | ENETDOWN | ENETRESET | ENETUNREACH
+      | ETIMEDOUT -> `Eof
       | error ->
         raise (Unix.Unix_error (error, "read", ""))
   ;;
@@ -489,7 +490,8 @@ module Writer_internal = struct
   let handle_error t (error : Unix.Error.t) : Error_kind.t =
     match error with
     | EAGAIN | EWOULDBLOCK | EINTR -> Write_blocked
-    | EPIPE  | ECONNRESET | ENETDOWN | ENETRESET | ENETUNREACH | ETIMEDOUT ->
+    | EPIPE  | ECONNRESET | EHOSTUNREACH | ENETDOWN | ENETRESET | ENETUNREACH
+    | ETIMEDOUT ->
       Ivar.fill_if_empty t.connection_lost ();
       Connection_lost
     | _ -> Other_error

@@ -29,8 +29,7 @@
     whenever the sequencer has no jobs to run.
 
     The implementation does not automatically release state; one must call [set_state t
-    ~key None].
-*)
+    ~key None]. *)
 
 open! Core.Std
 open! Import

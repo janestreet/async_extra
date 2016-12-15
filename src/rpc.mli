@@ -28,7 +28,7 @@ module Connection : sig
       documentation. The differences are that:
 
       - they take an [Async_unix.Std.Reader.t], [Async_unix.Std.Writer.t] and
-        [max_message_size] instead of a [Transport.t]
+      [max_message_size] instead of a [Transport.t]
       - they use [Time] instead of [Time_ns] *)
   val create
     :  ?implementations   : 's Implementations.t

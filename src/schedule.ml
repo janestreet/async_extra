@@ -4,6 +4,17 @@ open Import
 module Schedule = Core.Std.Schedule
 include Schedule
 
+(* To make sure time sources are passed through the entire implementation, we first shadow
+   all wall-clock functionality, and make time-sources required arguments in the entire
+   implementation.  Below the implementation, we then write wrappers that provide the
+   default wall-clock time source. *)
+open Require_explicit_time_source
+module Time_source = struct
+  include Time_source
+  let wall_clock = [`Do_not_use_wall_clock]
+  let _is_not_actually_used = wall_clock
+end
+
 type ('tag, 'output) pipe_emit =
   | Transitions
     : ('tag, 'tag Event.transition) pipe_emit
@@ -67,8 +78,7 @@ type ('tag, 'output) pipe =
   [ `Started_in_range of 'tag list * 'output Pipe.Reader.t
   | `Started_out_of_range of 'output Pipe.Reader.t ]
 
-let to_pipe (type tag) (type output) t ~start_time ~emit
-      ?(time_source = Time_source.wall_clock ()) ()
+let to_pipe (type tag) (type output) t ~start_time ~emit ~time_source ()
   : (tag, output) pipe =
   match (emit : (tag, output) pipe_emit) with
   | Transitions_and_tag_changes f ->
@@ -93,10 +103,9 @@ let to_pipe (type tag) (type output) t ~start_time ~emit
       (to_endless_sequence t ~start_time ~emit:Transitions)
 ;;
 
-let next_transition_filtered t ~stop ~f
-      ?(time_source = Time_source.wall_clock ())
+let next_transition_filtered t ~stop ~f ~time_source
       ?(after = Time_source.now time_source |> Time_ns.to_time) () =
-  let r = get_reader (to_pipe t ~start_time:after ~emit:Transitions ()) in
+  let r = get_reader (to_pipe t ~time_source ~start_time:after ~emit:Transitions ()) in
   upon (stop) (fun () -> Pipe.close_read r);
   let pipe = Pipe.filter_map r ~f in
   Pipe.read pipe
@@ -107,26 +116,26 @@ let next_transition_filtered t ~stop ~f
   | `Ok v -> return v
 ;;
 
-let next_enter t ?time_source ?after () =
+let next_enter t ~time_source ?after () =
   let f = function
     | `Enter (time, _) -> Some time
     | `Leave _         -> None
   in
-  next_transition_filtered t ~f ?time_source ?after ()
+  next_transition_filtered t ~f ~time_source ?after ()
 ;;
 
-let next_leave t ?time_source ?after () =
+let next_leave t ~time_source ?after () =
   let f = function
     | `Enter _    -> None
     | `Leave time -> Some time
   in
-  next_transition_filtered t ?time_source ~f ?after ()
+  next_transition_filtered t ~time_source ~f ?after ()
 ;;
 
-let next_event t ~event ~stop ?time_source ?after () =
+let next_event t ~event ~stop ~time_source ?after () =
   match event with
-  | `Enter -> next_enter t ~stop ?time_source ?after ()
-  | `Leave -> next_leave t ~stop ?time_source ?after ()
+  | `Enter -> next_enter t ~stop ~time_source ?after ()
+  | `Leave -> next_leave t ~stop ~time_source ?after ()
 ;;
 
 module Every = struct
@@ -165,7 +174,7 @@ module Every = struct
              call_with_enter_and_get_leave ~enter ~tags ~monitor f
            in
            let pipe, initial_tags =
-             match to_pipe t ~start_time ~emit () with
+             match to_pipe t ~time_source ~start_time ~emit () with
              | `Started_out_of_range pipe     -> pipe, None
              | `Started_in_range (tags, pipe) -> pipe, Some tags
            in
@@ -206,8 +215,7 @@ module Every = struct
     Deferred.join (choose [ stop_choice ; start_choice ])
   ;;
 
-  let enter_without_pushback t
-        ?(time_source             = Time_source.wall_clock ())
+  let enter_without_pushback t ~time_source
         ?(start                   = Time_source.now time_source |> Time_ns.to_time)
         ?(stop                    = Deferred.never ())
         ?(continue_on_error       = true)
@@ -225,8 +233,7 @@ module Every = struct
     |> don't_wait_for
   ;;
 
-  let tag_change_without_pushback t
-        ?(time_source             = Time_source.wall_clock ())
+  let tag_change_without_pushback t ~time_source
         ?(start                   = Time_source.now time_source |> Time_ns.to_time)
         ?(stop                    = Deferred.never ())
         ?(continue_on_error       = true)
@@ -255,7 +262,7 @@ let do_nothing_on_pushback ~enter:_ ~leave:_ = ()
 
 let every_enter
       t
-      ?time_source
+      ~time_source
       ?start
       ?stop
       ?(continue_on_error = true)
@@ -266,7 +273,7 @@ let every_enter
   let prior_event_finished = ref (return ()) in
   every_enter_without_pushback
     t
-    ?time_source
+    ~time_source
     ?start
     ?stop
     ~continue_on_error
@@ -295,7 +302,7 @@ let do_nothing_on_tag_change_pushback ~tags:_ ~enter:_ ~leave:_ = ()
 
 let every_tag_change
       t
-      ?time_source
+      ~time_source
       ?start
       ?stop
       ?(continue_on_error = true)
@@ -307,7 +314,7 @@ let every_tag_change
   let prior_event_finished = ref (return ()) in
   every_tag_change_without_pushback
     t
-    ?time_source
+    ~time_source
     ?start
     ?stop
     ~continue_on_error
@@ -333,56 +340,166 @@ let every_tag_change
        else on_pushback ~tags ~enter ~leave)
 ;;
 
-let%test_module "test run loop semenatics" = (module struct
-  let async_unit_test = Thread_safe.block_on_async_exn
+(* Now we re-introduce wall-clock functions and write wrappers so we can export functions
+   that default to using wall-clock time. *)
+open Core.Std
+open Import
 
-  let test_filter_events = function
-    | `No_change_until_at_least (_, time) -> time, None
-    | `Enter (time, _)
-    | `Leave time as event -> time, Some event
-  ;;
+let to_pipe t ~start_time ~emit ?(time_source = Time_source.wall_clock ()) () =
+  to_pipe t ~start_time ~emit ~time_source ()
+
+let next_event t ~event ~stop ?(time_source = Time_source.wall_clock ()) ?after () =
+  next_event t ~event ~stop ~time_source ?after ()
+
+let every_enter_without_pushback
+      t
+      ?(time_source = Time_source.wall_clock ())
+      ?start
+      ?stop
+      ?continue_on_error
+      ?start_in_range_is_enter
+      callback
+  =
+  every_enter_without_pushback
+    t
+    ~time_source
+    ?start
+    ?stop
+    ?continue_on_error
+    ?start_in_range_is_enter
+    callback
+
+let every_enter
+      t
+      ?(time_source = Time_source.wall_clock ())
+      ?start
+      ?stop
+      ?continue_on_error
+      ?start_in_range_is_enter
+      ?on_pushback
+      on_enter
+  =
+  every_enter
+    t
+    ~time_source
+    ?start
+    ?stop
+    ?continue_on_error
+    ?start_in_range_is_enter
+    ?on_pushback
+    on_enter
+
+let every_enter_without_pushback
+      t
+      ?(time_source = Time_source.wall_clock ())
+      ?start
+      ?stop
+      ?continue_on_error
+      ?start_in_range_is_enter
+      f
+  =
+  every_enter_without_pushback
+    t
+    ~time_source
+    ?start
+    ?stop
+    ?continue_on_error
+    ?start_in_range_is_enter
+    f
+
+let every_tag_change_without_pushback
+      t
+      ?(time_source = Time_source.wall_clock ())
+      ?start
+      ?stop
+      ?continue_on_error
+      ?start_in_range_is_enter
+      ~tag_equal
+      f
+  =
+  every_tag_change_without_pushback
+    t
+    ~time_source
+    ?start
+    ?stop
+    ?continue_on_error
+    ?start_in_range_is_enter
+    ~tag_equal
+    f
+
+let every_tag_change
+      t
+      ?(time_source = Time_source.wall_clock ())
+      ?start
+      ?stop
+      ?continue_on_error
+      ?start_in_range_is_enter
+      ?on_pushback
+      ~tag_equal
+      on_tag_change
+  =
+  every_tag_change
+    t
+    ~time_source
+    ?start
+    ?stop
+    ?continue_on_error
+    ?start_in_range_is_enter
+    ?on_pushback
+    ~tag_equal
+    on_tag_change
+
+let%test_module "test run loop semenatics" =
+  (module struct
+    let async_unit_test = Thread_safe.block_on_async_exn
+
+    let test_filter_events = function
+      | `No_change_until_at_least (_, time) -> time, None
+      | `Enter (time, _)
+      | `Leave time as event -> time, Some event
+    ;;
 
 
-  let%test_unit "resource cleanup on end of sequence" =
-    let test_schedule = In_zone (Time.Zone.utc, Mins [5]) in
-    let test_start_time  = Time.of_string "2015-01-01 01:00:00" in
-    let time_source = Time_source.wall_clock () in
-    async_unit_test (fun () ->
-      let seq =
-        match to_endless_sequence test_schedule ~start_time:test_start_time ~emit:Transitions with
-        | `Started_in_range (tags, seq) -> `Started_in_range (tags, Sequence.take seq 1)
-        | `Started_out_of_range seq -> `Started_out_of_range (Sequence.take seq 1)
-      in
-      let res, `For_testing (current_pending_event, w) =
-        run_loop_for_testing_only time_source test_filter_events seq
-      in
-      let r = get_reader res in
-      Pipe.fold r ~init:() ~f:(fun () _ -> return ())
-      >>| fun () ->
-      assert (Pipe.is_closed r);
-      assert (Pipe.is_closed w);
-      assert (!current_pending_event = None))
-  ;;
+    let%test_unit "resource cleanup on end of sequence" =
+      let test_schedule = In_zone (Time.Zone.utc, Mins [5]) in
+      let test_start_time  = Time.of_string "2015-01-01 01:00:00" in
+      let time_source = Time_source.wall_clock () in
+      async_unit_test (fun () ->
+        let seq =
+          match to_endless_sequence test_schedule ~start_time:test_start_time ~emit:Transitions with
+          | `Started_in_range (tags, seq) -> `Started_in_range (tags, Sequence.take seq 1)
+          | `Started_out_of_range seq -> `Started_out_of_range (Sequence.take seq 1)
+        in
+        let res, `For_testing (current_pending_event, w) =
+          run_loop_for_testing_only time_source test_filter_events seq
+        in
+        let r = get_reader res in
+        Pipe.fold r ~init:() ~f:(fun () _ -> return ())
+        >>| fun () ->
+        assert (Pipe.is_closed r);
+        assert (Pipe.is_closed w);
+        assert (!current_pending_event = None))
+    ;;
 
-  let%test_unit "resource cleanup on pipe close" =
-    let test_start_time = Time.add (Time.now ()) (Time.Span.of_hr 24.) in
-    (* The following is too far in the future in 32bit *)
-    (* let test_start_time = Time.of_string "2030-01-01 01:01:00" in *)
-    let test_schedule = In_zone (Time.Zone.utc, Never) in
-    let time_source = Time_source.wall_clock () in
-    async_unit_test (fun () ->
-      let res, `For_testing (current_pending_event, w) =
-        run_loop_for_testing_only time_source test_filter_events
-          (to_endless_sequence test_schedule
-             ~start_time:test_start_time  ~emit:Transitions)
-      in
-      let r = get_reader res in
-      Pipe.close_read r;
-      Time_source.Event.fired (Option.value_exn !current_pending_event)
-      >>= function
-      | `Happened () -> assert false
-      | `Aborted  () ->
-        Pipe.closed w)
-  ;;
-end)
+    let%test_unit "resource cleanup on pipe close" =
+      let test_start_time = Time.add (Time.now ()) (Time.Span.of_hr 24.) in
+      (* The following is too far in the future in 32bit *)
+      (* let test_start_time = Time.of_string "2030-01-01 01:01:00" in *)
+      let test_schedule = In_zone (Time.Zone.utc, Never) in
+      let time_source = Time_source.wall_clock () in
+      async_unit_test (fun () ->
+        let res, `For_testing (current_pending_event, w) =
+          run_loop_for_testing_only time_source test_filter_events
+            (to_endless_sequence test_schedule
+               ~start_time:test_start_time  ~emit:Transitions)
+        in
+        let r = get_reader res in
+        Pipe.close_read r;
+        Time_source.Event.fired (Option.value_exn !current_pending_event)
+        >>= function
+        | `Happened () -> assert false
+        | `Aborted  () ->
+          Pipe.closed w)
+    ;;
+  end)
 

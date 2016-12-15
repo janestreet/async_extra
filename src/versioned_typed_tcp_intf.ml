@@ -29,10 +29,6 @@ module type Versions = sig
   val test_version : Version.t
 end
 
-(*_ JS-only: estokes tried changing the type of [marshal_fun] so that it returned a variant
-   indicating conversion failure, and decided it was too messy.  So, the plan is to use
-   exceptions for conversion failure.  And that this is OK, because that case is usually a
-   bug. *)
 type 'a marshal_fun = 'a -> Bigsubstring.t option
 type 'a unmarshal_fun = Bigsubstring.t -> 'a option
 

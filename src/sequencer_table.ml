@@ -110,191 +110,192 @@ module Make (Key : Hashable) = struct
   ;;
 end
 
-let%test_module _ = (module struct
-  module T = Make(Int)
+let%test_module _ =
+  (module struct
+    module T = Make(Int)
 
-  let (=) = Pervasives.(=)
+    let (=) = Pervasives.(=)
 
-  exception Abort of int
+    exception Abort of int
 
-  let%test_unit _ =
-    (* don't run a job immediately *)
-    Thread_safe.block_on_async_exn (fun () ->
-      let t = T.create () in
-      let i = ref 0 in
-      let res = T.enqueue t ~key:0 (fun _ -> incr i; Deferred.unit) in
-      assert (!i = 0);
-      res >>| fun () ->
-      assert (!i = 1)
-    )
-
-  let%test_unit _ =
-    (* no deferred between finding state and running the job *)
-    (* let [enqueue] function, when [Monitor.try_with] did not take [~run:`Now], then this
-       unit test failed to pass *)
-    Thread_safe.block_on_async_exn (fun () ->
-      let t = T.create () in
-      let i = ref `init in
-      debug_on_find_state := (fun () ->
-        Deferred.unit >>> fun () -> i := `deferred_determined
-      );
-      T.enqueue t ~key:0 (fun _ ->
-        [%test_eq: [`init | `deferred_determined]] !i `init;
-        Deferred.unit
+    let%test_unit _ =
+      (* don't run a job immediately *)
+      Thread_safe.block_on_async_exn (fun () ->
+        let t = T.create () in
+        let i = ref 0 in
+        let res = T.enqueue t ~key:0 (fun _ -> incr i; Deferred.unit) in
+        assert (!i = 0);
+        res >>| fun () ->
+        assert (!i = 1)
       )
-      >>| fun () ->
-      debug_on_find_state := ignore
-    )
 
-  let%test_unit _ =
-    Thread_safe.block_on_async_exn (fun () ->
-      let t = T.create () in
-      let num_keys = 100 in
-      let keys = List.init num_keys ~f:Fn.id in
-      let started_jobs = Queue.create () in
-      let enqueue key x =
-        Monitor.try_with (fun () ->
-          T.enqueue t ~key (fun state ->
-            let state =
-              match state with
-              | None -> [x]
-              | Some xs -> x::xs
-            in
-            T.set_state t ~key (Some state);
-            Queue.enqueue started_jobs key;
-            Clock.after (sec 0.01) >>| fun () ->
-            (* check continue on error *)
-            raise (Abort key)
-          )
+    let%test_unit _ =
+      (* no deferred between finding state and running the job *)
+      (* let [enqueue] function, when [Monitor.try_with] did not take [~run:`Now], then this
+         unit test failed to pass *)
+      Thread_safe.block_on_async_exn (fun () ->
+        let t = T.create () in
+        let i = ref `init in
+        debug_on_find_state := (fun () ->
+          Deferred.unit >>> fun () -> i := `deferred_determined
+        );
+        T.enqueue t ~key:0 (fun _ ->
+          [%test_eq: [`init | `deferred_determined]] !i `init;
+          Deferred.unit
         )
-        >>| function
-        | Error exn ->
-          begin match Monitor.extract_exn exn with
-          | (Abort i) when i = key -> ()
-          | _ -> assert false
-          end
-        | _ -> assert false
-      in
-      Deferred.List.iter keys ~how:`Parallel ~f:(fun key ->
-        Deferred.List.iter ['a'; 'b'; 'c' ] ~how:`Parallel ~f:(enqueue key)
+        >>| fun () ->
+        debug_on_find_state := ignore
       )
-      >>| fun () ->
-      List.iter keys ~f:(fun key ->
-        (* check [find_state] *)
-        (* check jobs are sequentialized for the same key *)
-        assert (T.find_state t key = Some ['c'; 'b'; 'a'])
-      );
-      (* check jobs on different keys can run concurrently *)
-      let started_jobs_in_batched =
-        List.groupi (Queue.to_list started_jobs)
-          ~break:(fun i _ _ -> i mod num_keys = 0)
-      in
-      List.iter started_jobs_in_batched ~f:(fun l ->
-        assert (List.sort l ~cmp:Int.compare = keys)
-      );
-    )
-  ;;
 
-  let%test_unit _ =
-    (* Test [num_unfinished_jobs] *)
-    Thread_safe.block_on_async_exn (fun () ->
-      let t = T.create () in
-      assert (T.num_unfinished_jobs t 0 = 0);
-      let job1 =
-        T.enqueue t ~key:0 (fun _ ->
-          assert (T.num_unfinished_jobs t 0 = 3); Deferred.unit)
-      in
-      let job2 =
-        T.enqueue t ~key:0 (fun _ ->
-          assert (T.num_unfinished_jobs t 0 = 2); Deferred.unit)
-      in
-      let job3 =
-        T.enqueue t ~key:0 (fun _ ->
-          assert (T.num_unfinished_jobs t 0 = 1); Deferred.unit)
-      in
-      assert (T.num_unfinished_jobs t 0 = 3);
-      Deferred.all_unit [job1; job2; job3] >>| fun () ->
-      assert (T.num_unfinished_jobs t 0 = 0)
-    )
+    let%test_unit _ =
+      Thread_safe.block_on_async_exn (fun () ->
+        let t = T.create () in
+        let num_keys = 100 in
+        let keys = List.init num_keys ~f:Fn.id in
+        let started_jobs = Queue.create () in
+        let enqueue key x =
+          Monitor.try_with (fun () ->
+            T.enqueue t ~key (fun state ->
+              let state =
+                match state with
+                | None -> [x]
+                | Some xs -> x::xs
+              in
+              T.set_state t ~key (Some state);
+              Queue.enqueue started_jobs key;
+              Clock.after (sec 0.01) >>| fun () ->
+              (* check continue on error *)
+              raise (Abort key)
+            )
+          )
+          >>| function
+          | Error exn ->
+            begin match Monitor.extract_exn exn with
+            | (Abort i) when i = key -> ()
+            | _ -> assert false
+            end
+          | _ -> assert false
+        in
+        Deferred.List.iter keys ~how:`Parallel ~f:(fun key ->
+          Deferred.List.iter ['a'; 'b'; 'c' ] ~how:`Parallel ~f:(enqueue key)
+        )
+        >>| fun () ->
+        List.iter keys ~f:(fun key ->
+          (* check [find_state] *)
+          (* check jobs are sequentialized for the same key *)
+          assert (T.find_state t key = Some ['c'; 'b'; 'a'])
+        );
+        (* check jobs on different keys can run concurrently *)
+        let started_jobs_in_batched =
+          List.groupi (Queue.to_list started_jobs)
+            ~break:(fun i _ _ -> i mod num_keys = 0)
+        in
+        List.iter started_jobs_in_batched ~f:(fun l ->
+          assert (List.sort l ~cmp:Int.compare = keys)
+        );
+      )
+    ;;
 
-  let%test_unit _ =
-    (* Test [mem] *)
-    Thread_safe.block_on_async_exn (fun () ->
-      let t = T.create () in
-      (* empty *)
-      assert (T.mem t 0 = false);
-      let job = T.enqueue t ~key:0 (fun _ -> Deferred.unit) in
-      (* with job *)
-      assert (T.mem t 0);
-      job >>= fun () ->
-      (* without job *)
-      assert (T.mem t 0 = false);
-      (* with state *)
-      T.set_state t ~key:0 (Some 'a');
-      assert (T.mem t 0);
-      T.set_state t ~key:0 None;
-      (* without state *)
-      assert (T.mem t 0 = false);
-      let job =
+    let%test_unit _ =
+      (* Test [num_unfinished_jobs] *)
+      Thread_safe.block_on_async_exn (fun () ->
+        let t = T.create () in
+        assert (T.num_unfinished_jobs t 0 = 0);
+        let job1 =
+          T.enqueue t ~key:0 (fun _ ->
+            assert (T.num_unfinished_jobs t 0 = 3); Deferred.unit)
+        in
+        let job2 =
+          T.enqueue t ~key:0 (fun _ ->
+            assert (T.num_unfinished_jobs t 0 = 2); Deferred.unit)
+        in
+        let job3 =
+          T.enqueue t ~key:0 (fun _ ->
+            assert (T.num_unfinished_jobs t 0 = 1); Deferred.unit)
+        in
+        assert (T.num_unfinished_jobs t 0 = 3);
+        Deferred.all_unit [job1; job2; job3] >>| fun () ->
+        assert (T.num_unfinished_jobs t 0 = 0)
+      )
+
+    let%test_unit _ =
+      (* Test [mem] *)
+      Thread_safe.block_on_async_exn (fun () ->
+        let t = T.create () in
+        (* empty *)
+        assert (T.mem t 0 = false);
+        let job = T.enqueue t ~key:0 (fun _ -> Deferred.unit) in
+        (* with job *)
+        assert (T.mem t 0);
+        job >>= fun () ->
+        (* without job *)
+        assert (T.mem t 0 = false);
+        (* with state *)
         T.set_state t ~key:0 (Some 'a');
-        T.enqueue t ~key:0 (fun _ -> Deferred.unit)
-      in
-      (* with job and state *)
-      assert (T.mem t 0);
-      job >>| fun () ->
-      (* without job but with state *)
-      assert (T.mem t 0)
-    )
-  ;;
+        assert (T.mem t 0);
+        T.set_state t ~key:0 None;
+        (* without state *)
+        assert (T.mem t 0 = false);
+        let job =
+          T.set_state t ~key:0 (Some 'a');
+          T.enqueue t ~key:0 (fun _ -> Deferred.unit)
+        in
+        (* with job and state *)
+        assert (T.mem t 0);
+        job >>| fun () ->
+        (* without job but with state *)
+        assert (T.mem t 0)
+      )
+    ;;
 
-  let%test_unit _ = (* enqueueing within a job doesn't lead to monitor nesting *)
-    Thread_safe.block_on_async_exn (fun () ->
-      let t = T.create () in
-      let rec loop n =
-        if n = 0
-        then Deferred.unit
-        else
-          T.enqueue t ~key:13 (fun _ ->
-            assert (Monitor.depth (Monitor.current ()) < 5);
-            don't_wait_for (loop (n - 1));
-            Deferred.unit)
-      in
-      loop 100)
-  ;;
+    let%test_unit _ = (* enqueueing within a job doesn't lead to monitor nesting *)
+      Thread_safe.block_on_async_exn (fun () ->
+        let t = T.create () in
+        let rec loop n =
+          if n = 0
+          then Deferred.unit
+          else
+            T.enqueue t ~key:13 (fun _ ->
+              assert (Monitor.depth (Monitor.current ()) < 5);
+              don't_wait_for (loop (n - 1));
+              Deferred.unit)
+        in
+        loop 100)
+    ;;
 
-  let%test_unit _ = (* [flushed] is determined after all current jobs are finished *)
-    Thread_safe.block_on_async_exn (fun () ->
-      let t = T.create () in
-      let phase1_finished = Ivar.create () in
-      let phase2_finished = Ivar.create () in
-      let num_flushed = 2 in
-      let num_not_flushed = 2 in
-      for i = 1 to num_flushed do
-        don't_wait_for (T.enqueue t ~key:i (fun _ -> Ivar.read phase1_finished));
-      done;
-      let phase1_flushed = T.prior_jobs_done t in
-      for i = 1 to num_flushed + num_not_flushed do
-        don't_wait_for (T.enqueue t ~key:i (fun _ -> Ivar.read phase2_finished));
-      done;
-      for i = 1 to num_flushed do
-        (* two jobs we enqueued, and one job [flush] added *)
-        assert (T.num_unfinished_jobs t i = 3)
-      done;
-      for i = num_flushed + 1 to num_flushed + num_not_flushed do
-        assert (T.num_unfinished_jobs t i = 1)
-      done;
-      Ivar.fill phase1_finished ();
-      phase1_flushed
-      >>= fun () ->
-      for i = 1 to num_flushed + num_not_flushed do
-        assert (T.num_unfinished_jobs t i = 1)
-      done;
-      Ivar.fill phase2_finished ();
-      T.prior_jobs_done t
-      >>| fun () ->
-      for i = 1 to num_flushed + num_not_flushed do
-        assert (T.num_unfinished_jobs t i = 0)
-      done;
-    )
-  ;;
-end)
+    let%test_unit _ = (* [flushed] is determined after all current jobs are finished *)
+      Thread_safe.block_on_async_exn (fun () ->
+        let t = T.create () in
+        let phase1_finished = Ivar.create () in
+        let phase2_finished = Ivar.create () in
+        let num_flushed = 2 in
+        let num_not_flushed = 2 in
+        for i = 1 to num_flushed do
+          don't_wait_for (T.enqueue t ~key:i (fun _ -> Ivar.read phase1_finished));
+        done;
+        let phase1_flushed = T.prior_jobs_done t in
+        for i = 1 to num_flushed + num_not_flushed do
+          don't_wait_for (T.enqueue t ~key:i (fun _ -> Ivar.read phase2_finished));
+        done;
+        for i = 1 to num_flushed do
+          (* two jobs we enqueued, and one job [flush] added *)
+          assert (T.num_unfinished_jobs t i = 3)
+        done;
+        for i = num_flushed + 1 to num_flushed + num_not_flushed do
+          assert (T.num_unfinished_jobs t i = 1)
+        done;
+        Ivar.fill phase1_finished ();
+        phase1_flushed
+        >>= fun () ->
+        for i = 1 to num_flushed + num_not_flushed do
+          assert (T.num_unfinished_jobs t i = 1)
+        done;
+        Ivar.fill phase2_finished ();
+        T.prior_jobs_done t
+        >>| fun () ->
+        for i = 1 to num_flushed + num_not_flushed do
+          assert (T.num_unfinished_jobs t i = 0)
+        done;
+      )
+    ;;
+  end)

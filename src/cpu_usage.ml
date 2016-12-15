@@ -260,60 +260,61 @@ end = struct
     end
   ;;
 
-  let%test_module _ = (module struct
-    (* Check correct sample sizes and removal of dead clients *)
-    let%test_unit _ =
-      let windows1 = [ sec 5. ; sec 8. ; sec 10. ] in
-      let windows2 = [ sec 4. ; sec 3. ; sec 6.  ] in
-      Async_unix.Thread_safe.block_on_async_exn (fun () ->
-        let pr, pw = Pipe.create () in
-        let t = create pr in
-        let r2 = subscribe t windows2 in
-        assert (t.max_num_samples = 6);
-        let r1 = subscribe t windows1 in
-        assert (t.max_num_samples = 10);
-        Pipe.close_read r1;
-        Pipe.write_without_pushback pw (Percent.of_mult 1.);
-        Pipe.downstream_flushed pw
-        >>= fun res ->
-        assert (res = `Ok);
-        assert (t.max_num_samples = 6);
-        Pipe.close_read r2;
-        Pipe.write_without_pushback pw (Percent.of_mult 2.);
-        Pipe.downstream_flushed pw
-        >>| fun res ->
-        assert (res = `Ok);
-        assert (t.max_num_samples = 0))
-
-    (* Check that summary computation is correct *)
-    let%test_unit _ =
-      let robustly_test_eq pct1 pct2 =
-        assert (0 = Float.robustly_compare (Percent.to_mult pct1) (Percent.to_mult pct2))
-      in
-      let window = [ sec 4.] in
-      let index = [0  ; 1  ; 2  ; 3  ; 4  ; 5 ] in
-      let pc = List.map ~f:Percent.of_percentage in
-      let input = pc [4. ; 8. ; 3. ; 1. ; 0. ; 2. ] in
-      let avg   = pc [4. ; 6. ; 5. ; 4. ; 3. ; 1.5 ] in
-      let max   = pc [4. ; 8. ; 8. ; 8. ; 8. ; 3. ] in
-      let min   = pc [4. ; 4. ; 3. ; 1. ; 0. ; 0. ] in
-      Async_unix.Thread_safe.block_on_async_exn (fun () ->
-        let pr, pw = Pipe.create () in
-        let t = create pr in
-        let r = subscribe t window in
-        Deferred.List.iter index ~f:(fun i ->
-          Pipe.write_without_pushback pw (List.nth_exn input i);
+  let%test_module _ =
+    (module struct
+      (* Check correct sample sizes and removal of dead clients *)
+      let%test_unit _ =
+        let windows1 = [ sec 5. ; sec 8. ; sec 10. ] in
+        let windows2 = [ sec 4. ; sec 3. ; sec 6.  ] in
+        Async_unix.Thread_safe.block_on_async_exn (fun () ->
+          let pr, pw = Pipe.create () in
+          let t = create pr in
+          let r2 = subscribe t windows2 in
+          assert (t.max_num_samples = 6);
+          let r1 = subscribe t windows1 in
+          assert (t.max_num_samples = 10);
+          Pipe.close_read r1;
+          Pipe.write_without_pushback pw (Percent.of_mult 1.);
           Pipe.downstream_flushed pw
           >>= fun res ->
           assert (res = `Ok);
-          Pipe.read r
-          >>| function
-          | `Ok (_, summary) ->
-            robustly_test_eq summary.avg (List.nth_exn avg i);
-            robustly_test_eq summary.max (List.nth_exn max i);
-            robustly_test_eq summary.min (List.nth_exn min i);
-          | _ -> assert false))
-  end)
+          assert (t.max_num_samples = 6);
+          Pipe.close_read r2;
+          Pipe.write_without_pushback pw (Percent.of_mult 2.);
+          Pipe.downstream_flushed pw
+          >>| fun res ->
+          assert (res = `Ok);
+          assert (t.max_num_samples = 0))
+
+      (* Check that summary computation is correct *)
+      let%test_unit _ =
+        let robustly_test_eq pct1 pct2 =
+          assert (0 = Float.robustly_compare (Percent.to_mult pct1) (Percent.to_mult pct2))
+        in
+        let window = [ sec 4.] in
+        let index = [0  ; 1  ; 2  ; 3  ; 4  ; 5 ] in
+        let pc = List.map ~f:Percent.of_percentage in
+        let input = pc [4. ; 8. ; 3. ; 1. ; 0. ; 2. ] in
+        let avg   = pc [4. ; 6. ; 5. ; 4. ; 3. ; 1.5 ] in
+        let max   = pc [4. ; 8. ; 8. ; 8. ; 8. ; 3. ] in
+        let min   = pc [4. ; 4. ; 3. ; 1. ; 0. ; 0. ] in
+        Async_unix.Thread_safe.block_on_async_exn (fun () ->
+          let pr, pw = Pipe.create () in
+          let t = create pr in
+          let r = subscribe t window in
+          Deferred.List.iter index ~f:(fun i ->
+            Pipe.write_without_pushback pw (List.nth_exn input i);
+            Pipe.downstream_flushed pw
+            >>= fun res ->
+            assert (res = `Ok);
+            Pipe.read r
+            >>| function
+            | `Ok (_, summary) ->
+              robustly_test_eq summary.avg (List.nth_exn avg i);
+              robustly_test_eq summary.max (List.nth_exn max i);
+              robustly_test_eq summary.min (List.nth_exn min i);
+            | _ -> assert false))
+    end)
 end
 
 let samples =

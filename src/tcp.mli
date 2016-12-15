@@ -70,18 +70,17 @@ val connect_sock
     If possible, use [with_connection], which automatically handles closing.
 
     It is fine to ignore the returned socket and just use the reader and writer.  The
-    socket is there to make it convenient to call [Socket] functions.
-*)
+    socket is there to make it convenient to call [Socket] functions. *)
 val connect
   :  ?socket : ([ `Unconnected ], 'addr) Socket.t
   -> ( 'addr where_to_connect
-      -> (([ `Active ], 'addr) Socket.t * Reader.t * Writer.t) Deferred.t
-    ) with_connect_options
+       -> (([ `Active ], 'addr) Socket.t * Reader.t * Writer.t) Deferred.t
+     ) with_connect_options
 
 (** A [Where_to_listen] describes the socket that a tcp server should listen on. *)
 module Where_to_listen : sig
   type ('address, 'listening_on) t constraint 'address = [< Socket.Address.t ]
-  [@@deriving sexp_of]
+    [@@deriving sexp_of]
 
   type inet = (Socket.Address.Inet.t, int   ) t [@@deriving sexp_of]
   type unix = (Socket.Address.Unix.t, string) t [@@deriving sexp_of]

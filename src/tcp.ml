@@ -489,13 +489,13 @@ module Server = struct
       | Ok (server, r, w) ->
         Monitor.protect ~finally:(fun () -> close_connection_via_reader_and_writer r w)
           (fun () ->
-            match
-              Unix.Syscall_result.Unit.to_result
-                (Fd.with_file_descr_exn (Socket.fd server)
-                   (Iobuf.read_assume_fd_is_nonblocking (Iobuf.create ~len:1)))
-            with
-            | Error (EAGAIN | EWOULDBLOCK) -> return (test `Accepted)
-            | r -> failwiths "read" r [%sexp_of: (unit, Unix.Error.t) Result.t])
+             match
+               Unix.Syscall_result.Unit.to_result
+                 (Fd.with_file_descr_exn (Socket.fd server)
+                    (Iobuf.read_assume_fd_is_nonblocking (Iobuf.create ~len:1)))
+             with
+             | Error (EAGAIN | EWOULDBLOCK) -> return (test `Accepted)
+             | r -> failwiths "read" r [%sexp_of: (unit, Unix.Error.t) Result.t])
     in
     (* We use a small [backlog] to keep the number of simultaneous threads small, to
        avoid spurious hydra rejects due to Async outputting on stderr complaints about

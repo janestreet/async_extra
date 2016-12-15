@@ -34,9 +34,9 @@ type 'a wo_my_name =
     remote_name : 'remote_name >
   constraint 'a =
     < send : 'send;
-      recv : 'recv;
-      my_name     : 'my_name;
-      remote_name : 'remote_name >
+    recv : 'recv;
+    my_name     : 'my_name;
+    remote_name : 'remote_name >
 
 type 'a flipped =
   < send : 'recv;
@@ -110,11 +110,11 @@ module Make (Z : Arg) = struct
       }
       constraint 'a =
         < send        : 'send;
-          recv        : 'recv;
-          my_name     : 'my_name;
-          remote_name : 'remote_name >
+        recv        : 'recv;
+        my_name     : 'my_name;
+        remote_name : 'remote_name >
 
-    let kill t = t.kill ()
+                      let kill t = t.kill ()
   end
 
   let try_with = Monitor.try_with
@@ -304,20 +304,20 @@ module Make (Z : Arg) = struct
             else begin
               let body = Bigsubstring.create buf ~pos:(!pos_ref) ~len:body_len in
               begin match try Ok (con.unmarshal_fun body) with ex -> Error ex with
-                | Error exn ->
-                  extend_parse_error remote_name (Exn.to_string exn);
-                | Ok None -> ()
-                | Ok (Some msg) ->
-                  let time_received = Reader.last_read_time con.reader in
-                  let time_sent = hdr.time_stamp in
-                  let raw_msg =
-                    if extend_data_needs_raw
-                    then Bigsubstring.create buf ~pos ~len:msg_len
-                    else
-                      (* a performance hack: this isn't really used downstream *)
-                      dummy_bigsubstring
-                  in
-                  extend ~time_received ~time_sent msg raw_msg
+              | Error exn ->
+                extend_parse_error remote_name (Exn.to_string exn);
+              | Ok None -> ()
+              | Ok (Some msg) ->
+                let time_received = Reader.last_read_time con.reader in
+                let time_sent = hdr.time_stamp in
+                let raw_msg =
+                  if extend_data_needs_raw
+                  then Bigsubstring.create buf ~pos ~len:msg_len
+                  else
+                    (* a performance hack: this isn't really used downstream *)
+                    dummy_bigsubstring
+                in
+                extend ~time_received ~time_sent msg raw_msg
               end;
               handle_chunk
                 buf
@@ -699,9 +699,9 @@ module Make (Z : Arg) = struct
             if t.enforce_unique_remote_name
             then h.name
             else sprintf "%s:%s:%s"
-                     h.name
-                     (Socket.Address.Inet.to_string addr)
-                     (Int63.to_string t.num_accepts)
+                   h.name
+                   (Socket.Address.Inet.to_string addr)
+                   (Int63.to_string t.num_accepts)
           in
           match Result.try_with (fun () -> Client_name.of_string name) with
           | Error exn ->
@@ -945,7 +945,7 @@ module Make (Z : Arg) = struct
                      Server_name.to_string t.expected_remote_name
                    in
                    if t.check_remote_name
-                      && h.name <> expected_remote_name
+                   && h.name <> expected_remote_name
                    then
                      Or_error.error "Hello name is not expected remote name"
                        (h.name, expected_remote_name)
@@ -1195,11 +1195,11 @@ module Make (Z : Arg) = struct
 end
 
 module Repeater
-         (To_server_msg : Datum)
-         (To_client_msg : Datum)
-         (Server_name : Name)
-         (Client_name : Name)
-         (Mode : Mode) =
+    (To_server_msg : Datum)
+    (To_client_msg : Datum)
+    (Server_name : Name)
+    (Client_name : Name)
+    (Mode : Mode) =
 struct
 
   module Repeater_hook = struct
@@ -1210,12 +1210,12 @@ struct
   end
 
   module Z = Make (struct
-    module To_client_msg = To_client_msg
-    module To_server_msg = To_server_msg
-    module Client_name = Client_name
-    module Server_name = Server_name
-    module Mode = Mode
-  end)
+      module To_client_msg = To_client_msg
+      module To_server_msg = To_server_msg
+      module Client_name = Client_name
+      module Server_name = Server_name
+      module Mode = Mode
+    end)
 
   module Server = Z.Server
 
@@ -1602,18 +1602,18 @@ module Datumable_of_binable = struct
   end
 
   module Make_datumable5
-           (Versions : Versions)
-           (T : T)
-           (V1 : T_bin)
-           (V2 : T_bin)
-           (V3 : T_bin)
-           (V4 : T_bin)
-           (V5 : T_bin)
-           (V1_cvt : V(V1)(T).S)
-           (V2_cvt : V(V2)(T).S)
-           (V3_cvt : V(V3)(T).S)
-           (V4_cvt : V(V4)(T).S)
-           (V5_cvt : V(V5)(T).S)
+      (Versions : Versions)
+      (T : T)
+      (V1 : T_bin)
+      (V2 : T_bin)
+      (V3 : T_bin)
+      (V4 : T_bin)
+      (V5 : T_bin)
+      (V1_cvt : V(V1)(T).S)
+      (V2_cvt : V(V2)(T).S)
+      (V3_cvt : V(V3)(T).S)
+      (V4_cvt : V(V4)(T).S)
+      (V5_cvt : V(V5)(T).S)
     : Datumable with type datum = T.t =
   struct
     type t = T.t
@@ -1678,18 +1678,18 @@ module Datumable_of_binable = struct
   end
 
   module Five_versions
-           (Versions : Pre_versions)
-           (T : T)
-           (V1 : T_bin)
-           (V2 : T_bin)
-           (V3 : T_bin)
-           (V4 : T_bin)
-           (V5 : T_bin)
-           (V1_cvt : V(V1)(T).S)
-           (V2_cvt : V(V2)(T).S)
-           (V3_cvt : V(V3)(T).S)
-           (V4_cvt : V(V4)(T).S)
-           (V5_cvt : V(V5)(T).S)
+      (Versions : Pre_versions)
+      (T : T)
+      (V1 : T_bin)
+      (V2 : T_bin)
+      (V3 : T_bin)
+      (V4 : T_bin)
+      (V5 : T_bin)
+      (V1_cvt : V(V1)(T).S)
+      (V2_cvt : V(V2)(T).S)
+      (V3_cvt : V(V3)(T).S)
+      (V4_cvt : V(V4)(T).S)
+      (V5_cvt : V(V5)(T).S)
     : Datumable with type datum = T.t =
     Make_datumable5
       (struct
@@ -1702,16 +1702,16 @@ module Datumable_of_binable = struct
   ;;
 
   module Four_versions
-           (Versions : Pre_versions)
-           (T : T)
-           (V1 : T_bin)
-           (V2 : T_bin)
-           (V3 : T_bin)
-           (V4 : T_bin)
-           (V1_cvt : V(V1)(T).S)
-           (V2_cvt : V(V2)(T).S)
-           (V3_cvt : V(V3)(T).S)
-           (V4_cvt : V(V4)(T).S)
+      (Versions : Pre_versions)
+      (T : T)
+      (V1 : T_bin)
+      (V2 : T_bin)
+      (V3 : T_bin)
+      (V4 : T_bin)
+      (V1_cvt : V(V1)(T).S)
+      (V2_cvt : V(V2)(T).S)
+      (V3_cvt : V(V3)(T).S)
+      (V4_cvt : V(V4)(T).S)
     : Datumable with type datum = T.t =
     Make_datumable5
       (struct
@@ -1724,14 +1724,14 @@ module Datumable_of_binable = struct
   ;;
 
   module Three_versions
-           (Versions : Pre_versions)
-           (T : T)
-           (V1 : T_bin)
-           (V2 : T_bin)
-           (V3 : T_bin)
-           (V1_cvt : V(V1)(T).S)
-           (V2_cvt : V(V2)(T).S)
-           (V3_cvt : V(V3)(T).S)
+      (Versions : Pre_versions)
+      (T : T)
+      (V1 : T_bin)
+      (V2 : T_bin)
+      (V3 : T_bin)
+      (V1_cvt : V(V1)(T).S)
+      (V2_cvt : V(V2)(T).S)
+      (V3_cvt : V(V3)(T).S)
     : Datumable with type datum = T.t =
     Make_datumable5
       (struct
@@ -1744,12 +1744,12 @@ module Datumable_of_binable = struct
   ;;
 
   module Two_versions
-           (Versions : Pre_versions)
-           (T : T)
-           (V1 : T_bin)
-           (V2 : T_bin)
-           (V1_cvt : V(V1)(T).S)
-           (V2_cvt : V(V2)(T).S)
+      (Versions : Pre_versions)
+      (T : T)
+      (V1 : T_bin)
+      (V2 : T_bin)
+      (V1_cvt : V(V1)(T).S)
+      (V2_cvt : V(V2)(T).S)
     : Datumable with type datum = T.t =
     Make_datumable5
       (struct
@@ -1762,10 +1762,10 @@ module Datumable_of_binable = struct
   ;;
 
   module One_version
-           (Versions : Pre_versions)
-           (T : T)
-           (V1 : T_bin)
-           (V1_cvt : V(V1)(T).S)
+      (Versions : Pre_versions)
+      (T : T)
+      (V1 : T_bin)
+      (V1_cvt : V(V1)(T).S)
     : Datumable with type datum = T.t =
     Make_datumable5
       (struct

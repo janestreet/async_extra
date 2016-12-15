@@ -26,7 +26,7 @@ val async' :      unit Deferred.t  basic_command' with_options
 (** [async_basic] is a deprecated synonym for [async] that will eventually go away.  It is
     here to give code outside jane street a chance to switch over before we delete it. *)
 val async_basic : ('a, unit Deferred.t) basic_command with_options
-  [@@deprecated "[since 2015-10] Use async instead"]
+[@@deprecated "[since 2015-10] Use async instead"]
 
 (** [async_or_error] is like [async], except that the main function it expects may
     return an error, in which case it prints out the error message and shuts down with

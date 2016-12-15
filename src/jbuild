@@ -2,8 +2,10 @@
  ((name async_extra)
   (public_name async_extra)
   (c_names (rpc_transport_low_latency_stubs))
-  (preprocess (((pps (JANE -check-doc-comments)) All)))
+  (preprocess (pps (ppx_jane -check-doc-comments)))
   (libraries (async_kernel
               async_rpc_kernel
               async_unix
               core))))
+
+(enforce_style ())

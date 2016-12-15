@@ -9,8 +9,8 @@ module Make (Arg : Arg) () :
      and module Server_message = Arg.Server_message
 
 module Simple
-         (Client_message : Binable_t)
-         (Server_message : Binable_t) ()
+    (Client_message : Binable_t)
+    (Server_message : Binable_t) ()
   : S
     with type Client_message.t = Client_message.t
     with type Server_message.t = Server_message.t

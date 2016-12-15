@@ -4,7 +4,6 @@ module Cpu_usage             = Cpu_usage
 module Dynamic_port_writer   = Dynamic_port_writer
 module File_tail             = File_tail
 module File_writer           = File_writer
-module Limiter               = Limiter
 module Lock_file             = Lock_file
 module Persistent_connection = Persistent_connection
 module Persistent_singleton  = Persistent_singleton

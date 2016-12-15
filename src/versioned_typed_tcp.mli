@@ -36,11 +36,11 @@ module Server_name = Z.Server_name
     strictly necessary but makes code simpler. It is possible that this will be changed in
     the future *)
 module Repeater
-         (To_server_msg : Datum)
-         (To_client_msg : Datum)
-         (Server_name : Name)
-         (Client_name : Name)
-         (Mode : Mode) :
+    (To_server_msg : Datum)
+    (To_client_msg : Datum)
+    (Server_name : Name)
+    (Client_name : Name)
+    (Mode : Mode) :
 sig
   type t
 
@@ -133,18 +133,18 @@ module Datumable_of_binable : sig
   end
 
   module Make_datumable5
-           (Versions : Versions)
-           (T : T)
-           (V1 : T_bin)
-           (V2 : T_bin)
-           (V3 : T_bin)
-           (V4 : T_bin)
-           (V5 : T_bin)
-           (V1_cvt : V(V1)(T).S)
-           (V2_cvt : V(V2)(T).S)
-           (V3_cvt : V(V3)(T).S)
-           (V4_cvt : V(V4)(T).S)
-           (V5_cvt : V(V5)(T).S)
+      (Versions : Versions)
+      (T : T)
+      (V1 : T_bin)
+      (V2 : T_bin)
+      (V3 : T_bin)
+      (V4 : T_bin)
+      (V5 : T_bin)
+      (V1_cvt : V(V1)(T).S)
+      (V2_cvt : V(V2)(T).S)
+      (V3_cvt : V(V3)(T).S)
+      (V4_cvt : V(V4)(T).S)
+      (V5_cvt : V(V5)(T).S)
     : Datumable with type datum = T.t
 
   module type Pre_versions = sig
@@ -153,62 +153,62 @@ module Datumable_of_binable : sig
   end
 
   module Five_versions
-           (Versions : Pre_versions)
-           (T : T)
-           (V1 : T_bin)
-           (V2 : T_bin)
-           (V3 : T_bin)
-           (V4 : T_bin)
-           (V5 : T_bin)
-           (V1_cvt : V(V1)(T).S)
-           (V2_cvt : V(V2)(T).S)
-           (V3_cvt : V(V3)(T).S)
-           (V4_cvt : V(V4)(T).S)
-           (V5_cvt : V(V5)(T).S)
+      (Versions : Pre_versions)
+      (T : T)
+      (V1 : T_bin)
+      (V2 : T_bin)
+      (V3 : T_bin)
+      (V4 : T_bin)
+      (V5 : T_bin)
+      (V1_cvt : V(V1)(T).S)
+      (V2_cvt : V(V2)(T).S)
+      (V3_cvt : V(V3)(T).S)
+      (V4_cvt : V(V4)(T).S)
+      (V5_cvt : V(V5)(T).S)
     : Datumable with type datum = T.t
   ;;
 
   module Four_versions
-           (Versions : Pre_versions)
-           (T : T)
-           (V1 : T_bin)
-           (V2 : T_bin)
-           (V3 : T_bin)
-           (V4 : T_bin)
-           (V1_cvt : V(V1)(T).S)
-           (V2_cvt : V(V2)(T).S)
-           (V3_cvt : V(V3)(T).S)
-           (V4_cvt : V(V4)(T).S)
+      (Versions : Pre_versions)
+      (T : T)
+      (V1 : T_bin)
+      (V2 : T_bin)
+      (V3 : T_bin)
+      (V4 : T_bin)
+      (V1_cvt : V(V1)(T).S)
+      (V2_cvt : V(V2)(T).S)
+      (V3_cvt : V(V3)(T).S)
+      (V4_cvt : V(V4)(T).S)
     : Datumable with type datum = T.t
   ;;
 
   module Three_versions
-           (Versions : Pre_versions)
-           (T : T)
-           (V1 : T_bin)
-           (V2 : T_bin)
-           (V3 : T_bin)
-           (V1_cvt : V(V1)(T).S)
-           (V2_cvt : V(V2)(T).S)
-           (V3_cvt : V(V3)(T).S)
+      (Versions : Pre_versions)
+      (T : T)
+      (V1 : T_bin)
+      (V2 : T_bin)
+      (V3 : T_bin)
+      (V1_cvt : V(V1)(T).S)
+      (V2_cvt : V(V2)(T).S)
+      (V3_cvt : V(V3)(T).S)
     : Datumable with type datum = T.t
   ;;
 
   module Two_versions
-           (Versions : Pre_versions)
-           (T : T)
-           (V1 : T_bin)
-           (V2 : T_bin)
-           (V1_cvt : V(V1)(T).S)
-           (V2_cvt : V(V2)(T).S)
+      (Versions : Pre_versions)
+      (T : T)
+      (V1 : T_bin)
+      (V2 : T_bin)
+      (V1_cvt : V(V1)(T).S)
+      (V2_cvt : V(V2)(T).S)
     : Datumable with type datum = T.t
   ;;
 
   module One_version
-           (Versions : Pre_versions)
-           (T : T)
-           (V1 : T_bin)
-           (V1_cvt : V(V1)(T).S)
+      (Versions : Pre_versions)
+      (T : T)
+      (V1 : T_bin)
+      (V1_cvt : V(V1)(T).S)
     : Datumable with type datum = T.t
   ;;
 end

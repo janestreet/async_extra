@@ -7,8 +7,7 @@
         stat to find out if data is available
         read data (repeatedly [ open, seek, read, close ] until all data is read)
         wait for some time
-    v}
-*)
+    v} *)
 
 open! Core.Std
 open! Import
@@ -100,8 +99,7 @@ end
     [eof_latency_tolerance] affects the [Did_not_reach_eof_for] warning.
 
     [null_read_tolerance] determines how long the tailing must observe null reads
-    before it will report a [Delayed_due_to_null_reads_for] warning.
-*)
+    before it will report a [Delayed_due_to_null_reads_for] warning. *)
 val create
   :  ?read_buf_len          : int           (** default is 32k *)
   -> ?read_delay            : Time.Span.t   (** default is 0.5s *)
