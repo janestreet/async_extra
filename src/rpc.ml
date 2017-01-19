@@ -160,18 +160,6 @@ module Connection = struct
          end)
   ;;
 
-  module Client_implementations = struct
-    type nonrec 's t =
-      { connection_state : t -> 's
-      ; implementations  : 's Implementations.t
-      }
-
-    let null () =
-      { connection_state = (fun _ -> ())
-      ; implementations  = Implementations.null ()
-      }
-  end
-
   let client ~host ~port
         ?via_local_interface
         ?implementations

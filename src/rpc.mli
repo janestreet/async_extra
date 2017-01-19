@@ -76,6 +76,7 @@ module Connection : sig
       ]}
   *)
   type transport_maker = Fd.t -> max_message_size:int -> Transport.t
+
   type on_handshake_error = [ `Raise | `Ignore | `Call of (Exn.t -> unit) ]
 
   (** [serve implementations ~port ?on_handshake_error ()] starts a server with the given
@@ -110,15 +111,6 @@ module Connection : sig
     -> on_handshake_error : on_handshake_error
     -> Transport.t
     -> unit Deferred.t
-
-  module Client_implementations : sig
-    type nonrec 's t =
-      { connection_state : t -> 's
-      ; implementations  : 's Implementations.t
-      }
-
-    val null : unit -> unit t
-  end
 
   (** [client ~host ~port ()] connects to the server at ([host],[port]) and returns the
       connection or an Error if a connection could not be made.  It is the responsibility
