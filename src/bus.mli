@@ -26,9 +26,14 @@ end
     [Some].  [first_exn] raises if it can't subscribe to the bus, i.e. if [subscribe_exn]
     raises.  If [f] raises, then [first_exn] raises to the monitor in effect when
     [first_exn] was called.  [first_exn] takes time proportional to the number of bus
-    subscribers. *)
+    subscribers.
+
+    If [stop] is provided and becomes determined, [f] will not be called again, it will
+    unsubscribe from the bus, and the deferred that was returned by [first_exn] will never
+    become determined. *)
 val first_exn
-  :  'c Read_only.t
+  :  ?stop : unit Deferred.t
+  -> 'c Read_only.t
   -> Source_code_position.t
   -> ('c, 'f, 'r) First_arity.t
   -> f:'f
