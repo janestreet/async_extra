@@ -376,9 +376,11 @@ let%test_module _ =
     ;;
 
     let next_representable_time t =
-      Time.to_float t
+      Time.to_span_since_epoch t
+      |> Time.Span.to_sec
       |> Float.one_ulp `Up
-      |> Time.of_float
+      |> Time.Span.of_sec
+      |> Time.of_span_since_epoch
     ;;
 
     let zone = Time.Zone.utc
