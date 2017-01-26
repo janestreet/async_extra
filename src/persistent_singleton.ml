@@ -3,7 +3,7 @@
     memory, changed, and then the process crashes, the file will correctly reflect that
     the value has been lost. *)
 
-open Core.Std
+open Core
 open Import
 
 module type Arg = Sexpable

@@ -1,4 +1,4 @@
-open Core.Std
+open Core
 open Import
 
 let input_closed_error = Error.of_string "input closed"

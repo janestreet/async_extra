@@ -1,7 +1,7 @@
 (** [Async.Lock_file] is a wrapper that provides Async equivalents for
     [Core.Lock_file]. *)
 
-open! Core.Std
+open! Core
 open! Import
 
 (** [create ?message path] tries to create a file at [path] containing the text [message],
@@ -26,7 +26,7 @@ val create_exn
 
 (** [waiting_create path] repeatedly tries to lock [path], becoming determined when [path]
     is locked or raising when [abort] becomes determined.  Similar to
-    [Core.Std.Lock_file.blocking_create]. *)
+    [Core.Lock_file.blocking_create]. *)
 val waiting_create
   :  ?abort          : unit Deferred.t  (** default is [Deferred.never ()] *)
   -> ?message        : string

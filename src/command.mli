@@ -1,11 +1,11 @@
 (** [Async.Command] is [Core.Command] with additional Async functions. *)
 
-open! Core.Std
+open! Core
 open! Import
 
-include module type of Core.Std.Command
-  with type t      = Core.Std.Command.t
-  with module Spec = Core.Std.Command.Spec
+include module type of Core.Command
+  with type t      = Core.Command.t
+  with module Spec = Core.Command.Spec
 
 type 'a with_options
   =  ?extract_exn : bool

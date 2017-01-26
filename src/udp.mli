@@ -14,7 +14,7 @@
 
     Instead, we use synchronous callbacks. *)
 
-open! Core.Std
+open! Core
 open! Import
 
 type write_buffer = (read_write, Iobuf.seek) Iobuf.t

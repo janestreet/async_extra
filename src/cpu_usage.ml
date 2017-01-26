@@ -1,4 +1,4 @@
-open Core.Std
+open Core
 open Import
 
 let debug = false
@@ -19,7 +19,7 @@ end = struct
   [@@deriving sexp_of]
 
   let time_used () =
-    let r = Core.Std.Unix.Resource_usage.get `Self in
+    let r = Core.Unix.Resource_usage.get `Self in
     sec (r.utime +. r.stime)
   ;;
 

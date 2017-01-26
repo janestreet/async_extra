@@ -53,7 +53,7 @@
                (fun _ reader writer -> ...))
     ]} *)
 
-open! Core.Std
+open! Core
 open! Import
 
 type t [@@deriving bin_io, sexp]

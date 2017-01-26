@@ -1,6 +1,6 @@
 (** Access to on-disk files in parallel with serving them over a TCP connection. *)
 
-open! Core.Std
+open! Core
 open! Import
 
 module Server : sig

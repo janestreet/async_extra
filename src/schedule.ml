@@ -1,7 +1,7 @@
-open Core.Std
+open Core
 open Import
 
-module Schedule = Core.Std.Schedule
+module Schedule = Core.Schedule
 include Schedule
 
 (* To make sure time sources are passed through the entire implementation, we first shadow
@@ -342,7 +342,7 @@ let every_tag_change
 
 (* Now we re-introduce wall-clock functions and write wrappers so we can export functions
    that default to using wall-clock time. *)
-open Core.Std
+open Core
 open Import
 
 let to_pipe t ~start_time ~emit ?(time_source = Time_source.wall_clock ()) () =

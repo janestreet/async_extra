@@ -1,7 +1,7 @@
-open Core.Std
+open Core
 open Import
 
-module File_descr = Core.Std.Unix.File_descr
+module File_descr = Core.Unix.File_descr
 
 type t = File_descr.t [@@deriving bin_io, sexp]
 
@@ -12,7 +12,7 @@ let create_fd core_fd =
 ;;
 
 let create () =
-  let module Unix = Core.Std.Unix in
+  let module Unix = Core.Unix in
   In_thread.syscall_exn ~name:"Dynamic_port_writer: pipe" (fun () -> Unix.pipe ())
   >>= fun (r, w) ->
   (* We only need the read-end of the pipe in the parent. *)
@@ -29,7 +29,7 @@ let create () =
     Reader.with_close reader ~f:(fun () -> Reader.read_sexp reader)
     >>= fun result ->
     In_thread.syscall_exn ~name:"Dynamic_port_writer: close"
-      (fun () -> Core.Std.Unix.close w)
+      (fun () -> Core.Unix.close w)
     >>| fun () ->
     match result with
     | `Ok sexp -> Ok (`Port (Int.t_of_sexp sexp))

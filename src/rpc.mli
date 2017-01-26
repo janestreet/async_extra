@@ -3,7 +3,7 @@
     For documentation, see [Rpc] and [Connection_intf] in the [Async_rpc_kernel] library.
 *)
 
-open! Core.Std
+open! Core
 open! Import
 
 module Transport = Rpc_transport

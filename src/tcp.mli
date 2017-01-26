@@ -2,7 +2,7 @@
     different types.  We use ['a where_to_connect] to specify a socket to connect to,
     where the ['a] identifies the type of socket. *)
 
-open! Core.Std
+open! Core
 open! Import
 
 type 'a where_to_connect constraint 'a = [< Socket.Address.t ]

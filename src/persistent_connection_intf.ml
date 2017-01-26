@@ -2,7 +2,7 @@
     to reconnect whenever the underlying connection is lost, until a new one can be
     established. *)
 
-open! Core.Std
+open! Core
 open! Import
 
 

@@ -1,7 +1,7 @@
-open Core.Std
+open Core
 open Import
 
-include Core.Std.Command
+include Core.Command
 
 type 'a with_options = ?extract_exn:bool -> 'a
 
@@ -12,7 +12,7 @@ let shutdown_with_error e =
        shutdown only waits for flush of the output written before [shutdown] was called.
        We want to make sure the error is seen.  We delay it until [at_exit] to avoid
        interleaving this with flushing of Async writers. *)
-    Core.Std.prerr_endline (Error.to_string_hum e));
+    Core.prerr_endline (Error.to_string_hum e));
   shutdown 1
 ;;
 

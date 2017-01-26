@@ -1,9 +1,9 @@
-open Core.Std
+open Core
 open Import
 
 let create ?message ?close_on_exec ?unlink_on_exit path =
   In_thread.run (fun () ->
-    Core.Std.Lock_file.create ?message ?close_on_exec ?unlink_on_exit path)
+    Core.Lock_file.create ?message ?close_on_exec ?unlink_on_exit path)
 ;;
 
 let create_exn ?message ?close_on_exec ?unlink_on_exit path =
@@ -43,31 +43,31 @@ let waiting_create
   >>| fail_on_abort path
 ;;
 
-let is_locked path = In_thread.run (fun () -> Core.Std.Lock_file.is_locked path)
+let is_locked path = In_thread.run (fun () -> Core.Lock_file.is_locked path)
 
 module Nfs = struct
   let get_hostname_and_pid path =
-    In_thread.run (fun () -> Core.Std.Lock_file.Nfs.get_hostname_and_pid path)
+    In_thread.run (fun () -> Core.Lock_file.Nfs.get_hostname_and_pid path)
   ;;
 
   let get_message path =
-    In_thread.run (fun () -> Core.Std.Lock_file.Nfs.get_message path)
+    In_thread.run (fun () -> Core.Lock_file.Nfs.get_message path)
   ;;
 
   let unlock_exn path =
-    In_thread.run (fun () -> Core.Std.Lock_file.Nfs.unlock_exn path)
+    In_thread.run (fun () -> Core.Lock_file.Nfs.unlock_exn path)
   ;;
 
   let unlock path =
-    In_thread.run (fun () -> Core.Std.Lock_file.Nfs.unlock path)
+    In_thread.run (fun () -> Core.Lock_file.Nfs.unlock path)
   ;;
 
   let create ?message path =
-    In_thread.run (fun () -> Core.Std.Lock_file.Nfs.create ?message path)
+    In_thread.run (fun () -> Core.Lock_file.Nfs.create ?message path)
   ;;
 
   let create_exn ?message path =
-    In_thread.run (fun () -> Core.Std.Lock_file.Nfs.create_exn ?message path)
+    In_thread.run (fun () -> Core.Lock_file.Nfs.create_exn ?message path)
   ;;
 
   let waiting_create ?(abort = Deferred.never ()) ?message path =

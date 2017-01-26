@@ -1,4 +1,4 @@
-open Core.Std
+open Core
 open Import
 open Int.Replace_polymorphic_compare
 
@@ -145,7 +145,7 @@ let sendto () =
         | `Interrupted -> Deferred.unit
         | (`Bad_fd | `Closed | `Unsupported) as error ->
           fail buf "Udp.sendto" (error, addr)
-            [%sexp_of: [ `Bad_fd | `Closed | `Unsupported ] * Core.Std.Unix.sockaddr])
+            [%sexp_of: [ `Bad_fd | `Closed | `Unsupported ] * Core.Unix.sockaddr])
 ;;
 
 let send () =
@@ -175,7 +175,7 @@ let bind ?ifname addr =
     try
       (* We do not treat [mcast_join] as a blocking operation because it only instructs
          the kernel to send an IGMP message, which the kernel handles asynchronously. *)
-      Core.Std.Unix.mcast_join ?ifname (Fd.file_descr_exn (Socket.fd socket))
+      Core.Unix.mcast_join ?ifname (Fd.file_descr_exn (Socket.fd socket))
         (Socket.Address.to_sockaddr addr)
     with exn ->
       raise_s [%message "Udp.bind unable to join multicast group"

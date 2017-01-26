@@ -2,7 +2,7 @@
     coming from a [string Pipe.Reader.t] or a [Reader.t].  It can produce a pipe of
     upacked values or iterate a user-supplied function over the unpacked values. *)
 
-open! Core.Std
+open! Core
 open! Import
 
 module Unpack_iter_result : sig

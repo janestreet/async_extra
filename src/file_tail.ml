@@ -1,4 +1,4 @@
-open Core.Std
+open Core
 open Import
 
 module Stats = Unix.Stats
@@ -216,7 +216,7 @@ let stat t ~initial_call =
            downside is that this adds two more system calls per for every [stat], and in
            the case where the file has grown "wastes" the open file descriptor since we
            are just going to re-open it. *)
-        let module Unix = Core.Std.Unix in
+        let module Unix = Core.Unix in
         Unix.with_file t.file ~mode:[ O_RDONLY ] ~f:Unix.fstat)))
   >>| fun result ->
   let error e = error t e; Error () in
@@ -257,7 +257,7 @@ let start_eof_latency_check t =
 let read_once t =
   Global_throttle.enqueue (fun () ->
     In_thread.run (fun () ->
-      let module Unix = Core.Std.Unix in
+      let module Unix = Core.Unix in
       Unix.with_file t.file ~mode:[ O_RDONLY ] ~f:(fun fd ->
         ignore (Unix.lseek fd t.file_pos ~mode:SEEK_SET);
         Unix.read fd ~buf:t.read_buf)))

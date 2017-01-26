@@ -1,10 +1,10 @@
-open! Core.Std
+open! Core
 open! Import
 
-(** Wrapper around Core.Std.User_and_group with a deferred [for_this_process] /
+(** Wrapper around Core.User_and_group with a deferred [for_this_process] /
     [for_this_process_exn]. *)
 
-type t = Core.Std.User_and_group.t [@@deriving sexp, bin_io]
+type t = Core.User_and_group.t [@@deriving sexp, bin_io]
 include Identifiable with type t := t
 val create : user:string -> group:string -> t
 val user : t -> string

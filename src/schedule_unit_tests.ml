@@ -1,5 +1,5 @@
 module Async_schedule = Schedule
-open Core.Std
+open Core
 open Import
 
 let async_unit_test = Thread_safe.block_on_async_exn
@@ -9,7 +9,7 @@ let%test_module _ =
     open Async_schedule
 
     (* proves that the type equality is maintained *)
-    let _ = [ Core.Std.Schedule.Always; Async_schedule.Always ]
+    let _ = [ Core.Schedule.Always; Async_schedule.Always ]
 
     let next_schedule = In_zone (Time.Zone.utc, Mins [5])
 

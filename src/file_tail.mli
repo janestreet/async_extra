@@ -9,7 +9,7 @@
         wait for some time
     v} *)
 
-open! Core.Std
+open! Core
 open! Import
 
 module Error : sig

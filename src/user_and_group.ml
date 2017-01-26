@@ -1,7 +1,7 @@
-open Core.Std
+open Core
 open Import
 
-include Core.Std.User_and_group
+include Core.User_and_group
 
 let for_this_process () =
   Unix.getlogin ()

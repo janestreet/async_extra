@@ -8,7 +8,7 @@
     buffer with data that will never go anywhere. *)
 
 
-open! Core.Std
+open! Core
 open! Import
 
 type t [@@deriving sexp_of]

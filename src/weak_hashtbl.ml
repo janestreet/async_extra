@@ -1,7 +1,7 @@
-open! Core.Std
+open! Core
 open! Import
 
-include Core.Std.Weak_hashtbl
+include Core.Weak_hashtbl
 
 let create ?growth_allowed ?size hashable =
   let t = create ?growth_allowed ?size hashable in

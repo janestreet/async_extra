@@ -1,4 +1,4 @@
-open Core.Std
+open Core
 open Import
 
 module Kernel_transport = Rpc_kernel.Transport
@@ -8,7 +8,7 @@ module Handler_result = Kernel_transport.Handler_result
 module Send_result    = Kernel_transport.Send_result
 
 external writev2
-  :  Core.Std.Unix.File_descr.t
+  :  Core.Unix.File_descr.t
     -> buf1:Bigstring.t
   -> pos1:int
   -> len1:int

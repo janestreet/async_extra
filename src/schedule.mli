@@ -1,7 +1,7 @@
-open! Core.Std
+open! Core
 open! Import
 
-include module type of struct include Core.Std.Schedule end
+include module type of struct include Core.Schedule end
 
 (** in [Transitions_and_tag_changes] equality for the tag type must be given *)
 type ('tag, 'output) pipe_emit =

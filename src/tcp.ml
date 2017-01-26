@@ -1,4 +1,4 @@
-open Core.Std
+open Core
 open Import
 
 module Host = Unix.Host
@@ -557,7 +557,7 @@ module Server = struct
                   if not linger then
                     Fd.with_file_descr_exn to_client
                       (fun file_descr ->
-                         Core.Std.Unix.setsockopt_optint file_descr SO_LINGER (Some 0));
+                         Core.Unix.setsockopt_optint file_descr SO_LINGER (Some 0));
                   Fd.close to_client)
              >>= fun t ->
              Deferred.all (List.init backlog ~f:(fun _ ->
@@ -571,7 +571,7 @@ module Server = struct
                    Fd.with_file_descr connection_to_server
                      (fun file_descr ->
                         Unix.Error.of_system_int
-                          ~errno:(Core.Std.Unix.getsockopt_int file_descr SO_ERROR))
+                          ~errno:(Core.Unix.getsockopt_int file_descr SO_ERROR))
                  with
                  | `Ok e when e = expect -> Ok ()
                  | wrong ->

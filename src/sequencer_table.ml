@@ -1,4 +1,4 @@
-open Core.Std
+open Core
 open Import
 
 let debug_on_find_state = ref ignore

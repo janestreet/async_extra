@@ -1,7 +1,7 @@
 (** An Async extension of Core_kernel.Bus.  Functions that share the same name and types
     as those in Core_kernel.Bus are direct calls to the same. *)
 
-open! Core.Std
+open! Core
 open! Import
 
 include module type of struct include Core_kernel.Bus end

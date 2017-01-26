@@ -1,6 +1,6 @@
 (** This module implements a RPC transport optimized for low-latency. *)
 
-open! Core.Std
+open! Core
 open! Import
 
 module Config : sig

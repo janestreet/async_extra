@@ -31,7 +31,7 @@
     The implementation does not automatically release state; one must call [set_state t
     ~key None]. *)
 
-open! Core.Std
+open! Core
 open! Import
 
 module Make (Key : Hashable) : sig

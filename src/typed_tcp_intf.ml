@@ -1,4 +1,4 @@
-open Core.Std
+open Core
 open Import
 
 module type Binable_t = sig

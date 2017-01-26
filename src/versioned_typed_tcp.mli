@@ -1,4 +1,4 @@
-open! Core.Std
+open! Core
 open! Import
 
 include module type of Versioned_typed_tcp_intf
