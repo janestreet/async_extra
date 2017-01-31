@@ -75,7 +75,8 @@ module Nfs = struct
       create ?message path
       >>| function
       | Ok ()   -> true
-      | Error _ -> false)
+      | Error _ ->
+        false)
     >>| fail_on_abort path
   ;;
 
