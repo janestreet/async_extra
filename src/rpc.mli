@@ -67,7 +67,7 @@ module Connection : sig
   (** A function creating a transport from a file descriptor. It is responsible for
       setting the low-level parameters of the underlying transport.
 
-      For instance to setup a transport using [Async.Std.{Reader,Writer}] and set a buffer
+      For instance to setup a transport using [Async.{Reader,Writer}] and set a buffer
       age limit on the writer, you can pass this to the functions of this module:
 
       {[
