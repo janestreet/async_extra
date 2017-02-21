@@ -374,9 +374,7 @@ module Writer_internal = struct
     ; ivar : unit Ivar.t
     } [@@deriving sexp_of]
 
-  let get_job_number () =
-    Async_kernel.Scheduler.(num_jobs_run (t ()))
-  ;;
+  let get_job_number () = Scheduler.num_jobs_run ()
 
   module State = struct
     type t =

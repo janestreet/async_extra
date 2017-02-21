@@ -38,7 +38,7 @@ type 'a with_connect_options
     finished processing and the file descriptor for the socket is closed.  If [interrupt]
     is supplied then the connection attempt will be aborted if interrupt is fulfilled
     before the connection has been established.  Similarly, all connection attempts have a
-    timeout (default 30s), that can be overridden with [timeout].
+    timeout (default 10s), that can be overridden with [timeout].
 
     It is fine for [f] to ignore the supplied socket and just use the reader and writer.
     The socket is there to make it convenient to call [Socket] functions. *)
