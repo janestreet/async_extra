@@ -38,6 +38,11 @@ module Connection = struct
       (Transport.of_reader_writer reader writer ~max_message_size)
   ;;
 
+  let contains_magic_prefix reader =
+    Reader.peek_bin_prot reader contains_magic_prefix
+    >>| function `Eof -> false | `Ok b -> b
+  ;;
+
   let with_close
         ?implementations
         ?(max_message_size=default_max_message_size)

@@ -27,7 +27,7 @@
       Dynamic_port_writer.create ()
       >>= fun (dynamic_port_writer, port_d) ->
       Unix.fork_exec ~prog
-        ~args:([ prog ]
+        ~argv:([ prog ]
                @ Dynamic_port_writer.flag_args dynamic_port_writer
                @ [ ... other args ... ])
         ()

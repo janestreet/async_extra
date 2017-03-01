@@ -41,6 +41,16 @@ module Connection : sig
     -> Writer.t
     -> (t, Exn.t) Result.t Deferred.t
 
+  (** As of Feb 2017, the RPC protocol started to contain a magic number so that one can
+      identify RPC communication.  The bool returned by [contains_magic_prefix] says
+      whether this magic number was observed.
+
+      This operation is a "peek" that does not advanced any pointers associated with the
+      reader.  In particular, it makes sense to call [create] on a reader after calling
+      this function.
+  *)
+  val contains_magic_prefix : Reader.t -> bool Deferred.t
+
   val with_close
     :  ?implementations : 's Implementations.t
     -> ?max_message_size : int
