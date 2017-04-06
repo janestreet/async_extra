@@ -67,6 +67,9 @@ val where_to_listen : t -> (Socket.Address.Inet.t, int) Tcp.Where_to_listen.t
 (** For use with [Command]. *)
 val arg  : t Command.Spec.Arg_type.t
 
+(** The string used in [flag_args] for specifying the dynamic port writer flag *)
+val flag_name : string
+
 (** One can pass a [t] from parent to child by including [flag_args t] in the command-line
     arguments and using [flag] in the [Command.t] in the child. *)
 val flag : t Command.Spec.param

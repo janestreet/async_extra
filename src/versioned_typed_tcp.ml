@@ -148,7 +148,7 @@ module Make (Z : Arg) = struct
       raise (Write_bin_prot_error.E { name
                                     ; arg       = sexp m
                                     ; exn
-                                    ; backtrace = Exn.backtrace ()
+                                    ; backtrace = Backtrace.Exn.most_recent ()
                                     })
   ;;
 

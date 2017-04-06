@@ -24,7 +24,7 @@ module Connection : sig
   include module type of struct include Rpc_kernel.Connection end
 
   (** These functions are mostly the same as the ones with the same names in
-      [Async_rpc_kernel.Std.Rpc.Connection]; see [Connection_intf] in that library for
+      [Async_rpc_kernel.Rpc.Connection]; see [Connection_intf] in that library for
       documentation. The differences are that:
 
       - they take an [Async_unix.Std.Reader.t], [Async_unix.Std.Writer.t] and

@@ -39,8 +39,12 @@ module Connection = struct
   ;;
 
   let contains_magic_prefix reader =
-    Reader.peek_bin_prot reader contains_magic_prefix
-    >>| function `Eof -> false | `Ok b -> b
+    Deferred.Or_error.try_with (fun () ->
+      Reader.peek_bin_prot reader contains_magic_prefix)
+    >>| function
+    | Error _
+    | Ok (`Eof) -> false
+    | Ok (`Ok b) -> b
   ;;
 
   let with_close
@@ -172,7 +176,7 @@ module Connection = struct
         ?(make_transport=default_transport_maker)
         ?(handshake_timeout=
           Time_ns.Span.to_span
-            Async_rpc_kernel.Connection.default_handshake_timeout)
+            Async_rpc_kernel.Async_rpc_kernel_private.default_handshake_timeout)
         ?heartbeat_config
         ?description
         () =
