@@ -135,7 +135,7 @@ module Make (Z : Arg) = struct
       { name      : string
       ; arg       : Sexp.t
       ; exn       : exn
-      ; backtrace : string;
+      ; backtrace : Backtrace.t;
       }
     [@@deriving sexp_of]
 
