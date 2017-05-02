@@ -47,7 +47,9 @@ let in_async ?extract_exn param on_result =
   Param.map param ~f:(fun staged_main () ->
     let main = Or_error.try_with (fun () -> unstage (staged_main ())) in
     match main with
-    | Error e -> shutdown_with_error e
+    | Error e ->
+      shutdown_with_error e;
+      (never_returns (Scheduler.go ()) : unit)
     | Ok main ->
       let before_shutdown () =
         Deferred.List.iter ~how:`Parallel

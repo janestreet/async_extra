@@ -48,8 +48,8 @@ let run_loop_for_testing_only time_source filter_event init =
              current_pending_event := Some event;
              Time_source.Event.fired event
              >>= function
-             | `Aborted  () -> finished ()
-             | `Happened () ->
+             | Aborted  () -> finished ()
+             | Happened () ->
                current_pending_event := None;
                let repeat = return (`Repeat next) in
                begin match event_opt with
@@ -167,7 +167,7 @@ module Every = struct
     in
     let start_choice =
       choice (Time_source.Event.fired start_event)
-        (fun (`Aborted `only_stop_choice_can_abort | `Happened _) ->
+        (fun (Aborted `only_stop_choice_can_abort | Happened _) ->
            assert (not (Deferred.is_determined stop));
            let monitor = Monitor.create ~name () in
            let enter_and_get_leave ~enter ~tags =
@@ -497,8 +497,8 @@ let%test_module "test run loop semenatics" =
         Pipe.close_read r;
         Time_source.Event.fired (Option.value_exn !current_pending_event)
         >>= function
-        | `Happened () -> assert false
-        | `Aborted  () ->
+        | Happened () -> assert false
+        | Aborted  () ->
           Pipe.closed w)
     ;;
   end)
