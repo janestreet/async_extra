@@ -772,7 +772,7 @@ module Make (Z : Arg) = struct
             end;
             handler addr reader writer
         in
-        Set_once.set_exn t.handler wrapped_handler;
+        Set_once.set_exn t.handler [%here] wrapped_handler;
       end;
       Tail.collect t.tail
     ;;
