@@ -187,8 +187,7 @@ let%test_module _ =
         );
         (* check jobs on different keys can run concurrently *)
         let started_jobs_in_batched =
-          List.groupi (Queue.to_list started_jobs)
-            ~break:(fun i _ _ -> i mod num_keys = 0)
+          List.chunks_of ~length:num_keys (Queue.to_list started_jobs)
         in
         List.iter started_jobs_in_batched ~f:(fun l ->
           assert (List.sort l ~cmp:Int.compare = keys)
