@@ -1,4 +1,5 @@
-module Async_schedule = Schedule
+module Async_schedule = Schedule_v5
+module Core_schedule = Core.Schedule_v5
 open Core
 open Import
 
@@ -9,7 +10,7 @@ let%test_module _ =
     open Async_schedule
 
     (* proves that the type equality is maintained *)
-    let _ = [ Core.Schedule.Always; Async_schedule.Always ]
+    let _ = [ Core_schedule.Always; Async_schedule.Always ]
 
     let next_schedule = In_zone (Time.Zone.utc, Mins [5])
 
@@ -343,7 +344,7 @@ let%test_module _ =
     let%test_unit "every_enter, don't start too early" =
       async_unit_test (fun () ->
         let start = Time.add (Time.now ()) Time.Span.day in
-        every_enter Schedule.Always ~start
+        every_enter Always ~start
           ~on_pushback:(fun ~enter:_ ~leave:_ -> assert false)
           (fun ~enter:_ ~leave:_ -> assert false);
         wait_for_deferred_errors ())
@@ -351,7 +352,7 @@ let%test_module _ =
     let%test_unit "every_tag_change_without_pushback, don't start too early" =
       async_unit_test (fun () ->
         let start = Time.add (Time.now ()) Time.Span.day in
-        every_tag_change_without_pushback Schedule.Always ~start ~tag_equal:Pervasives.(=)
+        every_tag_change_without_pushback Always ~start ~tag_equal:Pervasives.(=)
           (fun ~tags:_ ~enter:_ ~leave:_ -> assert false);
         wait_for_deferred_errors ())
 
@@ -451,41 +452,45 @@ let%test_module _ =
 
     (* everything below this point exists to fulfill the type signature of Schedule to
        remind us to consider adding a unit test whenever we add a new function. *)
-    type zoned = Schedule.zoned = Zoned
-    type unzoned = Schedule.unzoned = Unzoned
+    type zoned = Core_schedule.zoned = Zoned
+    type unzoned = Core_schedule.unzoned = Unzoned
 
     module Inclusive_exclusive = struct
-      type t = Schedule.Inclusive_exclusive.t = Inclusive | Exclusive
+      type t = Core_schedule.Inclusive_exclusive.t = Inclusive | Exclusive
       let compare = Inclusive_exclusive.compare
     end
 
-    type ('a, 'b) t = ('a, 'b) Schedule.t =
-      | In_zone      : Time.Zone.t * (unzoned, 'b) t                     -> (zoned, 'b) t
-      | Tag          : 'b * ('a, 'b) t                                   -> ('a, 'b) t
-      | And          : ('a, 'b) t list                                   -> ('a, 'b) t
-      | Or           : ('a, 'b) t list                                   -> ('a, 'b) t
-      | Not          : ('a, 'b) t                                        -> ('a, 'b) t
-      | If_then_else : (('a, 'b) t * ('a, 'b) t * ('a, 'b) t)            -> ('a, 'b) t
-      | Shift        : Time.Span.t * ('a, 'b) t                          -> ('a, 'b) t
-      | Between      :   (Inclusive_exclusive.t * Time.Ofday.t)
-                         * (Inclusive_exclusive.t * Time.Ofday.t)          -> (unzoned, 'b) t
-      | At           : Time.Ofday.t list                                 -> (unzoned, 'b) t
-      | Secs         : int list                                          -> (unzoned, 'b) t
-      | Mins         : int list                                          -> (unzoned, 'b) t
-      | Hours        : int list                                          -> (unzoned, 'b) t
-      | Weekdays     : Day_of_week.t list                                -> (unzoned, 'b) t
-      | Days         : int list                                          -> (unzoned, 'b) t
-      | Weeks        : int list                                          -> (unzoned, 'b) t
-      | Months       : Month.t list                                      -> (unzoned, 'b) t
-      | On           : Date.t list                                       -> (unzoned, 'b) t
-      | Before       : (Inclusive_exclusive.t * (Date.t * Time.Ofday.t)) -> (unzoned, 'b) t
-      | After        : (Inclusive_exclusive.t * (Date.t * Time.Ofday.t)) -> (unzoned, 'b) t
-      | Always       : ('a, 'b) t
-      | Never        : ('a, 'b) t
+    type ('a, 'b) t = ('a, 'b) Core_schedule.t =
+      | In_zone       : Time.Zone.t * (unzoned, 'b) t                     -> (zoned, 'b) t
+      | Tag           : 'b * ('a, 'b) t                                   -> ('a, 'b) t
+      | And           : ('a, 'b) t list                                   -> ('a, 'b) t
+      | Or            : ('a, 'b) t list                                   -> ('a, 'b) t
+      | Not           : ('a, 'b) t                                        -> ('a, 'b) t
+      | If_then_else  : (('a, 'b) t * ('a, 'b) t * ('a, 'b) t)            -> ('a, 'b) t
+      | Shift         : Time.Span.t * ('a, 'b) t                          -> ('a, 'b) t
+      | Between       : (Inclusive_exclusive.t * Time.Ofday.t)
+                        * (Inclusive_exclusive.t * Time.Ofday.t)           -> (unzoned, 'b) t
+      | Zoned_between : (Inclusive_exclusive.t * Time.Zone.t * Time.Ofday.t)
+                        * (Inclusive_exclusive.t * Time.Zone.t * Time.Ofday.t) -> (zoned, 'b) t
+      | At            : Time.Ofday.t list                                 -> (unzoned, 'b) t
+      | Secs          : int list                                          -> (unzoned, 'b) t
+      | Mins          : int list                                          -> (unzoned, 'b) t
+      | Hours         : int list                                          -> (unzoned, 'b) t
+      | Weekdays      : Day_of_week.t list                                -> (unzoned, 'b) t
+      | Days          : int list                                          -> (unzoned, 'b) t
+      | Weeks         : int list                                          -> (unzoned, 'b) t
+      | Months        : Month.t list                                      -> (unzoned, 'b) t
+      | On            : Date.t list                                       -> (unzoned, 'b) t
+      | Before        : (Inclusive_exclusive.t * (Date.t * Time.Ofday.t)) -> (unzoned, 'b) t
+      | After         : (Inclusive_exclusive.t * (Date.t * Time.Ofday.t)) -> (unzoned, 'b) t
+      | Always        : ('a, 'b) t
+      | Never         : ('a, 'b) t
+
+    type 'b zoned_t = 'b Core_schedule.zoned_t
 
     module Event = struct include Event end
 
-    type ('tag, 'a) emit = ('tag, 'a) Schedule.emit =
+    type ('tag, 'a) emit = ('tag, 'a) Core_schedule.emit =
       | Transitions
         : ('tag, [ Event.no_change | 'tag Event.transition ]) emit
       | Transitions_and_tag_changes
@@ -513,6 +518,7 @@ let%test_module _ =
     let compare_unzoned = compare_unzoned
     let compare = compare
     let to_string_zoned = to_string_zoned
+    let sexp_of_zoned_t = sexp_of_zoned_t
     type nonrec 'a every_enter_callback = 'a every_enter_callback
     let every_enter = every_enter
     let every_tag_change_without_pushback = every_tag_change_without_pushback
@@ -520,8 +526,12 @@ let%test_module _ =
     let every_tag_change = every_tag_change
 
     module Stable = struct
-      module V4 = struct
-        include Schedule.Stable.V4
+      module V4_deprecated = struct
+        include Core_schedule.Stable.V4_deprecated
+      end
+
+      module V5 = struct
+        include Core_schedule.Stable.V5
       end
     end
   end

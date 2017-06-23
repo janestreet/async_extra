@@ -1,7 +1,7 @@
 open Core
 open Import
 
-module Schedule = Core.Schedule
+module Schedule = Core.Schedule_v4_deprecated
 include Schedule
 
 (* To make sure time sources are passed through the entire implementation, we first shadow
