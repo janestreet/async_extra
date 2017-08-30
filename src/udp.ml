@@ -31,21 +31,25 @@ let fail iobuf message a sexp_of_a =
     (Tuple.T2.sexp_of_t sexp_of_a ident)
 ;;
 
+(* Don't use [Or_error.map] to extract any of the [send] functions.  The natural usage
+   results in partially applied functions! *)
+
 let sendto_sync () =
-  Or_error.map (Iobuf.sendto_nonblocking_no_sigpipe ())
-    ~f:(fun sendto ->
-      fun fd buf addr ->
-        Fd.with_file_descr_exn fd ~nonblocking:true
-          (fun desc -> sendto buf desc (Unix.Socket.Address.to_sockaddr addr))
-    )
+  match Iobuf.sendto_nonblocking_no_sigpipe () with
+  | Error _ as e -> e
+  | Ok sendto ->
+    Ok (fun fd buf addr ->
+      Fd.with_file_descr_exn fd ~nonblocking:true
+        (fun desc -> sendto buf desc (Unix.Socket.Address.to_sockaddr addr)))
 ;;
 
 let send_sync () =
-  Or_error.map (Iobuf.send_nonblocking_no_sigpipe ())
-    ~f:(fun send ->
-      fun fd buf ->
-        Fd.with_file_descr_exn fd ~nonblocking:true
-          (fun desc -> send buf desc))
+  match Iobuf.send_nonblocking_no_sigpipe () with
+  | Error _ as e -> e
+  | Ok send ->
+    Ok (fun fd buf ->
+      Fd.with_file_descr_exn fd ~nonblocking:true
+        (fun desc -> send buf desc))
 ;;
 
 (** [ready_iter fd ~stop ~max_ready ~f] iterates [f] over [fd], handling [EINTR] by
@@ -131,38 +135,40 @@ let ready_iter fd ~stop ~max_ready ~f read_or_write ~syscall_name =
 ;;
 
 let sendto () =
-  Or_error.map (Iobuf.sendto_nonblocking_no_sigpipe ())
-    ~f:(fun sendto ->
-      fun fd buf addr ->
-        let addr = Unix.Socket.Address.to_sockaddr addr in
-        let stop = Ivar.create () in
-        ready_iter fd ~max_ready:default_retry ~stop `Write ~syscall_name:"sendto"
-          ~f:(fun file_descr ->
-            match Unix.Syscall_result.Unit.to_result (sendto buf file_descr addr) with
-            | Ok () -> Ready_iter.user_stopped
-            | Error e -> Ready_iter.create_error e)
-        >>= function
-        | `Interrupted -> Deferred.unit
-        | (`Bad_fd | `Closed | `Unsupported) as error ->
-          fail buf "Udp.sendto" (error, addr)
-            [%sexp_of: [ `Bad_fd | `Closed | `Unsupported ] * Core.Unix.sockaddr])
+  match Iobuf.sendto_nonblocking_no_sigpipe () with
+  | Error _ as e -> e
+  | Ok sendto ->
+    Ok (fun fd buf addr ->
+      let addr = Unix.Socket.Address.to_sockaddr addr in
+      let stop = Ivar.create () in
+      ready_iter fd ~max_ready:default_retry ~stop `Write ~syscall_name:"sendto"
+        ~f:(fun file_descr ->
+          match Unix.Syscall_result.Unit.to_result (sendto buf file_descr addr) with
+          | Ok    () -> Ready_iter.user_stopped
+          | Error e  -> Ready_iter.create_error e)
+      >>= function
+      | `Interrupted -> Deferred.unit
+      | (`Bad_fd | `Closed | `Unsupported) as error ->
+        fail buf "Udp.sendto" (error, addr)
+          [%sexp_of: [ `Bad_fd | `Closed | `Unsupported ] * Core.Unix.sockaddr])
 ;;
 
 let send () =
-  Or_error.map (Iobuf.send_nonblocking_no_sigpipe ())
-    ~f:(fun send ->
-      fun fd buf ->
-        let stop = Ivar.create () in
-        ready_iter fd ~max_ready:default_retry ~stop `Write ~syscall_name:"send"
-          ~f:(fun file_descr ->
-            match Unix.Syscall_result.Unit.to_result (send buf file_descr) with
-            | Ok () -> Ready_iter.user_stopped
-            | Error e -> Ready_iter.create_error e)
-        >>= function
-        | `Interrupted -> Deferred.unit
-        | (`Bad_fd | `Closed | `Unsupported) as error ->
-          fail buf "Udp.send" error
-            [%sexp_of: [ `Bad_fd | `Closed | `Unsupported ]])
+  match Iobuf.send_nonblocking_no_sigpipe () with
+  | Error _ as e -> e
+  | Ok send ->
+    Ok (fun fd buf ->
+      let stop = Ivar.create () in
+      ready_iter fd ~max_ready:default_retry ~stop `Write ~syscall_name:"send"
+        ~f:(fun file_descr ->
+          match Unix.Syscall_result.Unit.to_result (send buf file_descr) with
+          | Ok    () -> Ready_iter.user_stopped
+          | Error e  -> Ready_iter.create_error e)
+      >>= function
+      | `Interrupted -> Deferred.unit
+      | (`Bad_fd | `Closed | `Unsupported) as error ->
+        fail buf "Udp.send" error
+          [%sexp_of: [ `Bad_fd | `Closed | `Unsupported ]])
 ;;
 
 let bind ?ifname addr =
@@ -268,55 +274,55 @@ let recvmmsg_loop =
         | 0 -> Config.init config
         | _ -> Iobuf.create ~len:(Iobuf.length (Config.init config)))
   in
-  Or_error.map Iobuf.recvmmsg_assume_fd_is_nonblocking ~f:(fun recvmmsg ->
-    (fun
-      ?(config = Config.create ())
-      ?(max_count = default_recvmmsg_loop_max_count)
-      ?(on_wouldblock = (fun () -> ()))
-      fd
-      f
-      ->
-        let bufs = create_buffers ~max_count config in
-        let context = Iobuf.Recvmmsg_context.create bufs in
-        let stop = Ivar.create () in
-        Config.stop config
-        >>> Ivar.fill_if_empty stop;
-        ready_iter ~stop ~max_ready:config.max_ready fd `Read ~syscall_name:"recvmmsg"
-          ~f:(fun file_descr ->
-            let result = recvmmsg file_descr context in
-            if Unix.Syscall_result.Int.is_ok result
-            then
-              begin
-                let count = Unix.Syscall_result.Int.ok_exn result in
-                if count > Array.length bufs
-                then
-                  failwithf
-                    "Unexpected result from \
-                     Iobuf.recvmmsg_assume_fd_is_nonblocking: \
-                     count (%d) > Array.length bufs (%d)"
-                    count
-                    (Array.length bufs)
-                    ()
-                else
-                  begin
-                    (* [recvmmsg_assume_fd_is_nonblocking] implicitly calls [flip_lo]
-                       before and [reset] after the call, so we mustn't. *)
-                    f bufs ~count;
-                    Ready_iter.poll_again
-                  end
-              end
-            else
-              begin
-                (match Unix.Syscall_result.Int.error_exn result with
-                 | EWOULDBLOCK | EAGAIN -> on_wouldblock ()
-                 | _ -> ());
-                Unix.Syscall_result.Int.reinterpret_error_exn result
-              end
-          )
-        >>| function
-        | (`Bad_fd | `Unsupported) as error ->
-          failwiths "Udp.recvmmsg_loop" (error, fd)
-            [%sexp_of: [ `Bad_fd | `Unsupported ] * Fd.t]
-        | `Closed | `Interrupted -> ())
-  )
+  match Iobuf.recvmmsg_assume_fd_is_nonblocking with
+  | Error _ as e -> e
+  | Ok recvmmsg ->
+    Ok (fun
+         ?(config = Config.create ())
+         ?(max_count = default_recvmmsg_loop_max_count)
+         ?(on_wouldblock = (fun () -> ()))
+         fd f
+         ->
+           let bufs = create_buffers ~max_count config in
+           let context = Iobuf.Recvmmsg_context.create bufs in
+           let stop = Ivar.create () in
+           Config.stop config
+           >>> Ivar.fill_if_empty stop;
+           ready_iter ~stop ~max_ready:config.max_ready fd `Read ~syscall_name:"recvmmsg"
+             ~f:(fun file_descr ->
+               let result = recvmmsg file_descr context in
+               if Unix.Syscall_result.Int.is_ok result
+               then
+                 begin
+                   let count = Unix.Syscall_result.Int.ok_exn result in
+                   if count > Array.length bufs
+                   then
+                     failwithf
+                       "Unexpected result from \
+                        Iobuf.recvmmsg_assume_fd_is_nonblocking: \
+                        count (%d) > Array.length bufs (%d)"
+                       count
+                       (Array.length bufs)
+                       ()
+                   else
+                     begin
+                       (* [recvmmsg_assume_fd_is_nonblocking] implicitly calls [flip_lo]
+                          before and [reset] after the call, so we mustn't. *)
+                       f bufs ~count;
+                       Ready_iter.poll_again
+                     end
+                 end
+               else
+                 begin
+                   (match Unix.Syscall_result.Int.error_exn result with
+                    | EWOULDBLOCK | EAGAIN -> on_wouldblock ()
+                    | _ -> ());
+                   Unix.Syscall_result.Int.reinterpret_error_exn result
+                 end
+             )
+           >>| function
+           | (`Bad_fd | `Unsupported) as error ->
+             failwiths "Udp.recvmmsg_loop" (error, fd)
+               [%sexp_of: [ `Bad_fd | `Unsupported ] * Fd.t]
+           | `Closed | `Interrupted -> ())
 ;;

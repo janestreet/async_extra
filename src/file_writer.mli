@@ -24,6 +24,8 @@ val write_bigsubstring : t -> Bigsubstring.t -> unit
 val write_bigstring : t -> ?pos:int -> ?len:int -> Bigstring.t -> unit
 val schedule_bigstring : t -> Bigstring.t -> unit
 
+val write_iobuf : t -> ?pos:int -> ?len:int -> ([> read ], _) Iobuf.t -> unit
+
 val write_bin_prot : t -> 'a Bin_prot.Type_class.writer -> 'a -> unit
 
 val write_sexp : ?hum:bool (** default is [false] *) -> t -> Sexp.t -> unit

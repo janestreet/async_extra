@@ -47,6 +47,11 @@ let write_bigstring t ?pos ?len bigstring =
     Writer.write_bigstring t.writer ?pos ?len bigstring
 ;;
 
+let write_iobuf t ?pos ?len iobuf =
+  if not t.failed then
+    Writer.write_iobuf t.writer ?pos ?len iobuf
+;;
+
 let schedule_bigstring t ss =
   if not t.failed then
     Writer.schedule_bigstring t.writer ss
