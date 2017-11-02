@@ -99,18 +99,22 @@ end
     [eof_latency_tolerance] affects the [Did_not_reach_eof_for] warning.
 
     [null_read_tolerance] determines how long the tailing must observe null reads
-    before it will report a [Delayed_due_to_null_reads_for] warning. *)
+    before it will report a [Delayed_due_to_null_reads_for] warning.
+
+    The default [throttle] is a global throttle shared among all file tails that has
+    [continue_on_error = true] and [max_concurrent_jobs = 50]. *)
 val create
-  :  ?read_buf_len          : int           (** default is 32k *)
-  -> ?read_delay            : Time.Span.t   (** default is 0.5s *)
-  -> ?retry_null_reads      : bool          (** default is [true] *)
-  -> ?break_on_lines        : bool          (** default is [true] *)
-  -> ?ignore_inode_change   : bool          (** default is [false] *)
-  -> ?start_at              : [ `Beginning  (** default is [`Beginning] *)
+  :  ?read_buf_len          : int                    (** default is 32k *)
+  -> ?read_delay            : Time.Span.t            (** default is 0.5s *)
+  -> ?retry_null_reads      : bool                   (** default is [true] *)
+  -> ?break_on_lines        : bool                   (** default is [true] *)
+  -> ?ignore_inode_change   : bool                   (** default is [false] *)
+  -> ?start_at              : [ `Beginning           (** default is [`Beginning] *)
                               | `End
                               | `Pos of Int64.t
                               ]
-  -> ?eof_latency_tolerance : Time.Span.t   (** default is 5s *)
-  -> ?null_read_tolerance   : Time.Span.t   (** default is 0s *)
+  -> ?eof_latency_tolerance : Time.Span.t            (** default is 5s *)
+  -> ?null_read_tolerance   : Time.Span.t            (** default is 0s *)
+  -> ?throttle              : unit Throttle.t
   -> string
   -> Update.t Pipe.Reader.t

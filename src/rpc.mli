@@ -132,7 +132,7 @@ module Connection : sig
   val client
     :  host : string
     -> port : int
-    -> ?via_local_interface : Unix.Inet_addr.t  (** default is chosen by OS *)
+    -> ?bind_to_address     : Unix.Inet_addr.t  (** default is chosen by OS *)
     -> ?implementations     : _ Client_implementations.t
     -> ?max_message_size    : int
     -> ?make_transport      : transport_maker
@@ -151,7 +151,7 @@ module Connection : sig
   val with_client
     :  host : string
     -> port : int
-    -> ?via_local_interface : Unix.Inet_addr.t (** default is chosen by OS *)
+    -> ?bind_to_address     : Unix.Inet_addr.t (** default is chosen by OS *)
     -> ?implementations     : _ Client_implementations.t
     -> ?max_message_size    : int
     -> ?make_transport      : transport_maker

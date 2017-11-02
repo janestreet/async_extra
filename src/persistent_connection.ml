@@ -10,7 +10,8 @@ include Persistent_connection_intf
 module Make (Conn : T) = struct
   include Async_kernel_private.Persistent_connection.Make (Conn)
 
-  let create ~server_name ?log ?(on_event = ignore) ?retry_delay ~connect get_address =
+  let create ~server_name ?log ?(on_event = fun _ -> Deferred.unit) ?retry_delay
+        ~connect get_address =
     let retry_delay =
       Option.map retry_delay ~f:(fun f ->
         fun () ->
@@ -19,14 +20,14 @@ module Make (Conn : T) = struct
     in
     let on_event =
       fun event ->
-        on_event event;
         Option.iter log ~f:(fun log ->
           if Log.would_log log (Some (Event.log_level event))
           then
             Log.sexp
               log
               ~tags:[("persistent-connection-to", server_name)]
-              ~level:(Event.log_level event) (Event.sexp_of_t event))
+              ~level:(Event.log_level event) (Event.sexp_of_t event));
+        on_event event
     in
     create ~server_name ~on_event ?retry_delay ~connect get_address
 end
@@ -50,12 +51,12 @@ module Rpc = struct
     end)
 
   (* convenience wrapper *)
-  let create' ~server_name ?log ?on_event ?retry_delay ?via_local_interface ?implementations
+  let create' ~server_name ?log ?on_event ?retry_delay ?bind_to_address ?implementations
         ?max_message_size ?make_transport ?handshake_timeout
         ?heartbeat_config get_address =
     let connect host_and_port =
       let (host, port) = Host_and_port.tuple host_and_port in
-      Rpc.Connection.client ~host ~port ?via_local_interface ?implementations
+      Rpc.Connection.client ~host ~port ?bind_to_address ?implementations
         ?max_message_size ?make_transport ?handshake_timeout
         ?heartbeat_config
         ~description:(Info.of_string ("persistent connection to " ^ server_name)) ()

@@ -4,50 +4,73 @@ open Import
 module Host = Unix.Host
 module Socket = Unix.Socket
 
-type 'addr where_to_connect =
-  { socket_type    : 'addr Socket.Type.t
-  ; remote_address : unit -> 'addr Deferred.t
-  ; local_address  : 'addr option
-  }
+module Where_to_connect = struct
+  type 'addr t =
+    { socket_type    : 'addr Socket.Type.t
+    ; remote_address : unit -> 'addr Deferred.t
+    ; local_address  : 'addr option
+    ; info           : Sexp.t
+    }
 
-let create_local_address ~via_local_interface ~via_local_port =
-  let port = Option.value via_local_port ~default:0 in
-  match via_local_interface with
-  | None           -> Socket.Address.Inet.create_bind_any ~port
-  | Some inet_addr -> Socket.Address.Inet.create          ~port inet_addr
+  let sexp_of_t _ { info; _ } = info
+
+  type inet = Socket.Address.Inet.t t [@@deriving sexp_of]
+  type unix = Socket.Address.Unix.t t [@@deriving sexp_of]
+
+  let create_local_address ~bind_to_address ~bind_to_port =
+    let port = Option.value bind_to_port ~default:0 in
+    match bind_to_address with
+    | None           -> Socket.Address.Inet.create_bind_any ~port
+    | Some inet_addr -> Socket.Address.Inet.create          ~port inet_addr
+  ;;
+
+  let host_and_port ?bind_to_address ?bind_to_port { Host_and_port.host; port } =
+    { socket_type    = Socket.Type.tcp
+    ; remote_address =
+        (fun () ->
+           Unix.Inet_addr.of_string_or_getbyname host
+           >>| fun inet_addr->
+           Socket.Address.Inet.create inet_addr ~port)
+    ; local_address  = Some (create_local_address ~bind_to_address ~bind_to_port)
+    ; info           = [%sexp_of: string * int] (host, port)
+    }
+  ;;
+
+  let file file =
+    { socket_type    = Socket.Type.unix
+    ; remote_address = (fun () -> return (Socket.Address.Unix.create file))
+    ; local_address  = None
+    ; info           = [%sexp_of: string] file
+    }
+  ;;
+
+  let inet_address ?bind_to_address ?bind_to_port address =
+    { socket_type    = Socket.Type.tcp
+    ; remote_address = (fun () -> return address)
+    ; local_address  = Some (create_local_address ~bind_to_address ~bind_to_port)
+    ; info           = [%sexp_of: Socket.Address.Inet.t] address
+    }
+  ;;
+
+  let unix_address address =
+    { socket_type    = Socket.Type.unix
+    ; remote_address = (fun () -> return address)
+    ; local_address  = None
+    ; info           = [%sexp_of: Socket.Address.Unix.t] address
+    }
+  ;;
+end
+
+let to_host_and_port ?bind_to_address ?bind_to_port host port =
+  Where_to_connect.host_and_port ?bind_to_address ?bind_to_port
+    (Host_and_port.create ~host ~port)
 ;;
 
-let to_host_and_port ?via_local_interface ?via_local_port host port =
-  { socket_type    = Socket.Type.tcp
-  ; remote_address =
-      (fun () ->
-         Unix.Inet_addr.of_string_or_getbyname host
-         >>| fun inet_addr->
-         Socket.Address.Inet.create inet_addr ~port)
-  ; local_address  = Some (create_local_address ~via_local_interface ~via_local_port)
-  }
-;;
+let to_file          = Where_to_connect.file
 
-let to_file file =
-  { socket_type    = Socket.Type.unix
-  ; remote_address = (fun () -> return (Socket.Address.Unix.create file))
-  ; local_address  = None
-  }
-;;
+let to_inet_address  = Where_to_connect.inet_address
 
-let to_inet_address ?via_local_interface ?via_local_port address =
-  { socket_type    = Socket.Type.tcp
-  ; remote_address = (fun () -> return address)
-  ; local_address  = Some (create_local_address ~via_local_interface ~via_local_port)
-  }
-;;
-
-let to_unix_address address =
-  { socket_type    = Socket.Type.unix
-  ; remote_address = (fun () -> return address)
-  ; local_address  = None
-  }
-;;
+let to_unix_address  = Where_to_connect.unix_address
 
 let create_socket socket_type =
   let s = Socket.create socket_type in
@@ -77,7 +100,7 @@ let connect_sock
       ?socket
       ?interrupt
       ?(timeout = sec 10.)
-      where_to_connect
+      (where_to_connect : _ Where_to_connect.t)
   =
   where_to_connect.remote_address ()
   >>= fun address ->
@@ -162,23 +185,6 @@ let with_connection
   | Error e -> raise e
 ;;
 
-module Where_to_listen = struct
-
-  type ('address, 'listening_on) t =
-    { socket_type  : 'address Socket.Type.t
-    ; address      : 'address
-    ; listening_on : ('address -> 'listening_on) sexp_opaque
-    }
-  [@@deriving sexp_of, fields]
-
-  type inet = (Socket.Address.Inet.t, int   ) t [@@deriving sexp_of]
-  type unix = (Socket.Address.Unix.t, string) t [@@deriving sexp_of]
-
-  let create ~socket_type ~address ~listening_on =
-    { socket_type; address; listening_on }
-  ;;
-end
-
 module Bind_to_address = struct
   type t =
     | Address of Unix.Inet_addr.t
@@ -194,36 +200,59 @@ module Bind_to_port = struct
   [@@deriving sexp_of]
 end
 
-let bind_to (bind_to_address : Bind_to_address.t) (bind_to_port : Bind_to_port.t) =
-  let port =
-    match bind_to_port with
-    | On_port port         -> port
-    | On_port_chosen_by_os -> 0
-  in
-  let address =
-    match bind_to_address with
-    | All_addresses -> Socket.Address.Inet.create_bind_any                 ~port
-    | Address addr  -> Socket.Address.Inet.create addr                     ~port
-    | Localhost     -> Socket.Address.Inet.create Unix.Inet_addr.localhost ~port
-  in
-  { Where_to_listen.
-    socket_type  = Socket.Type.tcp
-  ; address
-  ; listening_on = function `Inet (_, port) -> port
-  }
-;;
+module Where_to_listen = struct
 
-let on_port port = bind_to All_addresses (On_port port)
+  type ('address, 'listening_on) t =
+    { socket_type  : 'address Socket.Type.t
+    ; address      : 'address
+    ; listening_on : ('address -> 'listening_on) sexp_opaque
+    }
+  [@@deriving sexp_of, fields]
 
-let on_port_chosen_by_os = bind_to All_addresses On_port_chosen_by_os
+  type inet = (Socket.Address.Inet.t, int   ) t [@@deriving sexp_of]
+  type unix = (Socket.Address.Unix.t, string) t [@@deriving sexp_of]
 
-let on_file path =
-  { Where_to_listen.
-    socket_type  = Socket.Type.unix
-  ; address      = Socket.Address.Unix.create path
-  ; listening_on = fun _ -> path
-  }
-;;
+  let create ~socket_type ~address ~listening_on =
+    { socket_type; address; listening_on }
+  ;;
+
+  let bind_to (bind_to_address : Bind_to_address.t) (bind_to_port : Bind_to_port.t) =
+    let port =
+      match bind_to_port with
+      | On_port port         -> port
+      | On_port_chosen_by_os -> 0
+    in
+    let address =
+      match bind_to_address with
+      | All_addresses -> Socket.Address.Inet.create_bind_any                 ~port
+      | Address addr  -> Socket.Address.Inet.create addr                     ~port
+      | Localhost     -> Socket.Address.Inet.create Unix.Inet_addr.localhost ~port
+    in
+    { socket_type  = Socket.Type.tcp
+    ; address
+    ; listening_on = function `Inet (_, port) -> port
+    }
+  ;;
+
+  let port port = bind_to All_addresses (On_port port)
+
+  let port_chosen_by_os = bind_to All_addresses On_port_chosen_by_os
+
+  let file path =
+    { socket_type  = Socket.Type.unix
+    ; address      = Socket.Address.Unix.create path
+    ; listening_on = fun _ -> path
+    }
+  ;;
+end
+
+let bind_to = Where_to_listen.bind_to
+
+let on_port = Where_to_listen.port
+
+let on_port_chosen_by_os = Where_to_listen.port_chosen_by_os
+
+let on_file = Where_to_listen.file
 
 module Server = struct
 

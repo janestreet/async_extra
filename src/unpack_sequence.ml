@@ -253,7 +253,7 @@ let%test_module _ =
       let partial_data =
         (* The size header should be more than 1 byte, so this is enough to make unpack
            wait for more data. *)
-        String.create 1
+        Bytes.create 1
       ;;
 
       let%test_unit _ =

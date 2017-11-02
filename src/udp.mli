@@ -123,9 +123,9 @@ val send
 val bind
   :  ?ifname : string
   -> Socket.Address.Inet.t
-  -> ([ `Bound ], Socket.Address.Inet.t) Socket.t Deferred.t
+  -> ([ `Bound ], Socket.Address.Inet.t) Socket.t
 
-val bind_any : unit -> ([ `Bound ], Socket.Address.Inet.t) Socket.t Deferred.t
+val bind_any : unit -> ([ `Bound ], Socket.Address.Inet.t) Socket.t
 
 (** Loops, including [recvfrom_loop], terminate normally when the socket is closed. *)
 val recvfrom_loop

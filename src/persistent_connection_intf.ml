@@ -10,7 +10,7 @@ module type S = sig
     (** If [~log] is supplied then all events that would be passed to [on_event] will be
         written there as well, with a "persistent-connection-to" tag value of
         [server_name], which should be the name of the server we are connecting to. *)
-    -> ?on_event    : (Event.t -> unit)
+    -> ?on_event    : (Event.t -> unit Deferred.t)
     -> ?retry_delay : (unit -> Time.Span.t)
     -> connect      : (address -> conn Or_error.t Deferred.t)
     -> (unit -> address Or_error.t Deferred.t)
@@ -38,9 +38,9 @@ module type Persistent_connection = sig
     val create'
       :  server_name          : string
       -> ?log                 : Log.t
-      -> ?on_event            : (Event.t -> unit)
+      -> ?on_event            : (Event.t -> unit Deferred.t)
       -> ?retry_delay         : (unit -> Time.Span.t)
-      -> ?via_local_interface : Unix.Inet_addr.t
+      -> ?bind_to_address     : Unix.Inet_addr.t
       -> ?implementations     : _ Rpc.Connection.Client_implementations.t
       -> ?max_message_size    : int
       -> ?make_transport      : Rpc.Connection.transport_maker

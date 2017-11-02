@@ -188,7 +188,7 @@ let bind ?ifname addr =
                           (addr : Socket.Address.Inet.t)
                           (ifname : string option)
                           (exn : Exn.t)]);
-  Socket.bind socket addr
+  Socket.bind_inet socket addr
 ;;
 
 let bind_any () =
@@ -197,7 +197,7 @@ let bind_any () =
      address is chosen (i.e., an ephemeral port).  In almost all cases where we use this,
      we want a unique port, and hence prevent reuseaddr. *)
   let bind_addr = Socket.Address.Inet.create_bind_any ~port:0 in
-  Socket.bind socket ~reuseaddr:false bind_addr
+  Socket.bind_inet socket ~reuseaddr:false bind_addr
 ;;
 
 let recvfrom_loop_with_buffer_replacement ?(config = Config.create ()) fd f =

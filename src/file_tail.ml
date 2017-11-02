@@ -3,13 +3,6 @@ open Import
 
 module Stats = Unix.Stats
 
-module Global_throttle : sig
-  val enqueue : (unit -> 'a Deferred.t) -> 'a Deferred.t
-end = struct
-  let global = lazy (Throttle.create ~continue_on_error:true ~max_concurrent_jobs:50)
-  let enqueue job = Throttle.enqueue (Lazy.force global) job
-end
-
 module Error = struct
   type t =
     | File_replaced
@@ -162,6 +155,7 @@ type t =
   ; ignore_inode_change                   : bool
   ; eof_latency_tolerance                 : Time.Span.t
   ; null_read_tolerance                   : Time.Span.t
+  ; throttle                              : unit Throttle.t
   ; mutable read_buf                      : string
   ; mutable file_pos                      : int64
   ; mutable file_len                      : int64
@@ -207,7 +201,7 @@ let error t e =
    [t.most_recent_file_len_increase]. *)
 let stat t ~initial_call =
   try_with (fun () ->
-    Global_throttle.enqueue (fun () ->
+    Throttle.enqueue t.throttle (fun () ->
       In_thread.run (fun () ->
         (* We use [Unix.with_file t.file ~f:Unix.fstat], which does [open; fstat; close],
            rather than just [stat t.file] because [File_tail] is often used over NFS and
@@ -255,7 +249,7 @@ let start_eof_latency_check t =
 (* [read_once t] reads into [t.read_buf] some bytes from the file starting at
    [t.file_pos], and returns the number of bytes read. *)
 let read_once t =
-  Global_throttle.enqueue (fun () ->
+  Throttle.enqueue t.throttle (fun () ->
     In_thread.run (fun () ->
       let module Unix = Core.Unix in
       Unix.with_file t.file ~mode:[ O_RDONLY ] ~f:(fun fd ->
@@ -364,6 +358,11 @@ let start_reading t ~start_at =
     start_stat_loop t;
 ;;
 
+let global_throttle =
+  lazy (
+    Throttle.create ~continue_on_error:true ~max_concurrent_jobs:50)
+;;
+
 let create
       ?(read_buf_len = 32 * 1024)
       ?(read_delay = sec 0.5)
@@ -373,8 +372,14 @@ let create
       ?(start_at = `Beginning)
       ?(eof_latency_tolerance = sec 5.)
       ?(null_read_tolerance = sec 0.)
+      ?throttle
       file =
   let pipe_r, pipe_w = Pipe.create () in
+  let throttle =
+    match throttle with
+    | Some x -> x
+    | None   -> Lazy.force global_throttle
+  in
   let t =
     { file
     ; read_delay
@@ -384,7 +389,8 @@ let create
     ; ignore_inode_change
     ; eof_latency_tolerance
     ; null_read_tolerance
-    ; read_buf                      = String.create read_buf_len
+    ; throttle
+    ; read_buf                      = Bytes.create read_buf_len
     ; file_len                      = 0L
     ; most_recent_file_len_increase = Time.epoch
     ; file_pos                      = 0L

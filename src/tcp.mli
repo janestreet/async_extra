@@ -1,28 +1,37 @@
 (** [Tcp] supports connection to [inet] sockets and [unix] sockets.  These are two
-    different types.  We use ['a where_to_connect] to specify a socket to connect to,
+    different types.  We use ['a Where_to_connect.t] to specify a socket to connect to,
     where the ['a] identifies the type of socket. *)
 
 open! Core
 open! Import
 
-type 'a where_to_connect constraint 'a = [< Socket.Address.t ]
+(** A [Where_to_connect] describes the socket that a tcp client should connect to. *)
+module Where_to_connect : sig
+  type 'a t constraint 'a = [< Socket.Address.t ] [@@deriving sexp_of]
 
+  type inet = Socket.Address.Inet.t t [@@deriving sexp_of]
+  type unix = Socket.Address.Unix.t t [@@deriving sexp_of]
+end
 
+(** [bind_to_address] and [bind_to_port] can be used to bind the source IP and port of the
+    underlying socket.  This does not necessarily alter the interface used to send the
+    data.  In particular, the commonly used destination-based routing is unaffected by
+    binding to a different address. *)
 val to_host_and_port
-  :  ?via_local_interface : Unix.Inet_addr.t (** default is chosen by OS *)
-  -> ?via_local_port      : int              (** default is chosen by OS *)
+  :  ?bind_to_address : Unix.Inet_addr.t (** default is chosen by OS *)
+  -> ?bind_to_port    : int              (** default is chosen by OS *)
   -> string
   -> int
-  -> Socket.Address.Inet.t where_to_connect
+  -> Where_to_connect.inet
 
 val to_inet_address
-  :  ?via_local_interface : Unix.Inet_addr.t  (** default is chosen by OS *)
-  -> ?via_local_port      : int               (** default is chosen by OS *)
+  :  ?bind_to_address : Unix.Inet_addr.t  (** default is chosen by OS *)
+  -> ?bind_to_port    : int               (** default is chosen by OS *)
   -> Socket.Address.Inet.t
-  -> Socket.Address.Inet.t where_to_connect
+  -> Where_to_connect.inet
 
-val to_file          : string                -> Socket.Address.Unix.t where_to_connect
-val to_unix_address  : Socket.Address.Unix.t -> Socket.Address.Unix.t where_to_connect
+val to_file          : string                -> Where_to_connect.unix
+val to_unix_address  : Socket.Address.Unix.t -> Where_to_connect.unix
 
 type 'a with_connect_options
   =  ?buffer_age_limit   : [ `At_most of Time.Span.t | `Unlimited ]
@@ -44,7 +53,7 @@ type 'a with_connect_options
     It is fine for [f] to ignore the supplied socket and just use the reader and writer.
     The socket is there to make it convenient to call [Socket] functions. *)
 val with_connection
-  : ( 'addr where_to_connect
+  : ( 'addr Where_to_connect.t
       -> (([ `Active ], 'addr) Socket.t -> Reader.t -> Writer.t -> 'a Deferred.t)
       -> 'a Deferred.t
     ) with_connect_options
@@ -56,7 +65,7 @@ val connect_sock
   :  ?socket    : ([ `Unconnected ], 'addr) Socket.t
   -> ?interrupt : unit Deferred.t
   -> ?timeout   : Time.Span.t
-  -> 'addr where_to_connect
+  -> 'addr Where_to_connect.t
   -> ([ `Active ], 'addr) Socket.t Deferred.t
 
 
@@ -74,7 +83,7 @@ val connect_sock
     socket is there to make it convenient to call [Socket] functions. *)
 val connect
   :  ?socket : ([ `Unconnected ], 'addr) Socket.t
-  -> ( 'addr where_to_connect
+  -> ( 'addr Where_to_connect.t
        -> (([ `Active ], 'addr) Socket.t * Reader.t * Writer.t) Deferred.t
      ) with_connect_options
 

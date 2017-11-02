@@ -170,7 +170,7 @@ module Connection = struct
   ;;
 
   let client ~host ~port
-        ?via_local_interface
+        ?bind_to_address
         ?implementations
         ?(max_message_size=default_max_message_size)
         ?(make_transport=default_transport_maker)
@@ -185,7 +185,7 @@ module Connection = struct
     in
     Monitor.try_with (fun () ->
       Tcp.connect_sock ~timeout:handshake_timeout
-        (Tcp.to_host_and_port ?via_local_interface host port))
+        (Tcp.to_host_and_port ?bind_to_address host port))
     >>=? fun sock ->
     let description =
       match description with
@@ -214,14 +214,14 @@ module Connection = struct
       return error
 
   let with_client ~host ~port
-        ?via_local_interface
+        ?bind_to_address
         ?implementations
         ?max_message_size
         ?make_transport
         ?handshake_timeout
         ?heartbeat_config
         f =
-    client ?via_local_interface ~host ~port
+    client ?bind_to_address ~host ~port
       ?implementations
       ?max_message_size
       ?make_transport
