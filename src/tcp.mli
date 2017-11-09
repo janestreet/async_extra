@@ -190,22 +190,22 @@ module Server : sig
       only service small number of connections at a times should see little to no
       difference in behavior for different values of [max_accepts_per_branch].
 
-      [on_handler_error] determines what happens if the handler throws an exception. If an
-      exception is raised by on_handler_error (either explicitely via [`Raise], or in the
-      closure passed to [`Call]) no further connections will be accepted.
-
       Supplying [socket] causes the server to use [socket] rather than create a new
       socket.  In this usage, creation does not set [Socket.Opt.reuseaddr] to [true]; if
-      you want that, you must set [reuseaddr] before creation. *)
+      you want that, you must set [reuseaddr] before creation.
+
+      [on_handler_error] determines what happens if the handler throws an exception. If an
+      exception is raised by on_handler_error (either explicitly via [`Raise], or in the
+      closure passed to [`Call]) no further connections will be accepted. *)
   type ('address, 'listening_on, 'callback) create_options
     =  ?max_connections       : int  (** default is [10_000] *)
     -> ?max_accepts_per_batch : int  (** default is [1] *)
     -> ?backlog               : int  (** default is [10] *)
-    -> ?on_handler_error      : [ `Raise  (** default *)
+    -> ?socket                : ([ `Unconnected ], 'address) Socket.t
+    -> on_handler_error       : [ `Raise
                                 | `Ignore
                                 | `Call of ('address -> exn -> unit)
                                 ]
-    -> ?socket                : ([ `Unconnected ], 'address) Socket.t
     -> ('address, 'listening_on) Where_to_listen.t
     -> 'callback
     -> ('address, 'listening_on) t Deferred.t

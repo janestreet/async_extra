@@ -300,11 +300,11 @@ module Server = struct
     =  ?max_connections  : int
     -> ?max_accepts_per_batch : int
     -> ?backlog          : int
-    -> ?on_handler_error : [ `Raise
+    -> ?socket           : ([ `Unconnected ], 'address) Socket.t
+    -> on_handler_error  : [ `Raise
                            | `Ignore
                            | `Call of ('address -> exn -> unit)
                            ]
-    -> ?socket           : ([ `Unconnected ], 'address) Socket.t
     -> ('address, 'listening_on) Where_to_listen.t
     -> 'callback
     -> ('address, 'listening_on) t Deferred.t
@@ -410,8 +410,8 @@ module Server = struct
         ?(max_connections = 10_000)
         ?(max_accepts_per_batch = 1)
         ?backlog
-        ?(on_handler_error = `Raise)
         ?socket
+        ~on_handler_error
         (where_to_listen : _ Where_to_listen.t)
         handle_client
     =
@@ -448,15 +448,15 @@ module Server = struct
         ?max_connections
         ?max_accepts_per_batch
         ?backlog
-        ?on_handler_error
         ?socket
+        ~on_handler_error
         where_to_listen
         handle_client =
     create_sock_internal
       ?max_connections
       ?max_accepts_per_batch
       ?backlog
-      ?on_handler_error
+      ~on_handler_error
       ?socket
       where_to_listen
       (fun client_address client_socket ->
@@ -469,20 +469,24 @@ module Server = struct
         ?max_connections
         ?max_accepts_per_batch
         ?backlog
-        ?on_handler_error
         ?socket
+        ~on_handler_error
         where_to_listen
         handle_client =
     create_sock_internal
       ?max_connections
       ?max_accepts_per_batch
       ?backlog
-      ?on_handler_error
       ?socket
+      ~on_handler_error
       where_to_listen
       (fun client_address client_socket ->
          let r, w = reader_writer_of_sock ?buffer_age_limit client_socket in
-         collect_errors w (fun () -> handle_client client_address r w)
+         Writer.set_raise_when_consumer_leaves w false;
+         Deferred.any [
+           collect_errors w (fun () -> handle_client client_address r w);
+           Writer.consumer_left w |> Deferred.ok;
+         ]
          >>= fun res ->
          close_connection_via_reader_and_writer r w
          >>| fun () ->
@@ -496,6 +500,7 @@ module Server = struct
       let close_connection r w () = Reader.close r >>= fun () -> Writer.close w in
       let multi_close_connection r w () = multi `Parallel (close_connection r w) in
       create on_port_chosen_by_os
+        ~on_handler_error:`Raise
         (fun _address r w -> multi_close_connection r w ())
       >>= fun t ->
       multi `Parallel (fun () ->
@@ -536,6 +541,7 @@ module Server = struct
              (fun () ->
                 let max_connections = 1 in
                 create ~max_connections ~backlog on_port_chosen_by_os
+                  ~on_handler_error:`Raise
                   (* [never ()] keeps all the connections open. *)
                   (fun _ _ _ -> never ())
                 >>= fun t ->
@@ -580,7 +586,8 @@ module Server = struct
         Thread_safe.block_on_async_exn
           (fun () ->
              let backlog = 10 in
-             create ~backlog on_port_chosen_by_os
+             create ~backlog ~on_handler_error:`Raise
+               on_port_chosen_by_os
                (fun _ _ to_client ->
                   let to_client = Writer.fd to_client in
                   if not linger then

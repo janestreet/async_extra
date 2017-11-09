@@ -818,6 +818,7 @@ module Make (Z : Arg) = struct
         raise (Invalid_argument "max_clients must be between 1 and 10,000");
       let handler = Set_once.create () in
       Tcp.Server.create
+        ~on_handler_error:`Raise
         ~max_connections:max_clients
         ~backlog:(min 1_000 max_clients)
         (Tcp.on_port listen_port)
