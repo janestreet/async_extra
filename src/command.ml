@@ -79,22 +79,22 @@ let in_async ?extract_exn param on_result =
 type 'r staged = ([`Scheduler_started] -> 'r) Staged.t
 
 module Staged = struct
-  let async' ?extract_exn ~summary ?readme param =
+  let async ?extract_exn ~summary ?readme param =
     let on_result = maybe_print_error_and_shutdown in
-    basic' ~summary ?readme (in_async ?extract_exn param on_result)
+    basic ~summary ?readme (in_async ?extract_exn param on_result)
   ;;
 
-  let async ?extract_exn ~summary ?readme spec main =
-    async' ?extract_exn ~summary ?readme (Spec.to_param spec main)
+  let async_spec ?extract_exn ~summary ?readme spec main =
+    async ?extract_exn ~summary ?readme (Spec.to_param spec main)
   ;;
 
-  let async_or_error' ?extract_exn ~summary ?readme param =
+  let async_or_error ?extract_exn ~summary ?readme param =
     let on_result res = maybe_print_error_and_shutdown (Or_error.join res) in
-    basic' ~summary ?readme (in_async ?extract_exn param on_result)
+    basic ~summary ?readme (in_async ?extract_exn param on_result)
   ;;
 
-  let async_or_error ?extract_exn ~summary ?readme spec main =
-    async_or_error' ?extract_exn ~summary ?readme (Spec.to_param spec main)
+  let async_spec_or_error ?extract_exn ~summary ?readme spec main =
+    async_or_error ?extract_exn ~summary ?readme (Spec.to_param spec main)
   ;;
 end
 
@@ -104,21 +104,18 @@ let stage_param =
       stage (fun `Scheduler_started -> main ()))
 ;;
 
-let async'      ?extract_exn ~summary ?readme param =
-  Staged.async' ?extract_exn ~summary ?readme (stage_param param)
+let async      ?extract_exn ~summary ?readme param =
+  Staged.async ?extract_exn ~summary ?readme (stage_param param)
 ;;
 
-let async_or_error'      ?extract_exn ~summary ?readme param =
-  Staged.async_or_error' ?extract_exn ~summary ?readme (stage_param param)
+let async_or_error      ?extract_exn ~summary ?readme param =
+  Staged.async_or_error ?extract_exn ~summary ?readme (stage_param param)
 ;;
 
-let async ?extract_exn ~summary ?readme spec main =
-  async'  ?extract_exn ~summary ?readme (Spec.to_param spec main)
+let async_spec ?extract_exn ~summary ?readme spec main =
+  async  ?extract_exn ~summary ?readme (Spec.to_param spec main)
 ;;
 
-let async_or_error ?extract_exn ~summary ?readme spec main =
-  async_or_error'  ?extract_exn ~summary ?readme (Spec.to_param spec main)
+let async_spec_or_error ?extract_exn ~summary ?readme spec main =
+  async_or_error  ?extract_exn ~summary ?readme (Spec.to_param spec main)
 ;;
-
-let async_basic = async
-

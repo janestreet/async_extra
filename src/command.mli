@@ -18,21 +18,15 @@ type 'a with_options
     [async] also handles top-level exceptions by wrapping the user-supplied function in a
     [Monitor.try_with]. If an exception is raised, it will print it to stderr and call
     [shutdown 1]. The [extract_exn] argument is passed along to [Monitor.try_with]; by
-    default it is [false].
-*)
-val async  : ('a, unit Deferred.t) basic_command  with_options
-val async' :      unit Deferred.t  basic_command' with_options
-
-(** [async_basic] is a deprecated synonym for [async] that will eventually go away.  It is
-    here to give code outside jane street a chance to switch over before we delete it. *)
-val async_basic : ('a, unit Deferred.t) basic_command with_options
-[@@deprecated "[since 2015-10] Use async instead"]
+    default it is [false]. *)
+val async      :      unit Deferred.t  basic_command      with_options
+val async_spec : ('a, unit Deferred.t) basic_spec_command with_options
 
 (** [async_or_error] is like [async], except that the main function it expects may
     return an error, in which case it prints out the error message and shuts down with
     exit code 1. *)
-val async_or_error  : ('a, unit Deferred.Or_error.t) basic_command  with_options
-val async_or_error' :      unit Deferred.Or_error.t  basic_command' with_options
+val async_or_error      :      unit Deferred.Or_error.t  basic_command      with_options
+val async_spec_or_error : ('a, unit Deferred.Or_error.t) basic_spec_command with_options
 
 (** staged functions allow the main function to be separated into two stages.  The first
     part is guaranteed to run before the async scheduler is started, and the second part
@@ -54,10 +48,10 @@ val async_or_error' :      unit Deferred.Or_error.t  basic_command' with_options
 type 'r staged = ([`Scheduler_started] -> 'r) Staged.t
 
 module Staged : sig
-  val async           : ('a, unit Deferred.t          staged) basic_command  with_options
-  val async'          :      unit Deferred.t          staged  basic_command' with_options
-  val async_or_error  : ('a, unit Deferred.Or_error.t staged) basic_command  with_options
-  val async_or_error' :      unit Deferred.Or_error.t staged  basic_command' with_options
+  val async               :      unit Deferred.t          staged  basic_command      with_options
+  val async_spec          : ('a, unit Deferred.t          staged) basic_spec_command with_options
+  val async_or_error      :      unit Deferred.Or_error.t staged  basic_command      with_options
+  val async_spec_or_error : ('a, unit Deferred.Or_error.t staged) basic_spec_command with_options
 end
 
 (** To create an [Arg_type.t] that uses auto-completion and uses Async to compute the

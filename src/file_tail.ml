@@ -60,7 +60,7 @@ module Chunker : sig
 
   include Invariant.S with type t := t
   val create : break_on_lines:bool -> t
-  val feed : t -> string -> pos:int -> len:int -> Update.t Queue.t
+  val feed : t -> Bytes.t -> pos:int -> len:int -> Update.t Queue.t
 end = struct
   type t =
     | Simple
@@ -88,10 +88,10 @@ end = struct
     let result : Update.t Queue.t = Queue.create () in
     let enqueue data = Queue.enqueue result (Data data) in
     begin match t with
-    | Simple -> enqueue (String.sub buf ~pos ~len)
+    | Simple -> enqueue (Bytes.To_string.sub buf ~pos ~len)
     | By_line buffer ->
       for i = pos to pos + len - 1 do
-        let c = buf.[i] in
+        let c = Bytes.get buf i in
         if c <> newline
         then Buffer.add_char buffer c
         else begin
@@ -123,13 +123,14 @@ let%test_unit _ =
            if i = string_length - 1
            then '\n'
            else Char.of_int_exn (i + Char.to_int '0'))))
+    |> Bytes.of_string
   in
   for bytes_at_a_time = 1 to 10 do
     let result = Queue.create () in
     let t = create ~break_on_lines:true in
     let rec loop pos =
       Chunker.invariant t;
-      let len = min bytes_at_a_time (String.length buf - pos) in
+      let len = min bytes_at_a_time (Bytes.length buf - pos) in
       if len > 0 then begin
         Queue.blit_transfer ~src:(Chunker.feed t buf ~pos ~len) ~dst:result ();
         loop (pos + bytes_at_a_time);
@@ -141,6 +142,7 @@ let%test_unit _ =
         (List.map (Queue.to_list result) ~f:(function
            | Data d -> d ^ "\n"
            | _ -> assert false))
+      |> Bytes.of_string
     in
     assert (buf = output);
   done
@@ -156,7 +158,7 @@ type t =
   ; eof_latency_tolerance                 : Time.Span.t
   ; null_read_tolerance                   : Time.Span.t
   ; throttle                              : unit Throttle.t
-  ; mutable read_buf                      : string
+  ; mutable read_buf                      : Bytes.t
   ; mutable file_pos                      : int64
   ; mutable file_len                      : int64
   ; mutable most_recent_file_len_increase : Time.t
@@ -276,7 +278,7 @@ let read t =
              [t.file_len], the file must have shrunk. *)
           error t File_shrank
         end
-        else if t.retry_null_reads && String.contains t.read_buf ~len '\000'
+        else if t.retry_null_reads && Bytes.contains t.read_buf ~len '\000'
         then begin
           let delayed_for = Time.(diff (now ()) started) in
           if Time.Span.(>=) delayed_for t.null_read_tolerance then
