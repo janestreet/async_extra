@@ -55,11 +55,11 @@ module Rpc = struct
         ?max_message_size ?make_transport ?handshake_timeout
         ?heartbeat_config get_address =
     let connect host_and_port =
-      let (host, port) = Host_and_port.tuple host_and_port in
-      Rpc.Connection.client ~host ~port ?bind_to_address ?implementations
-        ?max_message_size ?make_transport ?handshake_timeout
+      Rpc.Connection.client
+        (Tcp.Where_to_connect.of_host_and_port ?bind_to_address host_and_port)
+        ?implementations ?max_message_size ?make_transport ?handshake_timeout
         ?heartbeat_config
-        ~description:(Info.of_string ("persistent connection to " ^ server_name)) ()
+        ~description:(Info.of_string ("persistent connection to " ^ server_name))
       >>| Or_error.of_exn_result
     in
     create ~server_name ?log ?on_event ?retry_delay ~connect get_address

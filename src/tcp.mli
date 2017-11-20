@@ -11,27 +11,28 @@ module Where_to_connect : sig
 
   type inet = Socket.Address.Inet.t t [@@deriving sexp_of]
   type unix = Socket.Address.Unix.t t [@@deriving sexp_of]
+
+  val remote_address : 'a t -> 'a Deferred.t
+
+  (** [bind_to_address] and [bind_to_port] can be used to bind the source IP and port of the
+      underlying socket.  This does not necessarily alter the interface used to send the
+      data.  In particular, the commonly used destination-based routing is unaffected by
+      binding to a different address. *)
+  val of_host_and_port
+    :  ?bind_to_address : Unix.Inet_addr.t (** default is chosen by OS *)
+    -> ?bind_to_port    : int              (** default is chosen by OS *)
+    -> Host_and_port.t
+    -> inet
+
+  val of_inet_address
+    :  ?bind_to_address : Unix.Inet_addr.t (** default is chosen by OS *)
+    -> ?bind_to_port    : int              (** default is chosen by OS *)
+    -> Socket.Address.Inet.t
+    -> inet
+
+  val of_file          : string                -> unix
+  val of_unix_address  : Socket.Address.Unix.t -> unix
 end
-
-(** [bind_to_address] and [bind_to_port] can be used to bind the source IP and port of the
-    underlying socket.  This does not necessarily alter the interface used to send the
-    data.  In particular, the commonly used destination-based routing is unaffected by
-    binding to a different address. *)
-val to_host_and_port
-  :  ?bind_to_address : Unix.Inet_addr.t (** default is chosen by OS *)
-  -> ?bind_to_port    : int              (** default is chosen by OS *)
-  -> string
-  -> int
-  -> Where_to_connect.inet
-
-val to_inet_address
-  :  ?bind_to_address : Unix.Inet_addr.t  (** default is chosen by OS *)
-  -> ?bind_to_port    : int               (** default is chosen by OS *)
-  -> Socket.Address.Inet.t
-  -> Where_to_connect.inet
-
-val to_file          : string                -> Where_to_connect.unix
-val to_unix_address  : Socket.Address.Unix.t -> Where_to_connect.unix
 
 type 'a with_connect_options
   =  ?buffer_age_limit   : [ `At_most of Time.Span.t | `Unlimited ]
@@ -87,23 +88,6 @@ val connect
        -> (([ `Active ], 'addr) Socket.t * Reader.t * Writer.t) Deferred.t
      ) with_connect_options
 
-(** A [Where_to_listen] describes the socket that a tcp server should listen on. *)
-module Where_to_listen : sig
-  type ('address, 'listening_on) t constraint 'address = [< Socket.Address.t ]
-    [@@deriving sexp_of]
-
-  type inet = (Socket.Address.Inet.t, int   ) t [@@deriving sexp_of]
-  type unix = (Socket.Address.Unix.t, string) t [@@deriving sexp_of]
-
-  val create
-    :  socket_type  : 'address Socket.Type.t
-    -> address      : 'address
-    -> listening_on : ('address -> 'listening_on)
-    -> ('address, 'listening_on) t
-
-  val address : ('address, _) t -> 'address
-end
-
 module Bind_to_address : sig
   type t =
     | Address of Unix.Inet_addr.t
@@ -119,17 +103,34 @@ module Bind_to_port : sig
   [@@deriving sexp_of]
 end
 
-(** Listen on the specified port on the specified addresses *)
-val bind_to : Bind_to_address.t -> Bind_to_port.t -> Where_to_listen.inet
+(** A [Where_to_listen] describes the socket that a tcp server should listen on. *)
+module Where_to_listen : sig
+  type ('address, 'listening_on) t constraint 'address = [< Socket.Address.t ]
+    [@@deriving sexp_of]
 
-(** [on_port port] is [bind_to All_addresses (On_port port)]*)
-val on_port              : int ->    Where_to_listen.inet
+  type inet = (Socket.Address.Inet.t, int   ) t [@@deriving sexp_of]
+  type unix = (Socket.Address.Unix.t, string) t [@@deriving sexp_of]
 
-(** [on_port_chosen_by_os port] is [bind_to All_addresses On_port_chosen_by_os] *)
-val on_port_chosen_by_os :           Where_to_listen.inet
+  val create
+    :  socket_type  : 'address Socket.Type.t
+    -> address      : 'address
+    -> listening_on : ('address -> 'listening_on)
+    -> ('address, 'listening_on) t
 
-(** Listen on a unix domain socket using the specified path *)
-val on_file              : string -> Where_to_listen.unix
+  val address : ('address, _) t -> 'address
+
+  (** Listen on the specified port on the specified addresses *)
+  val bind_to : Bind_to_address.t -> Bind_to_port.t -> inet
+
+  (** [on_port port] is [bind_to All_addresses (On_port port)]*)
+  val of_port              : int ->    inet
+
+  (** [on_port_chosen_by_os port] is [bind_to All_addresses On_port_chosen_by_os] *)
+  val of_port_chosen_by_os :           inet
+
+  (** Listen on a unix domain socket using the specified path *)
+  val of_file              : string -> unix
+end
 
 (** A [Server.t] represents a TCP server listening on a socket. *)
 module Server : sig

@@ -122,41 +122,36 @@ module Connection : sig
     -> Transport.t
     -> unit Deferred.t
 
-  (** [client ~host ~port ()] connects to the server at ([host],[port]) and returns the
-      connection or an Error if a connection could not be made.  It is the responsibility
-      of the caller to eventually call close.
+  (** [client where_to_connect ()] connects to the server at [where_to_connect] and
+      returns the connection or an Error if a connection could not be made. It is the
+      responsibility of the caller to eventually call close.
 
       In [client] and [with_client], the [handshake_timeout] encompasses both the TCP
       connection timeout and the timeout for this module's own handshake.
   *)
   val client
-    :  host : string
-    -> port : int
-    -> ?bind_to_address     : Unix.Inet_addr.t  (** default is chosen by OS *)
-    -> ?implementations     : _ Client_implementations.t
+    :  ?implementations     : _ Client_implementations.t
     -> ?max_message_size    : int
     -> ?make_transport      : transport_maker
     -> ?handshake_timeout   : Time.Span.t
     -> ?heartbeat_config    : Heartbeat_config.t
     -> ?description         : Info.t
-    -> unit
+    -> _ Tcp.Where_to_connect.t
     -> (t, Exn.t) Result.t Deferred.t
 
-  (** [with_client ~host ~port f] connects to the server at ([host],[port]) and runs f
-      until an exception is thrown or until the returned Deferred is fulfilled.
+  (** [with_client where_to_connect f] connects to the server at [where_to_connect] and
+      runs f until an exception is thrown or until the returned Deferred is fulfilled.
 
       NOTE:  As with [with_close], you should be careful when using this with [Pipe_rpc].
       See [with_close] for more information.
   *)
   val with_client
-    :  host : string
-    -> port : int
-    -> ?bind_to_address     : Unix.Inet_addr.t (** default is chosen by OS *)
-    -> ?implementations     : _ Client_implementations.t
+    :  ?implementations     : _ Client_implementations.t
     -> ?max_message_size    : int
     -> ?make_transport      : transport_maker
     -> ?handshake_timeout   : Time.Span.t
     -> ?heartbeat_config    : Heartbeat_config.t
+    -> _ Tcp.Where_to_connect.t
     -> (t -> 'a Deferred.t)
     -> ('a, Exn.t) Result.t Deferred.t
 end

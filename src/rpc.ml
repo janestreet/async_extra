@@ -169,8 +169,7 @@ module Connection = struct
          end)
   ;;
 
-  let client ~host ~port
-        ?bind_to_address
+  let client
         ?implementations
         ?(max_message_size=default_max_message_size)
         ?(make_transport=default_transport_maker)
@@ -179,20 +178,20 @@ module Connection = struct
             Async_rpc_kernel.Async_rpc_kernel_private.default_handshake_timeout)
         ?heartbeat_config
         ?description
-        () =
+        where_to_connect =
     let finish_handshake_by =
       Time_ns.add (Time_ns.now ()) (Time_ns.Span.of_span handshake_timeout)
     in
     Monitor.try_with (fun () ->
-      Tcp.connect_sock ~timeout:handshake_timeout
-        (Tcp.to_host_and_port ?bind_to_address host port))
+      Tcp.connect_sock ~timeout:handshake_timeout where_to_connect)
     >>=? fun sock ->
     let description =
       match description with
       | None ->
-        Info.create "Client connected via TCP" (host, port) [%sexp_of: string * int]
+        Info.create "Client connected via TCP" where_to_connect
+          [%sexp_of: _ Tcp.Where_to_connect.t]
       | Some desc ->
-        Info.tag_arg desc "via TCP" (host, port) [%sexp_of: string * int]
+        Info.tag_arg desc "via TCP" where_to_connect [%sexp_of: _ Tcp.Where_to_connect.t]
     in
     let handshake_timeout = Time_ns.diff finish_handshake_by (Time_ns.now ()) in
     let transport = make_transport (Socket.fd sock) ~max_message_size in begin
@@ -213,21 +212,21 @@ module Connection = struct
       >>= fun () ->
       return error
 
-  let with_client ~host ~port
-        ?bind_to_address
+  let with_client
         ?implementations
         ?max_message_size
         ?make_transport
         ?handshake_timeout
         ?heartbeat_config
+        where_to_connect
         f =
-    client ?bind_to_address ~host ~port
+    client
       ?implementations
       ?max_message_size
       ?make_transport
       ?handshake_timeout
       ?heartbeat_config
-      ()
+      where_to_connect
     >>=? fun t ->
     try_with (fun () -> f t)
     >>= fun result ->
@@ -254,11 +253,11 @@ let%test_unit "Open dispatches see connection closed error" =
       in
       Connection.serve
         ~initial_connection_state:(fun _ _ -> ()) ~implementations
-        ~where_to_listen:Tcp.on_port_chosen_by_os
+        ~where_to_listen:Tcp.Where_to_listen.of_port_chosen_by_os
         ()
     in
     let client ~port =
-      Connection.client ~host:"localhost" ~port ()
+      Connection.client (Tcp.Where_to_connect.of_host_and_port {host = "localhost"; port})
       >>| Result.ok_exn
       >>= fun connection ->
       let res = Rpc.dispatch rpc connection () in

@@ -17,6 +17,8 @@ module Where_to_connect = struct
   type inet = Socket.Address.Inet.t t [@@deriving sexp_of]
   type unix = Socket.Address.Unix.t t [@@deriving sexp_of]
 
+  let remote_address t = t.remote_address ()
+
   let create_local_address ~bind_to_address ~bind_to_port =
     let port = Option.value bind_to_port ~default:0 in
     match bind_to_address with
@@ -24,19 +26,19 @@ module Where_to_connect = struct
     | Some inet_addr -> Socket.Address.Inet.create          ~port inet_addr
   ;;
 
-  let host_and_port ?bind_to_address ?bind_to_port { Host_and_port.host; port } =
+  let of_host_and_port ?bind_to_address ?bind_to_port { Host_and_port.host; port } =
     { socket_type    = Socket.Type.tcp
     ; remote_address =
         (fun () ->
            Unix.Inet_addr.of_string_or_getbyname host
-           >>| fun inet_addr->
+           >>| fun inet_addr ->
            Socket.Address.Inet.create inet_addr ~port)
     ; local_address  = Some (create_local_address ~bind_to_address ~bind_to_port)
     ; info           = [%sexp_of: string * int] (host, port)
     }
   ;;
 
-  let file file =
+  let of_file file =
     { socket_type    = Socket.Type.unix
     ; remote_address = (fun () -> return (Socket.Address.Unix.create file))
     ; local_address  = None
@@ -44,7 +46,7 @@ module Where_to_connect = struct
     }
   ;;
 
-  let inet_address ?bind_to_address ?bind_to_port address =
+  let of_inet_address ?bind_to_address ?bind_to_port address =
     { socket_type    = Socket.Type.tcp
     ; remote_address = (fun () -> return address)
     ; local_address  = Some (create_local_address ~bind_to_address ~bind_to_port)
@@ -52,7 +54,7 @@ module Where_to_connect = struct
     }
   ;;
 
-  let unix_address address =
+  let of_unix_address address =
     { socket_type    = Socket.Type.unix
     ; remote_address = (fun () -> return address)
     ; local_address  = None
@@ -60,17 +62,6 @@ module Where_to_connect = struct
     }
   ;;
 end
-
-let to_host_and_port ?bind_to_address ?bind_to_port host port =
-  Where_to_connect.host_and_port ?bind_to_address ?bind_to_port
-    (Host_and_port.create ~host ~port)
-;;
-
-let to_file          = Where_to_connect.file
-
-let to_inet_address  = Where_to_connect.inet_address
-
-let to_unix_address  = Where_to_connect.unix_address
 
 let create_socket socket_type =
   let s = Socket.create socket_type in
@@ -234,25 +225,17 @@ module Where_to_listen = struct
     }
   ;;
 
-  let port port = bind_to All_addresses (On_port port)
+  let of_port port = bind_to All_addresses (On_port port)
 
-  let port_chosen_by_os = bind_to All_addresses On_port_chosen_by_os
+  let of_port_chosen_by_os = bind_to All_addresses On_port_chosen_by_os
 
-  let file path =
+  let of_file path =
     { socket_type  = Socket.Type.unix
     ; address      = Socket.Address.Unix.create path
     ; listening_on = fun _ -> path
     }
   ;;
 end
-
-let bind_to = Where_to_listen.bind_to
-
-let on_port = Where_to_listen.port
-
-let on_port_chosen_by_os = Where_to_listen.port_chosen_by_os
-
-let on_file = Where_to_listen.file
 
 module Server = struct
 
@@ -499,12 +482,13 @@ module Server = struct
       let multi how f = Deferred.List.iter ~how ~f (units 10) in
       let close_connection r w () = Reader.close r >>= fun () -> Writer.close w in
       let multi_close_connection r w () = multi `Parallel (close_connection r w) in
-      create on_port_chosen_by_os
+      create Where_to_listen.of_port_chosen_by_os
         ~on_handler_error:`Raise
         (fun _address r w -> multi_close_connection r w ())
       >>= fun t ->
       multi `Parallel (fun () ->
-        with_connection (to_host_and_port "localhost" t.listening_on)
+        with_connection
+          (Where_to_connect.of_host_and_port {host = "localhost"; port = t.listening_on})
           (fun _socket r w -> multi_close_connection r w ()))
       >>= fun () ->
       multi `Sequential (fun () ->
@@ -516,7 +500,8 @@ module Server = struct
   let%test_unit "establish at least max_connections + backlog" =
     let test_connect address expect =
       let test = [%test_result:[ `Accepted | `Rejected ]] ~expect in
-      try_with ~extract_exn:true (fun () -> connect (to_inet_address address))
+      try_with ~extract_exn:true (fun () ->
+        connect (Where_to_connect.of_inet_address address))
       >>= function
       | Error (Unix.Unix_error (ECONNREFUSED, _, _)) -> return (test `Rejected)
       | Error e -> failwiths "connect" e [%sexp_of: exn]
@@ -540,7 +525,7 @@ module Server = struct
            try_with
              (fun () ->
                 let max_connections = 1 in
-                create ~max_connections ~backlog on_port_chosen_by_os
+                create ~max_connections ~backlog Where_to_listen.of_port_chosen_by_os
                   ~on_handler_error:`Raise
                   (* [never ()] keeps all the connections open. *)
                   (fun _ _ _ -> never ())
@@ -587,7 +572,7 @@ module Server = struct
           (fun () ->
              let backlog = 10 in
              create ~backlog ~on_handler_error:`Raise
-               on_port_chosen_by_os
+               Where_to_listen.of_port_chosen_by_os
                (fun _ _ to_client ->
                   let to_client = Writer.fd to_client in
                   if not linger then
@@ -597,7 +582,8 @@ module Server = struct
                   Fd.close to_client)
              >>= fun t ->
              Deferred.all (List.init backlog ~f:(fun _ ->
-               connect (to_inet_address (Socket.getsockname (listening_socket t)))
+               connect (Where_to_connect.of_inet_address
+                          (Socket.getsockname (listening_socket t)))
                >>= fun (connection_to_server, _, _) ->
                let connection_to_server = Socket.fd connection_to_server in
                after (sec 0.1)

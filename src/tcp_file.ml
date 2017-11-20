@@ -489,7 +489,9 @@ module Client = struct
   module Message  = Protocol.Open_file.Message
   module Response = Protocol.Open_file.Response
 
-  let connect ~host ~port = Rpc.Connection.client ~host ~port ()
+  let connect ~host ~port =
+    Rpc.Connection.client (Tcp.Where_to_connect.of_host_and_port {host; port})
+
   let disconnect t = Rpc.Connection.close t
 
   let read ?client_pushes_back t filename =

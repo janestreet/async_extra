@@ -821,7 +821,7 @@ module Make (Z : Arg) = struct
         ~on_handler_error:`Raise
         ~max_connections:max_clients
         ~backlog:(min 1_000 max_clients)
-        (Tcp.on_port listen_port)
+        (Tcp.Where_to_listen.of_port listen_port)
         (fun addr reader writer ->
            match Set_once.get handler with
            | None ->
@@ -917,7 +917,7 @@ module Make (Z : Arg) = struct
       Monitor.try_with (fun () ->
         Tcp.with_connection
           ~interrupt:(Ivar.read stop_connecting)
-          (Tcp.to_inet_address
+          (Tcp.Where_to_connect.of_inet_address
              (Socket.Address.Inet.create t.remote_ip ~port:t.remote_port))
           (fun _socket reader writer ->
              let my_name = Client_name.to_string t.my_name in
