@@ -32,7 +32,7 @@ let set_run_when_unused_data     `Do_not_use = assert false
 
 let%test_unit _ = (* automatic reclamation, multiple times *)
   Thread_safe.block_on_async_exn (fun () ->
-    let t = create Int.hashable in
+    let t = create (module Int) in
     let heap_block i = Heap_block.create_exn (ref i) in
     let b1 = heap_block 1 in
     let key1 = 13 in

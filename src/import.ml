@@ -1,5 +1,7 @@
-include Async_unix.Import
-include Async_unix.Std
+include Async_kernel
+include Async_unix
+
+module Kernel_scheduler = Async_kernel_private.Scheduler
 
 module Rpc_kernel    = Async_rpc_kernel.Rpc
 module Versioned_rpc = Async_rpc_kernel.Versioned_rpc
