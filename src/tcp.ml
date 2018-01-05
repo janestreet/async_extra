@@ -81,10 +81,10 @@ let close_sock_on_error s f =
     raise e;
 ;;
 
-let reader_writer_of_sock ?buffer_age_limit ?reader_buffer_size s =
+let reader_writer_of_sock ?buffer_age_limit ?reader_buffer_size ?writer_buffer_size s =
   let fd = Socket.fd s in
   (Reader.create ?buf_len:reader_buffer_size fd,
-   Writer.create ?buffer_age_limit fd)
+   Writer.create ?buffer_age_limit ?buf_len:writer_buffer_size fd)
 ;;
 
 let connect_sock
@@ -131,13 +131,16 @@ type 'a with_connect_options
   =  ?buffer_age_limit   : [ `At_most of Time.Span.t | `Unlimited ]
   -> ?interrupt          : unit Deferred.t
   -> ?reader_buffer_size : int
+  -> ?writer_buffer_size : int
   -> ?timeout            : Time.Span.t
   -> 'a
 
-let connect ?socket ?buffer_age_limit ?interrupt ?reader_buffer_size ?timeout where_to_connect =
+let connect ?socket ?buffer_age_limit ?interrupt ?reader_buffer_size ?writer_buffer_size ?timeout where_to_connect =
   connect_sock ?socket ?interrupt ?timeout where_to_connect
   >>| fun s ->
-  let r, w = reader_writer_of_sock ?buffer_age_limit ?reader_buffer_size s in
+  let r, w =
+    reader_writer_of_sock ?buffer_age_limit ?reader_buffer_size ?writer_buffer_size s
+  in
   s, r, w
 ;;
 
@@ -157,11 +160,13 @@ let close_connection_via_reader_and_writer r w =
 ;;
 
 let with_connection
-      ?buffer_age_limit ?interrupt ?reader_buffer_size ?timeout
+      ?buffer_age_limit ?interrupt ?reader_buffer_size ?writer_buffer_size ?timeout
       where_to_connect f =
   connect_sock ?interrupt ?timeout where_to_connect
   >>= fun socket ->
-  let r, w = reader_writer_of_sock ?buffer_age_limit ?reader_buffer_size socket in
+  let r, w =
+    reader_writer_of_sock ?buffer_age_limit ?reader_buffer_size ?writer_buffer_size socket
+  in
   let res = collect_errors w (fun () -> f socket r w) in
   Deferred.any [
     res >>| (fun (_ : ('a, exn) Result.t) -> ());

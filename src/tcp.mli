@@ -38,6 +38,7 @@ type 'a with_connect_options
   =  ?buffer_age_limit   : [ `At_most of Time.Span.t | `Unlimited ]
   -> ?interrupt          : unit Deferred.t
   -> ?reader_buffer_size : int
+  -> ?writer_buffer_size : int
   -> ?timeout            : Time.Span.t
   -> 'a
 
@@ -122,10 +123,10 @@ module Where_to_listen : sig
   (** Listen on the specified port on the specified addresses *)
   val bind_to : Bind_to_address.t -> Bind_to_port.t -> inet
 
-  (** [on_port port] is [bind_to All_addresses (On_port port)]*)
+  (** [of_port port] is [bind_to All_addresses (On_port port)]*)
   val of_port              : int ->    inet
 
-  (** [on_port_chosen_by_os port] is [bind_to All_addresses On_port_chosen_by_os] *)
+  (** [of_port_chosen_by_os port] is [bind_to All_addresses On_port_chosen_by_os] *)
   val of_port_chosen_by_os :           inet
 
   (** Listen on a unix domain socket using the specified path *)

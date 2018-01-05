@@ -66,8 +66,7 @@ end
 
     Short writes are distinguished by [buf] not being empty afterward.
 
-    See also
-    {!Iobuf.sendto_nonblocking_no_sigpipe} and
+    See also {!Iobuf.sendto_nonblocking_no_sigpipe} and
     {!Bigstring.sendto_nonblocking_no_sigpipe}.
 
     @raise Failure on internal errors but return [Unix.error] via
@@ -127,12 +126,26 @@ val bind
 
 val bind_any : unit -> ([ `Bound ], Socket.Address.Inet.t) Socket.t
 
+module Loop_result : sig
+  type t = Closed | Stopped [@@deriving sexp_of, compare]
+
+  (** As the name implies, this is useful for other modules that want to compatibly
+      convert the result of {!Fd.interruptible_ready_to} to a loop result or exception. *)
+  val of_fd_interruptible_every_ready_to_result_exn
+    :  (_, _) Iobuf.t option
+    -> string
+    -> 'a
+    -> ('a -> Sexp.t)
+    -> [ `Bad_fd | `Closed | `Unsupported | `Interrupted ]
+    -> t
+end
+
 (** Loops, including [recvfrom_loop], terminate normally when the socket is closed. *)
 val recvfrom_loop
   :  ?config : Config.t
   -> Fd.t
   -> (write_buffer -> Socket.Address.Inet.t -> unit)
-  -> unit Deferred.t
+  -> Loop_result.t Deferred.t
 
 (** [recvfrom_loop_with_buffer_replacement callback] calls [callback] synchronously on
     each message received.  [callback] returns the packet buffer for subsequent
@@ -143,18 +156,18 @@ val recvfrom_loop_with_buffer_replacement
   :  ?config : Config.t
   -> Fd.t
   -> (write_buffer -> Socket.Address.Inet.t -> write_buffer)
-  -> write_buffer Deferred.t
+  -> Loop_result.t Deferred.t
 
 val read_loop
   :  ?config : Config.t
   -> Fd.t
   -> (write_buffer -> unit)
-  -> unit Deferred.t
+  -> Loop_result.t Deferred.t
 val read_loop_with_buffer_replacement
   :  ?config : Config.t
   -> Fd.t
   -> (write_buffer -> write_buffer)
-  -> write_buffer Deferred.t
+  -> Loop_result.t Deferred.t
 
 (** [recvmmsg_loop ~socket callback] iteratively receives up to [max_count] packets at a
     time on [socket] and passes them to [callback].  Each packet is up to [Iobuf.capacity]
@@ -170,6 +183,6 @@ val recvmmsg_loop
      -> ?on_wouldblock : (unit -> unit) (** callback if [recvmmsg] would block *)
      -> Fd.t
      -> (write_buffer array -> count : int -> unit)
-     -> unit Deferred.t)
+     -> Loop_result.t Deferred.t)
       Or_error.t
 val default_recvmmsg_loop_max_count : int

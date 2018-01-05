@@ -14,7 +14,8 @@ module Config = struct
     ; init      : write_buffer
     ; stop      : unit Deferred.t
     ; max_ready : int
-    } [@@deriving fields]
+    }
+  [@@deriving fields]
 
   let create
         ?(capacity  = default_capacity)
@@ -27,7 +28,7 @@ end
 
 let fail iobuf message a sexp_of_a =
   (* Render buffers immediately, before we have a chance to change them. *)
-  failwiths message (a, [%sexp_of: (_, _) Iobuf.Hexdump.t] iobuf)
+  failwiths message (a, [%sexp_of: (_, _) Iobuf.Hexdump.t option] iobuf)
     (Tuple.T2.sexp_of_t sexp_of_a ident)
 ;;
 
@@ -118,14 +119,13 @@ let ready_iter fd ~stop ~max_ready ~f read_or_write ~syscall_name =
      [with_file_descr_deferred] would be the more natural choice, but it doesn't call
      [set_nonblock_if_necessary]. *)
   match
-    Fd.with_file_descr ~nonblocking:true fd
-      (fun file_descr ->
-         Fd.interruptible_every_ready_to fd read_or_write ~interrupt:(Ivar.read stop)
-           (fun file_descr ->
-              match inner_loop 0 file_descr with
-              | Poll_again   -> ()
-              | User_stopped -> Ivar.fill_if_empty stop ())
-           file_descr)
+    Fd.with_file_descr ~nonblocking:true fd (fun file_descr ->
+      Fd.interruptible_every_ready_to fd read_or_write ~interrupt:(Ivar.read stop)
+        (fun file_descr ->
+           match inner_loop 0 file_descr with
+           | Poll_again   -> ()
+           | User_stopped -> Ivar.fill_if_empty stop ())
+        file_descr)
   with
   (* Avoid one ivar creation and wait immediately by returning the result from
      [Fd.interruptible_every_ready_to] directly. *)
@@ -149,7 +149,7 @@ let sendto () =
       >>= function
       | `Interrupted -> Deferred.unit
       | (`Bad_fd | `Closed | `Unsupported) as error ->
-        fail buf "Udp.sendto" (error, addr)
+        fail (Some buf) "Udp.sendto" (error, addr)
           [%sexp_of: [ `Bad_fd | `Closed | `Unsupported ] * Core.Unix.sockaddr])
 ;;
 
@@ -167,8 +167,7 @@ let send () =
       >>= function
       | `Interrupted -> Deferred.unit
       | (`Bad_fd | `Closed | `Unsupported) as error ->
-        fail buf "Udp.send" error
-          [%sexp_of: [ `Bad_fd | `Closed | `Unsupported ]])
+        fail (Some buf) "Udp.send" error [%sexp_of: [ `Bad_fd | `Closed | `Unsupported ]])
 ;;
 
 let bind ?ifname addr =
@@ -200,6 +199,17 @@ let bind_any () =
   Socket.bind_inet socket ~reuseaddr:false bind_addr
 ;;
 
+module Loop_result = struct
+  type t = Closed | Stopped [@@deriving sexp_of, compare]
+
+  let of_fd_interruptible_every_ready_to_result_exn buf function_name x sexp_of_x result =
+    match result with
+    | (`Bad_fd | `Unsupported) as error ->
+      fail buf function_name (error, x) [%sexp_of: [ `Bad_fd | `Unsupported ] * x]
+    | `Closed      -> Closed
+    | `Interrupted -> Stopped
+end
+
 let recvfrom_loop_with_buffer_replacement ?(config = Config.create ()) fd f =
   let stop = Ivar.create () in
   Config.stop config
@@ -210,22 +220,18 @@ let recvfrom_loop_with_buffer_replacement ?(config = Config.create ()) fd f =
       match Iobuf.recvfrom_assume_fd_is_nonblocking !buf file_descr with
       | exception Unix.Unix_error (e, _, _) -> Ready_iter.create_error e
       | ADDR_UNIX dom ->
-        fail !buf "Unix domain socket addresses not supported" dom [%sexp_of: string]
+        fail (Some !buf) "Unix domain socket addresses not supported"
+          dom [%sexp_of: string]
       | ADDR_INET (host, port) ->
         Iobuf.flip_lo !buf;
         buf := f !buf (`Inet (host, port));
         Iobuf.reset !buf;
-        Ready_iter.poll_again
-    )
-  >>| function
-  | (`Bad_fd | `Unsupported) as error ->
-    fail !buf "Udp.recvfrom_loop_without_buffer_replacement" (error, fd)
-      [%sexp_of: [ `Bad_fd | `Unsupported ] * Fd.t]
-  | `Closed | `Interrupted -> !buf
+        Ready_iter.poll_again)
+  >>| Loop_result.of_fd_interruptible_every_ready_to_result_exn (Some !buf)
+        "recvfrom_loop_without_buffer_replacement" fd [%sexp_of: Fd.t]
 ;;
 let recvfrom_loop ?config fd f =
   recvfrom_loop_with_buffer_replacement ?config fd (fun b a -> f b a; b)
-  >>| (ignore : (_, _) Iobuf.t -> unit)
 ;;
 
 (* We don't care about the address, so read instead of recvfrom. *)
@@ -244,18 +250,13 @@ let read_loop_with_buffer_replacement ?(config = Config.create ()) fd f =
           Iobuf.reset !buf;
           Ready_iter.poll_again
         end
-      else Unix.Syscall_result.Unit.reinterpret_error_exn result
-    )
-  >>| function
-  | (`Bad_fd | `Unsupported) as error ->
-    fail !buf "Udp.read_loop_with_buffer_replacement" (error, fd)
-      [%sexp_of: [ `Bad_fd | `Unsupported ] * Fd.t]
-  | `Closed | `Interrupted -> !buf
+      else Unix.Syscall_result.Unit.reinterpret_error_exn result)
+  >>| Loop_result.of_fd_interruptible_every_ready_to_result_exn (Some !buf)
+        "read_loop_with_buffer_replacement" fd [%sexp_of: Fd.t]
 ;;
 
 let read_loop ?config fd f =
   read_loop_with_buffer_replacement ?config fd (fun b -> f b; b)
-  >>| (ignore : (_, _) Iobuf.t -> unit)
 ;;
 
 (* Too small a [max_count] here negates the value of [recvmmsg], while too large risks
@@ -318,11 +319,7 @@ let recvmmsg_loop =
                     | EWOULDBLOCK | EAGAIN -> on_wouldblock ()
                     | _ -> ());
                    Unix.Syscall_result.Int.reinterpret_error_exn result
-                 end
-             )
-           >>| function
-           | (`Bad_fd | `Unsupported) as error ->
-             failwiths "Udp.recvmmsg_loop" (error, fd)
-               [%sexp_of: [ `Bad_fd | `Unsupported ] * Fd.t]
-           | `Closed | `Interrupted -> ())
+                 end)
+           >>| Loop_result.of_fd_interruptible_every_ready_to_result_exn None
+                 "recvmmsg_loop" fd [%sexp_of: Fd.t])
 ;;
