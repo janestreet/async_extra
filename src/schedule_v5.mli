@@ -1,9 +1,11 @@
+(** Extends {{!Core.Schedule_v5}[Core.Schedule_v5]} with functions for asynchronously
+    handling events in the schedule. *)
+
 open! Core
 open! Import
+include module type of struct include Core.Schedule_v5 end (** @open *)
 
-include module type of struct include Core.Schedule_v5 end
-
-(** in [Transitions_and_tag_changes] equality for the tag type must be given *)
+(** In [Transitions_and_tag_changes], equality for the tag type must be given. *)
 type ('tag, 'output) pipe_emit =
   | Transitions
     : ('tag, 'tag Event.transition) pipe_emit
@@ -29,12 +31,12 @@ val to_pipe
 
     If [stop] becomes determined before the next event, the resulting deferred is never
     filled and the computation to find the next event stops.  If the caller intends to
-    never use the returned deferred stop should be filled or the background computation
+    never use the returned deferred, stop should be filled or the background computation
     will continue to keep the deferred alive until the event occurs.
 
     This function is a good choice for handling a single event during the run of a
     program, like scheduling shutdown.  If the intention is to follow along with all
-    events in a schedule it is preferable to call [to_pipe] or [to_endless_sequence]
+    events in a schedule, it is preferable to call [to_pipe] or [to_endless_sequence]
     (in the non-async module). *)
 val next_event
   :  (zoned, 'tag) t
@@ -47,9 +49,9 @@ val next_event
 
 type 'a every_enter_callback = enter:Time.t -> leave:Time.t Deferred.t -> 'a
 
-(** [every_enter_without_pushback t ~start ~stop ~continue_on_error ~start_in_range_is_enter f]
-    calls [f] for each contiguous block of time in [t] starting at [start] and continuing
-    until [stop] becomes determined.
+(** [every_enter_without_pushback t ~start ~stop ~continue_on_error
+    ~start_in_range_is_enter f] calls [f] for each contiguous block of time in [t]
+    starting at [start] and continuing until [stop] becomes determined.
 
     For each block of time with start time [enter] and end time [leave_time], [f] is
     called with [f ~enter ~leave], where [leave] is a deferred that becomes determined at

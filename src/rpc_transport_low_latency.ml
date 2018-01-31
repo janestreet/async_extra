@@ -18,9 +18,6 @@ external writev2
   -> Unix.Syscall_result.Int.t
   = "async_extra_rpc_writev2_byte" "async_extra_rpc_writev2" [@@noalloc]
 
-external realloc : Bigstring.t -> new_size:int -> unit
-  = "async_extra_rpc_realloc"
-
 module Config = struct
   (* Same as the default value of [buffer_age_limit] for [Async_unix.Writer] *)
   let default_write_timeout = Time_ns.Span.of_min 2.
@@ -109,8 +106,8 @@ module Config = struct
         ; config           = (t : t)
         }
       ];
-    let new_size = Int.min t.max_buffer_size (Int.ceil_pow2 new_size_request) in
-    realloc buf ~new_size;
+    let len = Int.min t.max_buffer_size (Int.ceil_pow2 new_size_request) in
+    Bigstring.unsafe_destroy_and_resize buf ~len
   ;;
 end
 
@@ -123,7 +120,7 @@ module Reader_internal = struct
     ; mutable reading : bool
     ; mutable closed  : bool
     ; close_finished  : unit Ivar.t
-    ; buf             : Bigstring.t
+    ; mutable buf     : Bigstring.t
     ; mutable pos     : int (* Start of unconsumed data. *)
     ; mutable max     : int (* End   of unconsumed data. *)
     } [@@deriving sexp_of, fields]
@@ -216,7 +213,7 @@ module Reader_internal = struct
         Message_len.create_exn payload_len
       else begin
         if total_len > Bigstring.length t.buf then
-          Config.grow_buffer t.config t.buf ~new_size_request:total_len;
+          t.buf <- Config.grow_buffer t.config t.buf ~new_size_request:total_len;
         Message_len.none
       end
     end else
@@ -392,7 +389,7 @@ module Writer_internal = struct
     ; close_started             : unit Ivar.t
     ; close_finished            : unit Ivar.t
     ; connection_lost           : unit Ivar.t
-    ; buf                       : Bigstring.t
+    ; mutable buf               : Bigstring.t
     ; mutable pos               : int
     ; mutable bytes_written     : Int63.t
     ; monitor                   : Monitor.t
@@ -571,7 +568,7 @@ module Writer_internal = struct
   let ensure_at_least t ~needed =
     if Bigstring.length t.buf - t.pos < needed then begin
       let new_size_request = t.pos + needed in
-      Config.grow_buffer t.config t.buf ~new_size_request
+      t.buf <- Config.grow_buffer t.config t.buf ~new_size_request
     end
   ;;
 

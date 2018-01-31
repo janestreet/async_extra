@@ -1,6 +1,7 @@
-(** [Tcp] supports connection to [inet] sockets and [unix] sockets.  These are two
-    different types.  We use ['a Where_to_connect.t] to specify a socket to connect to,
-    where the ['a] identifies the type of socket. *)
+(** [Tcp] supports connection to [inet] sockets and [unix] sockets.
+
+    These are two different types. We use ['a Where_to_connect.t] to specify a socket to
+    connect to, where the ['a] identifies the type of socket. *)
 
 open! Core
 open! Import
@@ -14,10 +15,10 @@ module Where_to_connect : sig
 
   val remote_address : 'a t -> 'a Deferred.t
 
-  (** [bind_to_address] and [bind_to_port] can be used to bind the source IP and port of the
-      underlying socket.  This does not necessarily alter the interface used to send the
-      data.  In particular, the commonly used destination-based routing is unaffected by
-      binding to a different address. *)
+  (** [bind_to_address] and [bind_to_port] can be used to bind the source IP and port of
+      the underlying socket.  This does not necessarily alter the interface used to send
+      the data.  In particular, the commonly used destination-based routing is unaffected
+      by binding to a different address. *)
   val of_host_and_port
     :  ?bind_to_address : Unix.Inet_addr.t (** default is chosen by OS *)
     -> ?bind_to_port    : int              (** default is chosen by OS *)
@@ -43,14 +44,14 @@ type 'a with_connect_options
   -> 'a
 
 
-(** [with_connection ~host ~port f] looks up host from a string (using DNS as needed),
+(** [with_connection ~host ~port f] looks up [host] from a string (using DNS as needed),
     connects, then calls [f], passing the connected socket and a reader and writer for it.
     When the deferred returned by [f] is determined, or any exception is thrown, the
-    socket, reader and writer are closed.  The return deferred is fulfilled after f has
-    finished processing and the file descriptor for the socket is closed.  If [interrupt]
-    is supplied then the connection attempt will be aborted if interrupt is fulfilled
-    before the connection has been established.  Similarly, all connection attempts have a
-    timeout (default 10s), that can be overridden with [timeout].
+    socket, reader and writer are closed.  The returned [Deferred.t] is fulfilled after
+    [f] has finished processing and the file descriptor for the socket is closed.  If
+    [interrupt] is supplied, the connection attempt will be aborted if [interrupt] is
+    fulfilled before the connection has been established.  Similarly, all connection
+    attempts have a timeout (default 10s), which can be overridden with [timeout].
 
     It is fine for [f] to ignore the supplied socket and just use the reader and writer.
     The socket is there to make it convenient to call [Socket] functions. *)
@@ -73,10 +74,10 @@ val connect_sock
 
 (** [connect ~host ~port] is a convenience wrapper around [connect_sock] that returns the
     socket, and a reader and writer for the socket.  The reader and writer share a file
-    descriptor, and so closing one will affect the other by closing its underlying fd.  In
-    particular, closing the reader before closing the writer will cause the writer to
+    descriptor, and so closing one will affect the other by closing its underlying [fd].
+    In particular, closing the reader before closing the writer will cause the writer to
     subsequently raise an exception when it attempts to flush internally-buffered bytes to
-    the OS, due to a closed fd.  You should close the [Writer] first to avoid this
+    the OS, due to a closed [fd].  You should close the [Writer] first to avoid this
     problem.
 
     If possible, use [with_connection], which automatically handles closing.
@@ -120,16 +121,16 @@ module Where_to_listen : sig
 
   val address : ('address, _) t -> 'address
 
-  (** Listen on the specified port on the specified addresses *)
+  (** Listen on the specified port on the specified addresses. *)
   val bind_to : Bind_to_address.t -> Bind_to_port.t -> inet
 
-  (** [of_port port] is [bind_to All_addresses (On_port port)]*)
+  (** [of_port port] is [bind_to All_addresses (On_port port)]. *)
   val of_port              : int ->    inet
 
-  (** [of_port_chosen_by_os port] is [bind_to All_addresses On_port_chosen_by_os] *)
+  (** [of_port_chosen_by_os port] is [bind_to All_addresses On_port_chosen_by_os]. *)
   val of_port_chosen_by_os :           inet
 
-  (** Listen on a unix domain socket using the specified path *)
+  (** Listen on a unix domain socket using the specified path. *)
   val of_file              : string -> unix
 end
 
@@ -149,7 +150,7 @@ module Server : sig
   val listening_on_address : ('address, _) t -> 'address
 
   (** [close t] starts closing the listening socket, and returns a deferred that becomes
-      determined after [Fd.close_finished fd] on the socket's fd.  It is guaranteed that
+      determined after [Fd.close_finished fd] on the socket's [fd].  It is guaranteed that
       [t]'s client handler will never be called after [close t].  It is ok to call [close]
       multiple times on the same [t]; calls subsequent to the initial call will have no
       effect, but will return the same deferred as the original call.
@@ -158,15 +159,15 @@ module Server : sig
       connections.  [close] does not (and cannot) stop the handlers handling the
       connections, but they will of course be unable to write to or read from the socket.
       The result of [close] becomes determined when all the socket file descriptors are
-      closed and the socket's fd is closed. *)
+      closed and the socket's [fd] is closed. *)
   val close
     :  ?close_existing_connections:bool  (** default is [false] *)
     -> (_, _) t
     -> unit Deferred.t
 
-  (** [close_finished] becomes determined after [Fd.close_finished fd] on the socket's fd,
-      i.e. the same deferred that [close] returns.  [close_finished] differs from [close]
-      in that it does not have the side effect of initiating a close. *)
+  (** [close_finished] becomes determined after [Fd.close_finished fd] on the socket's
+      [fd], i.e., the same deferred that [close] returns.  [close_finished] differs from
+      [close] in that it does not have the side effect of initiating a close. *)
   val close_finished : (_, _) t -> unit Deferred.t
 
   (** [is_closed t] returns [true] iff [close t] has been called. *)
@@ -189,7 +190,7 @@ module Server : sig
       load.  Increasing [max_accepts_per_batch] will ameliorate this effect, increasing
       connection accept rates and overall throughput at the cost of increased contention
       for resources amongst connections.  Servers that are under light load or ones that
-      only service small number of connections at a times should see little to no
+      only service a small number of connections at a time should see little to no
       difference in behavior for different values of [max_accepts_per_branch].
 
       Supplying [socket] causes the server to use [socket] rather than create a new

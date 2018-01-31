@@ -1,3 +1,15 @@
+## git version
+
+- Removed the following modules from `Async_extra`:
+  + `Cpu_usage`
+  + `Dynamic_port_writer`
+  + `File_tail`
+  + `Persistent_singleton`
+  + `Sequencer_table` (available at: http://github.com/janestreet/sequencer_table )
+  + `Tcp_file`
+  + `Unpack_sequence`
+  + `Versioned_typed_tcp`
+
 ## 113.43.00
 
 - Add the ability to specify the local source port to Async_extra.Tcp.

@@ -1,10 +1,10 @@
-(** An Async extension of Core_kernel.Bus.  Functions that share the same name and types
-    as those in Core_kernel.Bus are direct calls to the same. *)
+(** An Async extension of {{!Core_kernel.Bus}[Core_kernel.Bus]}.  Functions that share the
+    same name and types as those in [Core_kernel.Bus] are direct calls to same. *)
 
 open! Core
 open! Import
 
-include module type of struct include Core_kernel.Bus end
+include module type of struct include Core_kernel.Bus end (** @open *)
 
 (** [pipe1_exn t] returns a pipe of updates from [t].  If the pipe is closed you
     will be unsubscribed.  [pipe1_exn] raises in the same circumstances as
@@ -23,7 +23,7 @@ end
 (** [first_exn here t arity ~f] returns a deferred that becomes determined with value [r]
     when the first event is published to [t] where [f] returns [Some r].  [first_exn] then
     unsubscribes from [t], ensuring that [f] is never called again after it returns
-    [Some].  [first_exn] raises if it can't subscribe to the bus, i.e. if [subscribe_exn]
+    [Some].  [first_exn] raises if it can't subscribe to the bus, i.e., if [subscribe_exn]
     raises.  If [f] raises, then [first_exn] raises to the monitor in effect when
     [first_exn] was called.  [first_exn] takes time proportional to the number of bus
     subscribers.

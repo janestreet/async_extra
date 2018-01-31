@@ -1,11 +1,11 @@
-(** [Async.Command] is [Core.Command] with additional Async functions. *)
+(** [Async.Command] is {{!Core.Command}[Core.Command]} with additional Async functions. *)
 
 open! Core
 open! Import
 
 include module type of Core.Command
   with type t      = Core.Command.t
-  with module Spec = Core.Command.Spec
+  with module Spec = Core.Command.Spec (** @open *)
 
 type 'a with_options
   =  ?extract_exn : bool
@@ -28,11 +28,11 @@ val async_spec : ('a, unit Deferred.t) basic_spec_command with_options
 val async_or_error      :      unit Deferred.Or_error.t  basic_command      with_options
 val async_spec_or_error : ('a, unit Deferred.Or_error.t) basic_spec_command with_options
 
-(** staged functions allow the main function to be separated into two stages.  The first
-    part is guaranteed to run before the async scheduler is started, and the second part
-    will run after the async scheduler is started.  This is useful if the main function
-    runs code that relies on the fact that threads have not been created yet
-    (e.g. [Daemon.daemonize]).
+(** Staged functions allow the main function to be separated into two stages.  The first
+    part is guaranteed to run before the Async scheduler is started, and the second part
+    will run after the scheduler is started.  This is useful if the main function runs
+    code that relies on the fact that threads have not been created yet
+    (e.g., [Daemon.daemonize]).
 
     As an example:
     {[

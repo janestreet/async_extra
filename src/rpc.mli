@@ -1,6 +1,8 @@
 (** This module just re-exports lots of modules from [Async_rpc_kernel] and adds some
-    Unix-specific wrappers in [Connection] (for using [Reader], [Writer], and [Tcp]).
-    For documentation, see [Rpc] and [Connection_intf] in the [Async_rpc_kernel] library.
+    Unix-specific wrappers in [Connection] (for using [Reader], [Writer], and [Tcp]).  For
+    documentation, see {{!Async_rpc_kernel.Rpc}[Rpc]} and
+    {{!Async_rpc_kernel__.Connection_intf}[Connection_intf]} in the
+    {{!Async_rpc_kernel}[Async_rpc_kernel]} library.
 *)
 
 open! Core
@@ -45,7 +47,7 @@ module Connection : sig
       identify RPC communication.  The bool returned by [contains_magic_prefix] says
       whether this magic number was observed.
 
-      This operation is a "peek" that does not advanced any pointers associated with the
+      This operation is a "peek" that does not advance any pointers associated with the
       reader.  In particular, it makes sense to call [create] on a reader after calling
       this function.
   *)
@@ -77,7 +79,7 @@ module Connection : sig
   (** A function creating a transport from a file descriptor. It is responsible for
       setting the low-level parameters of the underlying transport.
 
-      For instance to setup a transport using [Async.{Reader,Writer}] and set a buffer
+      For instance to set up a transport using [Async.{Reader,Writer}] and set a buffer
       age limit on the writer, you can pass this to the functions of this module:
 
       {[
@@ -93,7 +95,7 @@ module Connection : sig
       implementation on [port].  The optional auth function will be called on all incoming
       connections with the address info of the client and will disconnect the client
       immediately if it returns false.  This auth mechanism is generic and does nothing
-      other than disconnect the client - any logging or record of the reasons is the
+      other than disconnect the client -- any logging or record of the reasons is the
       responsibility of the auth function itself.
   *)
   val serve
@@ -124,7 +126,7 @@ module Connection : sig
 
   (** [client where_to_connect ()] connects to the server at [where_to_connect] and
       returns the connection or an Error if a connection could not be made. It is the
-      responsibility of the caller to eventually call close.
+      responsibility of the caller to eventually call [close].
 
       In [client] and [with_client], the [handshake_timeout] encompasses both the TCP
       connection timeout and the timeout for this module's own handshake.

@@ -1,8 +1,8 @@
 open! Core
 open! Import
 
-(** Wrapper around Core.User_and_group with a deferred [for_this_process] /
-    [for_this_process_exn]. *)
+(** Wrapper around {{!Core.User_and_group}[Core.User_and_group]} with a deferred
+    [for_this_process] / [for_this_process_exn]. *)
 
 type t = Core.User_and_group.t [@@deriving sexp, bin_io]
 include Identifiable with type t := t

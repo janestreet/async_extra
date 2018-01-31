@@ -20,6 +20,7 @@ end
 module type T = Async_kernel_private.Persistent_connection.T
 
 module type Persistent_connection = sig
+  (** A persistent connection is one that is automatically reestablished whenever lost. *)
 
   module type S = S
   module type T = T

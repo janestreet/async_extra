@@ -1,7 +1,9 @@
+(** Extends {{!Core.Schedule_v4_deprecated}[Core.Schedule_v4_deprecated]}. *)
+
 open! Core
 open! Import
 
-include module type of struct include Core.Schedule_v4_deprecated end
+include module type of struct include Core.Schedule_v4_deprecated end (** @open *)
 
 (** in [Transitions_and_tag_changes] equality for the tag type must be given *)
 type ('tag, 'output) pipe_emit =

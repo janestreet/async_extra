@@ -1,1 +1,1 @@
-include Persistent_connection_intf.Persistent_connection
+include Persistent_connection_intf.Persistent_connection (** @inline *)

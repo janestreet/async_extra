@@ -45,19 +45,3 @@ async_extra_rpc_writev2_byte(value *argv, int argn __unused)
                                  argv[5],
                                  argv[6]);
 }
-
-CAMLprim value
-async_extra_rpc_realloc(value v_buf, value v_size)
-{
-  struct caml_ba_array *buf = Caml_ba_array_val(v_buf);
-  void *result;
-  size_t size = Unsigned_long_val(v_size);
-  result = realloc(buf->data, size);
-  buf->data = result;
-  if (result == NULL) {
-    buf->dim[0] = 0;
-    uerror("realloc", Nothing);
-  };
-  buf->dim[0] = size;
-  return Val_unit;
-}

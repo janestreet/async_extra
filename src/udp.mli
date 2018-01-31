@@ -3,16 +3,15 @@
 
     Defaults are chosen for typical UDP applications.  Buffering is via [Iobuf]
     conventions, where a typical packet-handling loop iteration is
-    read-[flip_lo]-process-[reset].
+    read -> [flip_lo] -> process -> [reset].
 
     While these functions are oriented toward UDP, they work with any files that satisfy
     [Fd.supports_nonblock].
 
     For zero-copy [Bigstring.t] transfers, we must ensure no buffering between the receive
-    loop and caller.  So, an interface like [Tcp.connect], with something like
-    [(Bigstring.t * Socket.Address.Inet.t) Pipe.Reader.t], won't work.
-
-    Instead, we use synchronous callbacks. *)
+    loop and caller.  So an interface like [Tcp.connect], with something like
+    [(Bigstring.t * Socket.Address.Inet.t) Pipe.Reader.t], won't work. Instead, we use
+    synchronous callbacks. *)
 
 open! Core
 open! Import
