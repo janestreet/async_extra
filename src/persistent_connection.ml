@@ -8,7 +8,7 @@ module Persistent_connection_intf = Persistent_connection_intf_in_this_directory
 include Persistent_connection_intf
 
 module Make (Conn : T) = struct
-  include Async_kernel.Persistent_connection.Make (Conn)
+  include Async_kernel_persistent_connection.Make (Conn)
 
   let create ~server_name ?log ?(on_event = fun _ -> Deferred.unit) ?retry_delay
         ~connect get_address =

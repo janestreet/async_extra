@@ -2,7 +2,7 @@ open Core
 open Import
 
 module type S = sig
-  include Async_kernel.Persistent_connection.S
+  include Async_kernel_persistent_connection.S
 
   val create
     :  server_name  : string
@@ -17,7 +17,7 @@ module type S = sig
     -> t
 end
 
-module type T = Async_kernel.Persistent_connection.T
+module type T = Async_kernel_persistent_connection.T
 
 module type Persistent_connection = sig
   (** A persistent connection is one that is automatically reestablished whenever lost. *)
