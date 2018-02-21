@@ -6,9 +6,10 @@ open! Import
 
 include module type of struct include Core_kernel.Bus end (** @open *)
 
-(** [pipe1_exn t] returns a pipe of updates from [t].  If the pipe is closed you
-    will be unsubscribed.  [pipe1_exn] raises in the same circumstances as
-    [subscribe_exn]. *)
+(** [pipe1_exn t] returns a pipe of updates from [t] by subscribing to [t].  Closing the
+    pipe unsubscribes from [t].  Closing [t] does not close the pipe; this follows the
+    same model as [Core_kernel.Bus], which does not notify subscribers when the pipe is
+    closed.  [pipe1_exn] raises in the same circumstances as [subscribe_exn]. *)
 val pipe1_exn : ('a -> unit) Read_only.t -> Source_code_position.t -> 'a Pipe.Reader.t
 
 module First_arity : sig
