@@ -7,8 +7,9 @@ include Bus
 let pipe1_exn (t : ('a -> unit) Read_only.t) here =
   let r, w = Pipe.create () in
   let subscription =
-    subscribe_exn t here ~f:(function v ->
-      Pipe.write_without_pushback_if_open w v)
+    subscribe_exn t here
+      ~f:(function v -> Pipe.write_without_pushback_if_open w v)
+      ~on_close:(fun () -> Pipe.close w)
   in
   upon (Pipe.closed w) (fun () -> unsubscribe t subscription);
   r
