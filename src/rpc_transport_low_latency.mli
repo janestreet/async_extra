@@ -10,20 +10,20 @@ module Config : sig
       receive/send.
 
       - [max_buffer_size] is the maximum size the internal reader/writer's buffer will
-      ever grow.
+        ever grow.
 
       - [write_timeout] is the maximum time allowed for a write operation to complete
-      before an error is reported.
+        before an error is reported.
 
       - When the writer's internal buffer is filled at [buffering_threshold_in_bytes] or
-      more, the writer will try to flush its buffer immediately. This is to get good
-      latency and avoid buffering too much when sending big batches of messages.
+        more, the writer will try to flush its buffer immediately. This is to get good
+        latency and avoid buffering too much when sending big batches of messages.
 
       - If the application hasn't sent any messages in the current Async job and nothing
-      is buffered, the first [start_batching_after_num_messages] messages will be sent
-      immediately. After that the writer will start buffering. This is to give good
-      latency when the application sends a few messages occasionally but still get good
-      throughput when sending a batch of messages.
+        is buffered, the first [start_batching_after_num_messages] messages will be sent
+        immediately. After that the writer will start buffering. This is to give good
+        latency when the application sends a few messages occasionally but still get good
+        throughput when sending a batch of messages.
 
       Note that [start_batching_after_num_messages] and [buffering_threshold_in_bytes]
       have somewhat opposite meanings: the former determines when to start batching and
