@@ -5,6 +5,7 @@
   + `Dynamic_port_writer`
   + `File_tail`
   + `Persistent_singleton`
+  + `Persistent_connection_intf`
   + `Sequencer_table` (available at: http://github.com/janestreet/sequencer_table )
   + `Tcp_file`
   + `Unpack_sequence`

@@ -228,7 +228,7 @@ let%test_module _ =
         every_tag_change_without_pushback run_schedule ~start:after ~tag_equal:Float.equal
           (fun ~tags ~enter ~leave ->
              don't_wait_for
-               (Pipe.write enter_writer (List.sort tags ~cmp:Float.compare, enter)
+               (Pipe.write enter_writer (List.sort tags ~compare:Float.compare, enter)
                 >>= fun () ->
                 leave
                 >>= fun leave_time ->
@@ -281,7 +281,7 @@ let%test_module _ =
           ~start_in_range_is_enter:true
           (fun ~tags ~enter ~leave ->
              don't_wait_for
-               (Pipe.write enter_writer (List.sort tags ~cmp:Float.compare, enter)
+               (Pipe.write enter_writer (List.sort tags ~compare:Float.compare, enter)
                 >>= fun () ->
                 leave
                 >>= fun leave_time ->
@@ -316,7 +316,7 @@ let%test_module _ =
           ~start_in_range_is_enter:false
           (fun ~tags ~enter ~leave ->
              don't_wait_for
-               (Pipe.write enter_writer (List.sort tags ~cmp:Float.compare, enter)
+               (Pipe.write enter_writer (List.sort tags ~compare:Float.compare, enter)
                 >>= fun () ->
                 leave
                 >>= fun leave_time ->
