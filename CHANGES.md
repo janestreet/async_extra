@@ -1,4 +1,4 @@
-## git version
+## v0.11
 
 - Removed the following modules from `Async_extra`:
   + `Cpu_usage`
