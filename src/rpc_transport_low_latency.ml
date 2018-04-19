@@ -661,7 +661,12 @@ module Writer_internal = struct
             slow_write_bin_prot_and_bigstring t writer msg ~buf ~pos ~len
           else begin
             match writer.write t.buf ~pos:(t.pos + Header.length) msg with
-            | exception Bin_prot.Common.Buffer_short ->
+            | exception _ ->
+              (* It's likely that the exception is due to a buffer overflow, so resize the
+                 internal buffer and try again. Technically we could match on
+                 [Bin_prot.Common.Buffer_short] only, however we can't easily enforce that
+                 custom bin_write_xxx functions raise this particular exception and not
+                 [Invalid_argument] or [Failure] for instance. *)
               slow_write_bin_prot_and_bigstring t writer msg ~buf ~pos ~len
             | stop ->
               let payload_len = stop - (t.pos + Header.length) + len in
