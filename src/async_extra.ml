@@ -9,4 +9,3 @@ module Tcp                    = Tcp
 module Udp                    = Udp
 module User_and_group         = User_and_group
 module Versioned_rpc          = Async_rpc_kernel.Versioned_rpc
-module Weak_hashtbl           = Weak_hashtbl

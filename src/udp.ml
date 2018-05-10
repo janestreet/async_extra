@@ -80,19 +80,6 @@ module Ready_iter = struct
       function
       | Poll_again   -> 0
       | User_stopped -> 1
-
-    let%test_unit _ =
-      List.iter all ~f:(fun t ->
-        let i = to_int t in
-        [%test_result: t] ~expect:t (of_int_exn i);
-        [%test_result: int] ~expect:i (to_int     t);
-        List.iter all ~f:(fun u ->
-          let j = to_int u in
-          if Bool.(<>) (compare u t = 0) (j = i) then
-            failwiths "overlapping representations" (t, i, u, j)
-              [%sexp_of: t * int * t * int]
-        )
-      )
   end
   include Unix.Syscall_result.Make (Ok) ()
   let poll_again   = create_ok Poll_again
@@ -323,3 +310,7 @@ let recvmmsg_loop =
            >>| Loop_result.of_fd_interruptible_every_ready_to_result_exn None
                  "recvmmsg_loop" fd [%sexp_of: Fd.t])
 ;;
+
+module Private = struct
+  module Ready_iter = Ready_iter
+end

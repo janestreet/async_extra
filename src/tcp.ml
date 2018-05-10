@@ -265,20 +265,21 @@ module Server = struct
   end
 
   type ('address, 'listening_on)  t =
-    { socket                            : ([ `Passive ], 'address) Socket.t
-    ; listening_on                      : 'listening_on
-    ; on_handler_error                  : [ `Raise
-                                          | `Ignore
-                                          | `Call of ('address -> exn -> unit)
-                                          ]
-    ; handle_client                     : ('address
-                                           -> ([ `Active ], 'address) Socket.t
-                                           -> (unit, exn) Result.t Deferred.t)
-    ; max_connections                   : int
-    ; max_accepts_per_batch             : int
-    ; connections                       : 'address Connection.t Bag.t
-    ; mutable accept_is_pending         : bool
-    ; mutable drop_incoming_connections : bool
+    { socket                                 : ([ `Passive ], 'address) Socket.t
+    ; listening_on                           : 'listening_on
+    ; on_handler_error                       : [ `Raise
+                                               | `Ignore
+                                               | `Call of ('address -> exn -> unit)
+                                               ]
+    ; handle_client                          : ('address
+                                                -> ([ `Active ], 'address) Socket.t
+                                                -> (unit, exn) Result.t Deferred.t)
+    ; max_connections                        : int
+    ; max_accepts_per_batch                  : int
+    ; connections                            : 'address Connection.t Bag.t
+    ; mutable accept_is_pending              : bool
+    ; mutable drop_incoming_connections      : bool
+    ; close_finished_and_handlers_determined : unit Ivar.t
     }
   [@@deriving fields, sexp_of]
 
@@ -323,6 +324,7 @@ module Server = struct
           assert (num_connections <= t.max_connections)))
         ~accept_is_pending:ignore
         ~drop_incoming_connections:ignore
+        ~close_finished_and_handlers_determined:ignore
     with exn ->
       failwiths "invariant failed" (exn, t) [%sexp_of: exn * (_, _) t]
   ;;
@@ -331,6 +333,10 @@ module Server = struct
 
   let is_closed      t = Fd.is_closed      (fd t)
   let close_finished t = Fd.close_finished (fd t)
+
+  let close_finished_and_handlers_determined t =
+    Ivar.read t.close_finished_and_handlers_determined
+  ;;
 
   let close ?(close_existing_connections = false) t =
     let fd_closed = Fd.close (fd t) in
@@ -391,6 +397,8 @@ module Server = struct
         raise e
     end;
     Bag.remove t.connections connections_elt;
+    if Deferred.is_determined (close_finished t) && num_connections t = 0
+    then Ivar.fill_if_empty t.close_finished_and_handlers_determined ();
     maybe_accept t;
   ;;
 
@@ -426,8 +434,15 @@ module Server = struct
       ; connections               = Bag.create ()
       ; accept_is_pending         = false
       ; drop_incoming_connections = false
+      ; close_finished_and_handlers_determined = Ivar.create ()
       }
     in
+    begin
+      close_finished t
+      >>> fun () ->
+      if num_connections t = 0
+      then Ivar.fill_if_empty t.close_finished_and_handlers_determined ()
+    end;
     maybe_accept t;
     t
   ;;
@@ -481,152 +496,12 @@ module Server = struct
          res)
   ;;
 
-  let%test_unit "multiclose" =
-    Thread_safe.block_on_async_exn (fun () ->
-      let units n = List.range 0 n |> List.map ~f:ignore in
-      let multi how f = Deferred.List.iter ~how ~f (units 10) in
-      let close_connection r w () = Reader.close r >>= fun () -> Writer.close w in
-      let multi_close_connection r w () = multi `Parallel (close_connection r w) in
-      create Where_to_listen.of_port_chosen_by_os
-        ~on_handler_error:`Raise
-        (fun _address r w -> multi_close_connection r w ())
-      >>= fun t ->
-      multi `Parallel (fun () ->
-        with_connection
-          (Where_to_connect.of_host_and_port {host = "localhost"; port = t.listening_on})
-          (fun _socket r w -> multi_close_connection r w ()))
-      >>= fun () ->
-      multi `Sequential (fun () ->
-        multi `Parallel (fun () -> close t)
-        >>= fun () ->
-        multi `Parallel (fun () -> Fd.close (Socket.fd t.socket))))
-  ;;
+  module Private = struct
+    let fd = fd
+  end
+end
 
-  let%test_unit "establish at least max_connections + backlog" =
-    let test_connect address expect =
-      let test = [%test_result:[ `Accepted | `Rejected ]] ~expect in
-      try_with ~extract_exn:true (fun () ->
-        connect (Where_to_connect.of_inet_address address))
-      >>= function
-      | Error (Unix.Unix_error (ECONNREFUSED, _, _)) -> return (test `Rejected)
-      | Error e -> failwiths "connect" e [%sexp_of: exn]
-      | Ok (server, r, w) ->
-        Monitor.protect ~finally:(fun () -> close_connection_via_reader_and_writer r w)
-          (fun () ->
-             match
-               Unix.Syscall_result.Unit.to_result
-                 (Fd.with_file_descr_exn (Socket.fd server)
-                    (Iobuf.read_assume_fd_is_nonblocking (Iobuf.create ~len:1)))
-             with
-             | Error (EAGAIN | EWOULDBLOCK) -> return (test `Accepted)
-             | r -> failwiths "read" r [%sexp_of: (unit, Unix.Error.t) Result.t])
-    in
-    (* We use a small [backlog] to keep the number of simultaneous threads small, to
-       avoid spurious hydra rejects due to Async outputting on stderr complaints about
-       the thread pool being stuck. *)
-    List.iter [ 10; 3; 2; 1; 0 ] ~f:(fun backlog ->
-      Thread_safe.block_on_async_exn
-        (fun () ->
-           try_with
-             (fun () ->
-                let max_connections = 1 in
-                create ~max_connections ~backlog Where_to_listen.of_port_chosen_by_os
-                  ~on_handler_error:`Raise
-                  (* [never ()] keeps all the connections open. *)
-                  (fun _ _ _ -> never ())
-                >>= fun t ->
-                let address = Socket.getsockname (listening_socket t) in
-                (* [address] is a 0.0.0.0 address but it still seems to work with
-                   [connect], i.e., it does connect to the server.  Ordinarily, one would
-                   replace the address with 127.0.0.1, but that does not seem to be
-                   necessary. *)
-                Monitor.protect ~finally:(fun () -> close t)
-                  (fun () ->
-                     Deferred.List.iter ~how:`Parallel
-                       (List.range 0 (max_connections + backlog))
-                       ~f:(fun i ->
-                         (* These [`Accepted] cases are not expected to fail unless
-                            [backlog] is capped.  In Linux, for example, this can happen
-                            if [tcp_max_syn_backlog] is reduced below 128 (from the
-                            default 2048, typically).
-
-                            Other vagaries of [backlog] lead to more connections being
-                            accepted rather than fewer. *)
-                         try_with (fun () -> test_connect address `Accepted)
-                         >>| function
-                         | Ok () -> ()
-                         | Error e -> failwiths "connection" (i, e)
-                                        [%sexp_of: int * exn])
-                     >>= fun () ->
-                     (* As now documented ad nauseum, we can't be sure excess connections
-                        will be actively rejected, so don't check. *)
-                     if false
-                     then test_connect address `Rejected
-                     else Deferred.unit))
-           >>| function
-           | Ok () -> ()
-           | Error e -> failwiths "backlog" (backlog, e) [%sexp_of: int * exn]))
-  ;;
-
-  (* This tests that setting SO_LINGER to 0 on a server's connection to a client and then
-     closing causes the client to receive an RST rather than an orderly shutdown. *)
-  let%test_module "SO_LINGER" =
-    (module struct
-      let test ~linger ~expect =
-        Thread_safe.block_on_async_exn
-          (fun () ->
-             let backlog = 10 in
-             create ~backlog ~on_handler_error:`Raise
-               Where_to_listen.of_port_chosen_by_os
-               (fun _ _ to_client ->
-                  let to_client = Writer.fd to_client in
-                  if not linger then
-                    Fd.with_file_descr_exn to_client
-                      (fun file_descr ->
-                         Core.Unix.setsockopt_optint file_descr SO_LINGER (Some 0));
-                  Fd.close to_client)
-             >>= fun t ->
-             Deferred.all (List.init backlog ~f:(fun _ ->
-               connect (Where_to_connect.of_inet_address
-                          (Socket.getsockname (listening_socket t)))
-               >>= fun (connection_to_server, _, _) ->
-               let connection_to_server = Socket.fd connection_to_server in
-               after (sec 0.1)
-               >>= fun () ->
-               let result =
-                 match
-                   Fd.with_file_descr connection_to_server
-                     (fun file_descr ->
-                        Unix.Error.of_system_int
-                          ~errno:(Core.Unix.getsockopt_int file_descr SO_ERROR))
-                 with
-                 | `Ok e when e = expect -> Ok ()
-                 | wrong ->
-                   Error (wrong |> [%sexp_of: [ `Already_closed
-                                              | `Error of exn
-                                              | `Ok of Unix.Error.t
-                                              ]])
-               in
-               Fd.close connection_to_server
-               >>= fun () ->
-               return result))
-             >>= fun results ->
-             close t
-             >>| fun () ->
-             if not (List.for_all results ~f:is_ok)
-             then failwiths "results" (results, t)
-                    [%sexp_of: (unit, Sexp.t) Result.t list * inet])
-      ;;
-
-      let%test_unit "setting to zero and closing connection sends RST" =
-        (* This test fails rarely but nondeterministically.  Rather than tweaking the
-           timing back and forth, since there's an inherent race, let's just disable the
-           test but leave it in place no run manually whenever we want. *)
-        if false then test ~linger:false ~expect:EPIPE (* apparently not ECONNRESET *)
-      ;;
-
-      let%test_unit "control: no RST without setting to zero" =
-        test ~linger:true ~expect:(EUNKNOWNERR 0)
-      ;;
-    end)
+module Private = struct
+  let close_connection_via_reader_and_writer =
+    close_connection_via_reader_and_writer
 end

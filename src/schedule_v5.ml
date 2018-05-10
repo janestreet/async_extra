@@ -342,7 +342,6 @@ let every_tag_change
 
 (* Now we re-introduce wall-clock functions and write wrappers so we can export functions
    that default to using wall-clock time. *)
-open Core
 open Import
 
 let to_pipe t ~start_time ~emit ?(time_source = Time_source.wall_clock ()) () =
@@ -449,57 +448,7 @@ let every_tag_change
     ~tag_equal
     on_tag_change
 
-let%test_module "test run loop semenatics" =
-  (module struct
-    let async_unit_test = Thread_safe.block_on_async_exn
-
-    let test_filter_events = function
-      | `No_change_until_at_least (_, time) -> time, None
-      | `Enter (time, _)
-      | `Leave time as event -> time, Some event
-    ;;
-
-
-    let%test_unit "resource cleanup on end of sequence" =
-      let test_schedule = In_zone (Time.Zone.utc, Mins [5]) in
-      let test_start_time  = Time.of_string "2015-01-01 01:00:00" in
-      let time_source = Time_source.wall_clock () in
-      async_unit_test (fun () ->
-        let seq =
-          match to_endless_sequence test_schedule ~start_time:test_start_time ~emit:Transitions with
-          | `Started_in_range (tags, seq) -> `Started_in_range (tags, Sequence.take seq 1)
-          | `Started_out_of_range seq -> `Started_out_of_range (Sequence.take seq 1)
-        in
-        let res, `For_testing (current_pending_event, w) =
-          run_loop_for_testing_only time_source test_filter_events seq
-        in
-        let r = get_reader res in
-        Pipe.fold r ~init:() ~f:(fun () _ -> return ())
-        >>| fun () ->
-        assert (Pipe.is_closed r);
-        assert (Pipe.is_closed w);
-        assert (!current_pending_event = None))
-    ;;
-
-    let%test_unit "resource cleanup on pipe close" =
-      let test_start_time = Time.add (Time.now ()) (Time.Span.of_hr 24.) in
-      (* The following is too far in the future in 32bit *)
-      (* let test_start_time = Time.of_string "2030-01-01 01:01:00" in *)
-      let test_schedule = In_zone (Time.Zone.utc, Never) in
-      let time_source = Time_source.wall_clock () in
-      async_unit_test (fun () ->
-        let res, `For_testing (current_pending_event, w) =
-          run_loop_for_testing_only time_source test_filter_events
-            (to_endless_sequence test_schedule
-               ~start_time:test_start_time  ~emit:Transitions)
-        in
-        let r = get_reader res in
-        Pipe.close_read r;
-        Time_source.Event.fired (Option.value_exn !current_pending_event)
-        >>= function
-        | Happened () -> assert false
-        | Aborted  () ->
-          Pipe.closed w)
-    ;;
-  end)
-
+module Private = struct
+  let get_reader = get_reader
+  let run_loop_for_testing_only = run_loop_for_testing_only
+end

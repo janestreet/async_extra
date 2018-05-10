@@ -173,6 +173,11 @@ module Server : sig
   (** [is_closed t] returns [true] iff [close t] has been called. *)
   val is_closed : (_, _) t -> bool
 
+  (** [close_finished_and_handlers_determined t] becomes determined after
+      [close_finished t] is determined and the return of all active handlers
+      is determined. *)
+  val close_finished_and_handlers_determined : (_, _) t -> unit Deferred.t
+
   (** Options for server creation:
 
       [backlog] is the number of clients that can have a connection pending, as with
@@ -203,7 +208,7 @@ module Server : sig
   type ('address, 'listening_on, 'callback) create_options
     =  ?max_connections       : int  (** default is [10_000] *)
     -> ?max_accepts_per_batch : int  (** default is [1] *)
-    -> ?backlog               : int  (** default is [10] *)
+    -> ?backlog               : int  (** default is [64] *)
     -> ?socket                : ([ `Unconnected ], 'address) Socket.t
     -> on_handler_error       : [ `Raise
                                 | `Ignore
@@ -264,4 +269,17 @@ module Server : sig
       [drop_incoming_connections] is set to false.
   *)
   val set_drop_incoming_connections : (_, _) t -> bool -> unit
+
+  (**/**)
+
+  module Private : sig
+    val fd : _ t -> Fd.t
+  end
+
+end
+
+(**/**)
+
+module Private : sig
+  val close_connection_via_reader_and_writer : Reader.t -> Writer.t -> unit Deferred.t
 end

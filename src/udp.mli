@@ -185,3 +185,16 @@ val recvmmsg_loop
      -> Loop_result.t Deferred.t)
       Or_error.t
 val default_recvmmsg_loop_max_count : int
+
+(**/**)
+
+module Private : sig
+  module Ready_iter : sig
+    module Ok : sig
+      type t [@@deriving enumerate, sexp_of]
+
+      val of_int_exn : int -> t
+      val to_int : t -> int
+    end
+  end
+end

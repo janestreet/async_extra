@@ -128,3 +128,22 @@ val every_tag_change
   -> (tags:'tag list -> unit Deferred.t every_enter_callback)
   -> unit
 
+(**/**)
+
+module Private : sig
+
+  val get_reader
+    :  [ `Started_in_range of _ * 'b
+       | `Started_out_of_range of 'b ]
+    -> 'b
+
+  val run_loop_for_testing_only
+    :  Time_source.t
+    -> ('a -> Time.t * 'b option)
+    -> [ `Started_in_range of 'c * 'a Sequence.t
+       | `Started_out_of_range of 'a Sequence.t ]
+    -> [ `Started_in_range of 'c * 'b Pipe.Reader.t
+       | `Started_out_of_range of 'b Pipe.Reader.t ]
+       * [ `For_testing of
+             (unit, unit) Time_source.Event.t option ref * 'b Pipe.Writer.t ]
+end
