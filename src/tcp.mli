@@ -272,6 +272,9 @@ module Server : sig
 
   (**/**)
 
+  (*_ See the Jane Street Style Guide for an explanation of [Private] submodules:
+
+    https://opensource.janestreet.com/standards/#private-submodules *)
   module Private : sig
     val fd : _ t -> Fd.t
   end
@@ -280,6 +283,9 @@ end
 
 (**/**)
 
+(*_ See the Jane Street Style Guide for an explanation of [Private] submodules:
+
+  https://opensource.janestreet.com/standards/#private-submodules *)
 module Private : sig
   val close_connection_via_reader_and_writer : Reader.t -> Writer.t -> unit Deferred.t
 end

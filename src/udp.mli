@@ -188,6 +188,9 @@ val default_recvmmsg_loop_max_count : int
 
 (**/**)
 
+(*_ See the Jane Street Style Guide for an explanation of [Private] submodules:
+
+  https://opensource.janestreet.com/standards/#private-submodules *)
 module Private : sig
   module Ready_iter : sig
     module Ok : sig
