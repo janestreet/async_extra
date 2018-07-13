@@ -535,4 +535,4 @@ let%test_module _ =
       end
     end
   end
-           : module type of Async_schedule))
+           : module type of Async_schedule [@remove_aliases]))
