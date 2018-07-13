@@ -61,7 +61,7 @@ module Writer : sig
 end
 
 include module type of struct include Rpc_kernel.Transport end
-  with module Reader := Reader
-  with module Writer := Writer
+  with module Reader := Rpc_kernel.Transport.Reader
+  with module Writer := Rpc_kernel.Transport.Writer
 
 val create : ?config:Config.t -> max_message_size:int -> Fd.t -> t
