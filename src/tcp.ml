@@ -383,6 +383,9 @@ module Server = struct
     >>> fun res ->
     Connection.close connection
     >>> fun () ->
+    Bag.remove t.connections connections_elt;
+    if Deferred.is_determined (close_finished t) && num_connections t = 0
+    then Ivar.fill_if_empty t.close_finished_and_handlers_determined ();
     begin match res with
     | Ok ()   -> ()
     | Error e ->
@@ -396,9 +399,6 @@ module Server = struct
         don't_wait_for (close t);
         raise e
     end;
-    Bag.remove t.connections connections_elt;
-    if Deferred.is_determined (close_finished t) && num_connections t = 0
-    then Ivar.fill_if_empty t.close_finished_and_handlers_determined ();
     maybe_accept t;
   ;;
 
