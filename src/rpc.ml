@@ -141,9 +141,10 @@ module Connection = struct
         ?heartbeat_config
         ?(auth = (fun _ -> true))
         ?(on_handshake_error = `Ignore)
+        ?(on_handler_error = `Ignore)
         () =
     Tcp.Server.create_sock ?max_connections ?backlog where_to_listen
-      ~on_handler_error:`Ignore
+      ~on_handler_error
       (fun inet socket ->
          if not (auth inet) then
            Deferred.unit

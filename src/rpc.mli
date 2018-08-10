@@ -111,6 +111,11 @@ module Connection : sig
     -> ?auth                    : ('address -> bool)
     (** default is [`Ignore] *)
     -> ?on_handshake_error : on_handshake_error
+    (** default is [`Ignore] *)
+    -> ?on_handler_error        : [ `Raise
+                                  | `Ignore
+                                  | `Call of ('address -> exn -> unit)
+                                  ]
     -> unit
     -> ('address, 'listening_on) Tcp.Server.t Deferred.t
 
