@@ -1,6 +1,5 @@
 module Bus                    = Bus
 module Command                = Command
-module Lock_file              = Lock_file
 module Persistent_connection  = Persistent_connection
 module Rpc                    = Rpc
 module Tcp                    = Tcp
