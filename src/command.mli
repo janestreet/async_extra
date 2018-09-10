@@ -3,13 +3,7 @@
 open! Core
 open! Import
 
-module Arg_type = Core.Command.Arg_type
-module Spec = Core.Command.Spec
-
-include module type of Core.Command
-  with type t = Core.Command.t
-  with module Arg_type := Arg_type
-  with module Spec := Spec (** @open *)
+include module type of struct include Core.Command end (** @open *)
 
 type 'a with_options
   =  ?extract_exn : bool
