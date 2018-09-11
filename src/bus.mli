@@ -4,7 +4,10 @@
 open! Core
 open! Import
 
-include module type of struct include Core_kernel.Bus end (** @open *)
+(** @open *)
+include module type of struct
+  include Core_kernel.Bus
+end
 
 (** [pipe1_exn t] returns a pipe of updates from [t] by subscribing to [t].  Closing the
     pipe unsubscribes from [t].  Closing [t] closes the pipe.  [pipe1_exn] raises in the
@@ -13,9 +16,9 @@ val pipe1_exn : ('a -> unit) Read_only.t -> Source_code_position.t -> 'a Pipe.Re
 
 module First_arity : sig
   type (_, _, _) t =
-    | Arity1 : ('a ->                   unit, 'a ->                   'r option, 'r) t
-    | Arity2 : ('a -> 'b ->             unit, 'a -> 'b ->             'r option, 'r) t
-    | Arity3 : ('a -> 'b -> 'c ->       unit, 'a -> 'b -> 'c ->       'r option, 'r) t
+    | Arity1 : ('a -> unit, 'a -> 'r option, 'r) t
+    | Arity2 : ('a -> 'b -> unit, 'a -> 'b -> 'r option, 'r) t
+    | Arity3 : ('a -> 'b -> 'c -> unit, 'a -> 'b -> 'c -> 'r option, 'r) t
     | Arity4 : ('a -> 'b -> 'c -> 'd -> unit, 'a -> 'b -> 'c -> 'd -> 'r option, 'r) t
   [@@deriving sexp_of]
 end
@@ -32,7 +35,7 @@ end
     unsubscribe from the bus, and the deferred that was returned by [first_exn] will never
     become determined. *)
 val first_exn
-  :  ?stop : unit Deferred.t
+  :  ?stop:unit Deferred.t
   -> 'c Read_only.t
   -> Source_code_position.t
   -> ('c, 'f, 'r) First_arity.t

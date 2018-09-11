@@ -7,23 +7,22 @@
 
 open! Core
 open! Import
-
 module Transport = Rpc_transport
 module Low_latency_transport = Rpc_transport_low_latency
-
-module Any             = Rpc_kernel.Any
-module Description     = Rpc_kernel.Description
-module Implementation  = Rpc_kernel.Implementation
+module Any = Rpc_kernel.Any
+module Description = Rpc_kernel.Description
+module Implementation = Rpc_kernel.Implementation
 module Implementations = Rpc_kernel.Implementations
-module One_way         = Rpc_kernel.One_way
-module Pipe_rpc        = Rpc_kernel.Pipe_rpc
-module Rpc             = Rpc_kernel.Rpc
-module State_rpc       = Rpc_kernel.State_rpc
-
+module One_way = Rpc_kernel.One_way
+module Pipe_rpc = Rpc_kernel.Pipe_rpc
+module Rpc = Rpc_kernel.Rpc
+module State_rpc = Rpc_kernel.State_rpc
 module Pipe_close_reason = Rpc_kernel.Pipe_close_reason
 
 module Connection : sig
-  include module type of struct include Rpc_kernel.Connection end
+  include module type of struct
+  include Rpc_kernel.Connection
+end
 
   (** These functions are mostly the same as the ones with the same names in
       [Async_rpc_kernel.Rpc.Connection]; see [Connection_intf] in that library for
@@ -33,12 +32,12 @@ module Connection : sig
         [max_message_size] instead of a [Transport.t]
       - they use [Time] instead of [Time_ns] *)
   val create
-    :  ?implementations   : 's Implementations.t
-    -> connection_state   : (t -> 's)
-    -> ?max_message_size : int
-    -> ?handshake_timeout : Time.Span.t
-    -> ?heartbeat_config  : Heartbeat_config.t
-    -> ?description       : Info.t
+    :  ?implementations:'s Implementations.t
+    -> connection_state:(t -> 's)
+    -> ?max_message_size:int
+    -> ?handshake_timeout:Time.Span.t
+    -> ?heartbeat_config:Heartbeat_config.t
+    -> ?description:Info.t
     -> Reader.t
     -> Writer.t
     -> (t, Exn.t) Result.t Deferred.t
@@ -54,26 +53,26 @@ module Connection : sig
   val contains_magic_prefix : Reader.t -> bool Deferred.t
 
   val with_close
-    :  ?implementations : 's Implementations.t
-    -> ?max_message_size : int
-    -> ?handshake_timeout : Time.Span.t
-    -> ?heartbeat_config : Heartbeat_config.t
-    -> connection_state : (t -> 's)
+    :  ?implementations:'s Implementations.t
+    -> ?max_message_size:int
+    -> ?handshake_timeout:Time.Span.t
+    -> ?heartbeat_config:Heartbeat_config.t
+    -> connection_state:(t -> 's)
     -> Reader.t
     -> Writer.t
-    -> dispatch_queries : (t -> 'a Deferred.t)
-    -> on_handshake_error : [ `Raise | `Call of (Exn.t -> 'a Deferred.t) ]
+    -> dispatch_queries:(t -> 'a Deferred.t)
+    -> on_handshake_error:[`Raise | `Call of Exn.t -> 'a Deferred.t]
     -> 'a Deferred.t
 
   val server_with_close
-    :  ?max_message_size : int
-    -> ?handshake_timeout : Time.Span.t
-    -> ?heartbeat_config : Heartbeat_config.t
+    :  ?max_message_size:int
+    -> ?handshake_timeout:Time.Span.t
+    -> ?heartbeat_config:Heartbeat_config.t
     -> Reader.t
     -> Writer.t
-    -> implementations : 's Implementations.t
-    -> connection_state : (t -> 's)
-    -> on_handshake_error : [ `Raise | `Ignore | `Call of (Exn.t -> unit Deferred.t) ]
+    -> implementations:'s Implementations.t
+    -> connection_state:(t -> 's)
+    -> on_handshake_error:[`Raise | `Ignore | `Call of Exn.t -> unit Deferred.t]
     -> unit Deferred.t
 
   (** A function creating a transport from a file descriptor. It is responsible for
@@ -89,7 +88,11 @@ module Connection : sig
   *)
   type transport_maker = Fd.t -> max_message_size:int -> Transport.t
 
-  type on_handshake_error = [ `Raise | `Ignore | `Call of (Exn.t -> unit) ]
+
+  type on_handshake_error =
+    [ `Raise
+    | `Ignore
+    | `Call of Exn.t -> unit ]
 
   (** [serve implementations ~port ?on_handshake_error ()] starts a server with the given
       implementation on [port].  The optional auth function will be called on all incoming
@@ -99,33 +102,28 @@ module Connection : sig
       responsibility of the auth function itself.
   *)
   val serve
-    :  implementations : 's Implementations.t
-    -> initial_connection_state : ('address -> t -> 's)
-    -> where_to_listen          : ('address, 'listening_on) Tcp.Where_to_listen.t
-    -> ?max_connections         : int
-    -> ?backlog                 : int
-    -> ?max_message_size        : int
-    -> ?make_transport          : transport_maker
-    -> ?handshake_timeout       : Time.Span.t
-    -> ?heartbeat_config        : Heartbeat_config.t
-    -> ?auth                    : ('address -> bool)
-    (** default is [`Ignore] *)
-    -> ?on_handshake_error : on_handshake_error
-    (** default is [`Ignore] *)
-    -> ?on_handler_error        : [ `Raise
-                                  | `Ignore
-                                  | `Call of ('address -> exn -> unit)
-                                  ]
+    :  implementations:'s Implementations.t
+    -> initial_connection_state:('address -> t -> 's)
+    -> where_to_listen:('address, 'listening_on) Tcp.Where_to_listen.t
+    -> ?max_connections:int
+    -> ?backlog:int
+    -> ?max_message_size:int
+    -> ?make_transport:transport_maker
+    -> ?handshake_timeout:Time.Span.t
+    -> ?heartbeat_config:Heartbeat_config.t
+    -> ?auth:('address -> bool) (** default is [`Ignore] *)
+    -> ?on_handshake_error:on_handshake_error (** default is [`Ignore] *)
+    -> ?on_handler_error:[`Raise | `Ignore | `Call of 'address -> exn -> unit]
     -> unit
     -> ('address, 'listening_on) Tcp.Server.t Deferred.t
 
   val serve_with_transport
-    : handshake_timeout   : Time.Span.t option
-    -> heartbeat_config   : Heartbeat_config.t option
-    -> implementations    : 's Implementations.t
-    -> description        : Info.t
-    -> connection_state   : (t -> 's)
-    -> on_handshake_error : on_handshake_error
+    :  handshake_timeout:Time.Span.t option
+    -> heartbeat_config:Heartbeat_config.t option
+    -> implementations:'s Implementations.t
+    -> description:Info.t
+    -> connection_state:(t -> 's)
+    -> on_handshake_error:on_handshake_error
     -> Transport.t
     -> unit Deferred.t
 
@@ -137,12 +135,12 @@ module Connection : sig
       connection timeout and the timeout for this module's own handshake.
   *)
   val client
-    :  ?implementations     : _ Client_implementations.t
-    -> ?max_message_size    : int
-    -> ?make_transport      : transport_maker
-    -> ?handshake_timeout   : Time.Span.t
-    -> ?heartbeat_config    : Heartbeat_config.t
-    -> ?description         : Info.t
+    :  ?implementations:_ Client_implementations.t
+    -> ?max_message_size:int
+    -> ?make_transport:transport_maker
+    -> ?handshake_timeout:Time.Span.t
+    -> ?heartbeat_config:Heartbeat_config.t
+    -> ?description:Info.t
     -> _ Tcp.Where_to_connect.t
     -> (t, Exn.t) Result.t Deferred.t
 
@@ -153,11 +151,11 @@ module Connection : sig
       See [with_close] for more information.
   *)
   val with_client
-    :  ?implementations     : _ Client_implementations.t
-    -> ?max_message_size    : int
-    -> ?make_transport      : transport_maker
-    -> ?handshake_timeout   : Time.Span.t
-    -> ?heartbeat_config    : Heartbeat_config.t
+    :  ?implementations:_ Client_implementations.t
+    -> ?max_message_size:int
+    -> ?make_transport:transport_maker
+    -> ?handshake_timeout:Time.Span.t
+    -> ?heartbeat_config:Heartbeat_config.t
     -> _ Tcp.Where_to_connect.t
     -> (t -> 'a Deferred.t)
     -> ('a, Exn.t) Result.t Deferred.t

@@ -1,6 +1,5 @@
 open Core
 open Import
-
 include Core.Command
 
 type 'a with_options = ?extract_exn:bool -> 'a
@@ -52,7 +51,8 @@ let in_async ?extract_exn param on_result =
       (never_returns (Scheduler.go ()) : unit)
     | Ok main ->
       let before_shutdown () =
-        Deferred.List.iter ~how:`Parallel
+        Deferred.List.iter
+          ~how:`Parallel
           Writer.[ force stdout; force stderr ]
           ~f:(fun writer ->
             Deferred.any_unit
@@ -72,8 +72,7 @@ let in_async ?extract_exn param on_result =
       upon
         (Deferred.Or_error.try_with ?extract_exn (fun () -> main `Scheduler_started))
         on_result;
-      (never_returns (Scheduler.go ()) : unit)
-  )
+      (never_returns (Scheduler.go ()) : unit))
 ;;
 
 type 'r staged = ([`Scheduler_started] -> 'r) Staged.t
@@ -98,24 +97,20 @@ module Staged = struct
   ;;
 end
 
-let stage_param =
-  Param.map ~f:(fun main ->
-    fun () ->
-      stage (fun `Scheduler_started -> main ()))
-;;
+let stage_param = Param.map ~f:(fun main () -> stage (fun `Scheduler_started -> main ()))
 
-let async      ?extract_exn ~summary ?readme param =
+let async ?extract_exn ~summary ?readme param =
   Staged.async ?extract_exn ~summary ?readme (stage_param param)
 ;;
 
-let async_or_error      ?extract_exn ~summary ?readme param =
+let async_or_error ?extract_exn ~summary ?readme param =
   Staged.async_or_error ?extract_exn ~summary ?readme (stage_param param)
 ;;
 
 let async_spec ?extract_exn ~summary ?readme spec main =
-  async  ?extract_exn ~summary ?readme (Spec.to_param spec main)
+  async ?extract_exn ~summary ?readme (Spec.to_param spec main)
 ;;
 
 let async_spec_or_error ?extract_exn ~summary ?readme spec main =
-  async_or_error  ?extract_exn ~summary ?readme (Spec.to_param spec main)
+  async_or_error ?extract_exn ~summary ?readme (Spec.to_param spec main)
 ;;

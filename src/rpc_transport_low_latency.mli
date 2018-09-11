@@ -30,12 +30,12 @@ module Config : sig
       the latter determines when to write data that has been batched.
   *)
   val create
-    :  ?max_message_size                  : int            (** default Int.max_value                  *)
-    -> ?initial_buffer_size               : int            (** default 64 KB                          *)
-    -> ?max_buffer_size                   : int            (** default Int.max_value                  *)
-    -> ?write_timeout                     : Time_ns.Span.t (** default 2 minutes                      *)
-    -> ?buffering_threshold_in_bytes      : int            (** default 32 KB                          *)
-    -> ?start_batching_after_num_messages : int            (** default 2                              *)
+    :  ?max_message_size:int (** default Int.max_value *)
+    -> ?initial_buffer_size:int (** default 64 KB *)
+    -> ?max_buffer_size:int (** default Int.max_value *)
+    -> ?write_timeout:Time_ns.Span.t (** default 2 minutes *)
+    -> ?buffering_threshold_in_bytes:int (** default 32 KB *)
+    -> ?start_batching_after_num_messages:int (** default 2 *)
     -> unit
     -> t
 end
@@ -49,18 +49,25 @@ end
 *)
 
 module Reader : sig
-  include module type of struct include Rpc_kernel.Transport.Reader end
+  include module type of struct
+  include Rpc_kernel.Transport.Reader
+end
 
   val create : ?config:Config.t -> max_message_size:int -> Fd.t -> t
 end
 
 module Writer : sig
-  include module type of struct include Rpc_kernel.Transport.Writer end
+  include module type of struct
+  include Rpc_kernel.Transport.Writer
+end
 
   val create : ?config:Config.t -> max_message_size:int -> Fd.t -> t
 end
 
-include module type of struct include Rpc_kernel.Transport end
+include
+module type of struct
+  include Rpc_kernel.Transport
+end
   with module Reader := Rpc_kernel.Transport.Reader
   with module Writer := Rpc_kernel.Transport.Writer
 
