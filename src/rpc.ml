@@ -177,7 +177,7 @@ module Connection = struct
              (make_transport ~max_message_size (Socket.fd socket))))
   ;;
 
-  let client
+  let client'
         ?implementations
         ?(max_message_size = default_max_message_size)
         ?(make_transport = default_transport_maker)
@@ -227,8 +227,51 @@ module Connection = struct
          ~description
          ~connection_state)
     >>= function
-    | Ok _ as ok -> return ok
+    | Ok t -> return (Ok (Socket.getpeername sock, t))
     | Error _ as error -> Transport.close transport >>= fun () -> return error
+  ;;
+
+  let client
+        ?implementations
+        ?max_message_size
+        ?make_transport
+        ?handshake_timeout
+        ?heartbeat_config
+        ?description
+        where_to_connect
+    =
+    client'
+      ?implementations
+      ?max_message_size
+      ?make_transport
+      ?handshake_timeout
+      ?heartbeat_config
+      ?description
+      where_to_connect
+    >>|? snd
+  ;;
+
+  let with_client'
+        ?implementations
+        ?max_message_size
+        ?make_transport
+        ?handshake_timeout
+        ?heartbeat_config
+        where_to_connect
+        f
+    =
+    client'
+      ?implementations
+      ?max_message_size
+      ?make_transport
+      ?handshake_timeout
+      ?heartbeat_config
+      where_to_connect
+    >>=? fun (remote_server, t) ->
+    try_with (fun () -> f ~remote_server t)
+    >>= fun result ->
+    close t ~reason:(Info.of_string "Rpc.Connection.with_client finished")
+    >>| fun () -> result
   ;;
 
   let with_client
@@ -240,17 +283,13 @@ module Connection = struct
         where_to_connect
         f
     =
-    client
+    with_client'
       ?implementations
       ?max_message_size
       ?make_transport
       ?handshake_timeout
       ?heartbeat_config
       where_to_connect
-    >>=? fun t ->
-    try_with (fun () -> f t)
-    >>= fun result ->
-    close t ~reason:(Info.of_string "Rpc.Connection.with_client finished")
-    >>| fun () -> result
+      (fun ~remote_server:_ -> f)
   ;;
 end

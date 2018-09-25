@@ -144,6 +144,18 @@ end
     -> _ Tcp.Where_to_connect.t
     -> (t, Exn.t) Result.t Deferred.t
 
+  (** Similar to [client], but additionally expose the [Socket.Address.t] of the RPC
+      server that we connected to. *)
+  val client'
+    :  ?implementations:_ Client_implementations.t
+    -> ?max_message_size:int
+    -> ?make_transport:transport_maker
+    -> ?handshake_timeout:Time.Span.t
+    -> ?heartbeat_config:Heartbeat_config.t
+    -> ?description:Info.t
+    -> 'transport Tcp.Where_to_connect.t
+    -> ('transport * t, Exn.t) Result.t Deferred.t
+
   (** [with_client where_to_connect f] connects to the server at [where_to_connect] and
       runs f until an exception is thrown or until the returned Deferred is fulfilled.
 
@@ -158,5 +170,17 @@ end
     -> ?heartbeat_config:Heartbeat_config.t
     -> _ Tcp.Where_to_connect.t
     -> (t -> 'a Deferred.t)
+    -> ('a, Exn.t) Result.t Deferred.t
+
+  (** Similar to [with_client], but additionally expose the [Socket.Address.t] of the RPC
+      server that we connected to. *)
+  val with_client'
+    :  ?implementations:_ Client_implementations.t
+    -> ?max_message_size:int
+    -> ?make_transport:transport_maker
+    -> ?handshake_timeout:Time.Span.t
+    -> ?heartbeat_config:Heartbeat_config.t
+    -> 'transport Tcp.Where_to_connect.t
+    -> (remote_server:'transport -> t -> 'a Deferred.t)
     -> ('a, Exn.t) Result.t Deferred.t
 end
