@@ -418,8 +418,8 @@ module Server = struct
       | None -> create_socket where_to_listen.socket_type, true
     in
     close_sock_on_error socket (fun () ->
-      if should_set_reuseaddr then Socket.setopt socket Socket.Opt.reuseaddr true;
-      Socket.bind socket where_to_listen.address >>| Socket.listen ?backlog)
+      Socket.bind ~reuseaddr:should_set_reuseaddr socket where_to_listen.address
+      >>| Socket.listen ?backlog)
     >>| fun socket ->
     let t =
       { socket

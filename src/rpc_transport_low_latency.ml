@@ -662,7 +662,7 @@ module Writer_internal = struct
       Ordered_collection_common.check_pos_len_exn
         ~pos
         ~len
-        ~length:(Bigstring.length buf);
+        ~total_length:(Bigstring.length buf);
       if connection_alive t
       then (
         let send_now = should_send_now t in
