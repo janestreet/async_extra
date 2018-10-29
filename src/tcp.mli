@@ -42,7 +42,7 @@ type 'a with_connect_options =
   -> ?timeout:Time.Span.t
   -> 'a
 
-(** [with_connection ~host ~port f] looks up [host] from a string (using DNS as needed),
+(** [with_connection where_to_connect f] looks up [where_to_connect] (using DNS as needed),
     connects, then calls [f], passing the connected socket and a reader and writer for it.
     When the deferred returned by [f] is determined, or any exception is thrown, the
     socket, reader and writer are closed.  The returned [Deferred.t] is fulfilled after
@@ -69,7 +69,7 @@ val connect_sock
   -> 'addr Where_to_connect.t
   -> ([`Active], 'addr) Socket.t Deferred.t
 
-(** [connect ~host ~port] is a convenience wrapper around [connect_sock] that returns the
+(** [connect where_to_connect] is a convenience wrapper around [connect_sock] that returns the
     socket, and a reader and writer for the socket.  The reader and writer share a file
     descriptor, and so closing one will affect the other by closing its underlying [fd].
     In particular, closing the reader before closing the writer will cause the writer to
