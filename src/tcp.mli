@@ -42,17 +42,20 @@ type 'a with_connect_options =
   -> ?timeout:Time.Span.t
   -> 'a
 
-(** [with_connection where_to_connect f] looks up [where_to_connect] (using DNS as needed),
-    connects, then calls [f], passing the connected socket and a reader and writer for it.
-    When the deferred returned by [f] is determined, or any exception is thrown, the
-    socket, reader and writer are closed.  The returned [Deferred.t] is fulfilled after
-    [f] has finished processing and the file descriptor for the socket is closed.  If
-    [interrupt] is supplied, the connection attempt will be aborted if [interrupt] is
-    fulfilled before the connection has been established.  Similarly, all connection
-    attempts have a timeout (default 10s), which can be overridden with [timeout].
+(** [with_connection where_to_connect f] looks up [where_to_connect] (using DNS
+    as needed), connects, then calls [f], passing the connected socket and
+    a reader and writer for it. When the deferred returned by [f] is
+    determined, or any exception is thrown, the socket, reader and writer are
+    closed.  The returned [Deferred.t] is fulfilled after [f] has finished
+    processing and the file descriptor for the socket is closed.  If
+    [interrupt] is supplied, the connection attempt will be aborted if
+    [interrupt] is fulfilled before the connection has been established.
+    Similarly, all connection attempts have a timeout (default 10s), which can
+    be overridden with [timeout].
 
-    It is fine for [f] to ignore the supplied socket and just use the reader and writer.
-    The socket is there to make it convenient to call [Socket] functions. *)
+    It is fine for [f] to ignore the supplied socket and just use the reader
+    and writer. The socket is there to make it convenient to call [Socket]
+    functions. *)
 val with_connection :
   ('addr Where_to_connect.t
    -> (([`Active], 'addr) Socket.t -> Reader.t -> Writer.t -> 'a Deferred.t)
@@ -69,18 +72,20 @@ val connect_sock
   -> 'addr Where_to_connect.t
   -> ([`Active], 'addr) Socket.t Deferred.t
 
-(** [connect where_to_connect] is a convenience wrapper around [connect_sock] that returns the
-    socket, and a reader and writer for the socket.  The reader and writer share a file
-    descriptor, and so closing one will affect the other by closing its underlying [fd].
-    In particular, closing the reader before closing the writer will cause the writer to
-    subsequently raise an exception when it attempts to flush internally-buffered bytes to
-    the OS, due to a closed [fd].  You should close the [Writer] first to avoid this
+(** [connect where_to_connect] is a convenience wrapper around [connect_sock]
+    that returns the socket, and a reader and writer for the socket.  The
+    reader and writer share a file descriptor, and so closing one will affect
+    the other by closing its underlying [fd]. In particular, closing the reader
+    before closing the writer will cause the writer to subsequently raise an
+    exception when it attempts to flush internally-buffered bytes to the OS,
+    due to a closed [fd].  You should close the [Writer] first to avoid this
     problem.
 
     If possible, use [with_connection], which automatically handles closing.
 
-    It is fine to ignore the returned socket and just use the reader and writer.  The
-    socket is there to make it convenient to call [Socket] functions. *)
+    It is fine to ignore the returned socket and just use the reader and
+    writer. The socket is there to make it convenient to call [Socket]
+    functions. *)
 val connect
   :  ?socket:([`Unconnected], 'addr) Socket.t
   -> ('addr Where_to_connect.t
