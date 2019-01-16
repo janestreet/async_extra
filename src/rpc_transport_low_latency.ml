@@ -118,7 +118,7 @@ module Reader_internal = struct
     ; mutable reading : bool
     ; mutable closed : bool
     ; close_finished : unit Ivar.t
-    ; mutable buf : Bigstring.t
+    ; mutable buf : Bigstring.t sexp_opaque
     ; mutable pos : int (* Start of unconsumed data. *)
     ; mutable max : int
     (* End   of unconsumed data. *)
@@ -247,13 +247,19 @@ module Reader_internal = struct
       ; mutable state : 'a state
       }
 
+    let is_running t =
+      match t.state with
+      | Running -> true
+      | Stopped _ -> false
+    ;;
+
     let interrupt t reason =
-      assert (t.state = Running);
+      assert (is_running t);
       t.state <- Stopped reason;
       Ivar.fill t.interrupt ()
     ;;
 
-    let can_process_message t = not t.reader.closed && t.state = Running
+    let can_process_message t = not t.reader.closed && is_running t
 
     let rec process_received_messages t =
       if can_process_message t
@@ -287,7 +293,7 @@ module Reader_internal = struct
     let stop_watching_on_error t ~monitor =
       let parent = Monitor.current () in
       Monitor.detach_and_iter_errors monitor ~f:(fun exn ->
-        if t.state = Running then interrupt t Handler_raised;
+        if is_running t then interrupt t Handler_raised;
         (* Let the monitor in effect when [dispatch] was called deal with the error. *)
         Monitor.send_exn parent exn)
     ;;
@@ -390,7 +396,7 @@ module Writer_internal = struct
     ; close_started : unit Ivar.t
     ; close_finished : unit Ivar.t
     ; connection_lost : unit Ivar.t
-    ; mutable buf : Bigstring.t
+    ; mutable buf : Bigstring.t sexp_opaque
     ; mutable pos : int
     ; mutable bytes_written : Int63.t
     ; monitor : Monitor.t
@@ -434,7 +440,9 @@ module Writer_internal = struct
   let flushed t =
     if t.pos = 0
     then Deferred.unit
-    else if t.state = Closed
+    else if match t.state with
+      | Closed -> true
+      | Running | Final_flush -> false
     then Deferred.never ()
     else (
       let flush =
