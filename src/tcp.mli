@@ -244,9 +244,9 @@ module Server : sig
          create_options
 
   (** [listening_socket t] accesses the listening socket, which should be used with care.
-      An anticipated use is with {!Udp.bind_to_interface_exn}.  Accepting connections on
-      the socket directly will circumvent [max_connections] and [on_handler_error],
-      however, and is not recommended. *)
+      An anticipated use is with {!Async_udp.bind_to_interface_exn}.  Accepting
+      connections on the socket directly will circumvent [max_connections] and
+      [on_handler_error], however, and is not recommended. *)
   val listening_socket : ('address, _) t -> ([`Passive], 'address) Socket.t
 
   val num_connections : (_, _) t -> int
