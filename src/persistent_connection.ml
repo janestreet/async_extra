@@ -16,7 +16,8 @@ module Make (Conn : T) = struct
         get_address
     =
     let retry_delay =
-      Option.map retry_delay ~f:(fun f () -> f () |> Time_ns.Span.of_span)
+      Option.map retry_delay ~f:(fun f () ->
+        f () |> Time_ns.Span.of_span_float_round_nearest)
     in
     let on_event event =
       Option.iter log ~f:(fun log ->

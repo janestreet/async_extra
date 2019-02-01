@@ -31,7 +31,8 @@ module Connection = struct
     create
       ?implementations
       ~connection_state
-      ?handshake_timeout:(Option.map handshake_timeout ~f:Time_ns.Span.of_span)
+      ?handshake_timeout:
+        (Option.map handshake_timeout ~f:Time_ns.Span.of_span_float_round_nearest)
       ?heartbeat_config
       ?description
       (Transport.of_reader_writer reader writer ~max_message_size)
@@ -59,7 +60,8 @@ module Connection = struct
     =
     with_close
       ?implementations
-      ?handshake_timeout:(Option.map handshake_timeout ~f:Time_ns.Span.of_span)
+      ?handshake_timeout:
+        (Option.map handshake_timeout ~f:Time_ns.Span.of_span_float_round_nearest)
       ?heartbeat_config
       ~connection_state
       (Transport.of_reader_writer reader writer ~max_message_size)
@@ -78,7 +80,8 @@ module Connection = struct
         ~on_handshake_error
     =
     server_with_close
-      ?handshake_timeout:(Option.map handshake_timeout ~f:Time_ns.Span.of_span)
+      ?handshake_timeout:
+        (Option.map handshake_timeout ~f:Time_ns.Span.of_span_float_round_nearest)
       ?heartbeat_config
       (Transport.of_reader_writer reader writer ~max_message_size)
       ~implementations
@@ -116,7 +119,8 @@ module Connection = struct
     =
     collect_errors transport ~f:(fun () ->
       Rpc_kernel.Connection.create
-        ?handshake_timeout:(Option.map handshake_timeout ~f:Time_ns.Span.of_span)
+        ?handshake_timeout:
+          (Option.map handshake_timeout ~f:Time_ns.Span.of_span_float_round_nearest)
         ?heartbeat_config
         ~implementations
         ~description
@@ -182,14 +186,16 @@ module Connection = struct
         ?(max_message_size = default_max_message_size)
         ?(make_transport = default_transport_maker)
         ?(handshake_timeout =
-          Time_ns.Span.to_span
+          Time_ns.Span.to_span_float_round_nearest
             Async_rpc_kernel.Async_rpc_kernel_private.default_handshake_timeout)
         ?heartbeat_config
         ?description
         where_to_connect
     =
     let finish_handshake_by =
-      Time_ns.add (Time_ns.now ()) (Time_ns.Span.of_span handshake_timeout)
+      Time_ns.add
+        (Time_ns.now ())
+        (Time_ns.Span.of_span_float_round_nearest handshake_timeout)
     in
     Monitor.try_with (fun () ->
       Tcp.connect_sock ~timeout:handshake_timeout where_to_connect)
