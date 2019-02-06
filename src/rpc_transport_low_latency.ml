@@ -386,12 +386,10 @@ module Writer_internal = struct
     val create : unit -> t
     val is_currently_accepting_writes : t -> bool
     val is_able_to_send_data : t -> bool
-
-
-    val close_started : t -> unit
-    val close_finished : t -> fd_closed:unit Deferred.t -> unit
+    val start_close : t -> unit
+    val finish_close : t -> fd_closed:unit Deferred.t -> unit
     val connection_lost : t -> unit
-    val has_close_finished : t -> unit Deferred.t
+    val close_finished : t -> unit Deferred.t
     val stopped : t -> unit Deferred.t
   end = struct
     type t =
@@ -401,15 +399,15 @@ module Writer_internal = struct
       }
     [@@deriving sexp_of]
 
-    let close_started t = Ivar.fill_if_empty t.close_started ()
+    let start_close t = Ivar.fill_if_empty t.close_started ()
 
-    let close_finished t ~fd_closed =
-      close_started t;
+    let finish_close t ~fd_closed =
+      start_close t;
       Ivar.fill_if_empty t.connection_lost ();
       upon fd_closed (Ivar.fill_if_empty t.close_finished)
     ;;
 
-    let has_close_finished t = Ivar.read t.close_finished
+    let close_finished t = Ivar.read t.close_finished
     let is_currently_accepting_writes t = Ivar.is_empty t.close_started
     let is_able_to_send_data t = Ivar.is_empty t.connection_lost
     let connection_lost t = Ivar.fill_if_empty t.connection_lost ()
@@ -461,7 +459,7 @@ module Writer_internal = struct
     not (Connection_state.is_currently_accepting_writes t.connection_state)
   ;;
 
-  let close_finished t = Connection_state.has_close_finished t.connection_state
+  let close_finished t = Connection_state.close_finished t.connection_state
   let bytes_to_write t = t.pos
   let stopped t = Connection_state.stopped t.connection_state
 
@@ -541,27 +539,27 @@ module Writer_internal = struct
        | Other_error -> raise exn)
   ;;
 
-  let finish_closing t =
+  let finish_close t =
     let fd_closed = Fd.close t.fd in
     t.writing <- false;
-    Connection_state.close_finished t.connection_state ~fd_closed
+    Connection_state.finish_close t.connection_state ~fd_closed
   ;;
 
   let rec write_everything t =
     match single_write t with
-    | Stop -> finish_closing t
+    | Stop -> finish_close t
     | Continue ->
       if t.pos = 0
       then (
         t.writing <- false;
-        if is_closed t then finish_closing t)
+        if is_closed t then finish_close t)
       else wait_and_write_everything t
 
   and wait_and_write_everything t =
     Clock_ns.with_timeout t.config.write_timeout (Fd.ready_to t.fd `Write)
     >>> fun result ->
     if not (Connection_state.is_able_to_send_data t.connection_state)
-    then finish_closing t
+    then finish_close t
     else (
       match result with
       | `Result `Ready -> write_everything t
@@ -573,7 +571,7 @@ module Writer_internal = struct
              descriptor. Closing the writer."
               ~timeout:(t.config.write_timeout : Time_ns.Span.t)
               (t : t)];
-        finish_closing t
+        finish_close t
       | `Result ((`Bad_fd | `Closed) as result) ->
         raise_s
           [%sexp
@@ -760,9 +758,9 @@ module Writer_internal = struct
   let close t =
     if not (is_closed t)
     then (
-      Connection_state.close_started t.connection_state;
+      Connection_state.start_close t.connection_state;
       flush t;
-      if not t.writing then finish_closing t);
+      if not t.writing then finish_close t);
     close_finished t
   ;;
 end
