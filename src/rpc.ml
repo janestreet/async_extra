@@ -158,27 +158,29 @@ module Connection = struct
       where_to_listen
       ~on_handler_error
       (fun inet socket ->
-         if not (auth inet)
-         then Deferred.unit
-         else (
-           let description =
-             let server_addr = (Socket.getsockname socket :> Socket.Address.t) in
-             let client_addr = (Socket.getpeername socket :> Socket.Address.t) in
-             Info.create_s
-               [%message
-                 "TCP server"
-                   (server_addr : Socket.Address.t)
-                   (client_addr : Socket.Address.t)]
-           in
-           let connection_state = initial_connection_state inet in
-           serve_with_transport
-             ~handshake_timeout
-             ~heartbeat_config
-             ~implementations
-             ~description
-             ~connection_state
-             ~on_handshake_error
-             (make_transport ~max_message_size (Socket.fd socket))))
+         match (Socket.getpeername socket :> Socket.Address.t) with
+         | exception _could_raise_if_the_socket_disconnects_quickly -> Deferred.unit
+         | client_addr ->
+           if not (auth inet)
+           then Deferred.unit
+           else (
+             let description =
+               let server_addr = (Socket.getsockname socket :> Socket.Address.t) in
+               Info.create_s
+                 [%message
+                   "TCP server"
+                     (server_addr : Socket.Address.t)
+                     (client_addr : Socket.Address.t)]
+             in
+             let connection_state = initial_connection_state inet in
+             serve_with_transport
+               ~handshake_timeout
+               ~heartbeat_config
+               ~implementations
+               ~description
+               ~connection_state
+               ~on_handshake_error
+               (make_transport ~max_message_size (Socket.fd socket))))
   ;;
 
   let client'
@@ -200,41 +202,50 @@ module Connection = struct
     Monitor.try_with (fun () ->
       Tcp.connect_sock ~timeout:handshake_timeout where_to_connect)
     >>=? fun sock ->
-    let description =
-      match description with
-      | None ->
-        Info.create
-          "Client connected via TCP"
-          where_to_connect
-          [%sexp_of: _ Tcp.Where_to_connect.t]
-      | Some desc ->
-        Info.tag_arg desc "via TCP" where_to_connect [%sexp_of: _ Tcp.Where_to_connect.t]
-    in
-    let handshake_timeout = Time_ns.diff finish_handshake_by (Time_ns.now ()) in
-    let transport = make_transport (Socket.fd sock) ~max_message_size in
-    (match implementations with
-     | None ->
-       let { Client_implementations.connection_state; implementations } =
-         Client_implementations.null ()
-       in
-       Rpc_kernel.Connection.create
-         transport
-         ~handshake_timeout
-         ?heartbeat_config
-         ~implementations
-         ~description
-         ~connection_state
-     | Some { Client_implementations.connection_state; implementations } ->
-       Rpc_kernel.Connection.create
-         transport
-         ~handshake_timeout
-         ?heartbeat_config
-         ~implementations
-         ~description
-         ~connection_state)
-    >>= function
-    | Ok t -> return (Ok (Socket.getpeername sock, t))
-    | Error _ as error -> Transport.close transport >>= fun () -> return error
+    match Socket.getpeername sock with
+    | exception exn_could_be_raised_if_the_socket_is_diconnected_now ->
+      Socket.shutdown sock `Both;
+      Deferred.Result.fail exn_could_be_raised_if_the_socket_is_diconnected_now
+    | sock_peername ->
+      let description =
+        match description with
+        | None ->
+          Info.create
+            "Client connected via TCP"
+            where_to_connect
+            [%sexp_of: _ Tcp.Where_to_connect.t]
+        | Some desc ->
+          Info.tag_arg
+            desc
+            "via TCP"
+            where_to_connect
+            [%sexp_of: _ Tcp.Where_to_connect.t]
+      in
+      let handshake_timeout = Time_ns.diff finish_handshake_by (Time_ns.now ()) in
+      let transport = make_transport (Socket.fd sock) ~max_message_size in
+      (match implementations with
+       | None ->
+         let { Client_implementations.connection_state; implementations } =
+           Client_implementations.null ()
+         in
+         Rpc_kernel.Connection.create
+           transport
+           ~handshake_timeout
+           ?heartbeat_config
+           ~implementations
+           ~description
+           ~connection_state
+       | Some { Client_implementations.connection_state; implementations } ->
+         Rpc_kernel.Connection.create
+           transport
+           ~handshake_timeout
+           ?heartbeat_config
+           ~implementations
+           ~description
+           ~connection_state)
+      >>= (function
+        | Ok t -> return (Ok (sock_peername, t))
+        | Error _ as error -> Transport.close transport >>= fun () -> return error)
   ;;
 
   let client

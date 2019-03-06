@@ -1,7 +1,7 @@
-open! Core
+open! Core_kernel
+open! Async_kernel
 open! Import
-module Bus = Core_kernel.Bus
-include Bus
+open! Bus
 
 let pipe1_exn (t : ('a -> unit) Read_only.t) here =
   let r, w = Pipe.create () in

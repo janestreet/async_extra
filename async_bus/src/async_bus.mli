@@ -1,18 +1,16 @@
-(** An Async extension of {{!Core_kernel.Bus}[Core_kernel.Bus]}.  Functions that share the
-    same name and types as those in [Core_kernel.Bus] are direct calls to same. *)
+(** Async operations on {{!Core_kernel.Bus}[Core_kernel.Bus]}. *)
 
-open! Core
+open! Core_kernel
+open! Async_kernel
 open! Import
-
-(** @open *)
-include module type of struct
-  include Core_kernel.Bus
-end
 
 (** [pipe1_exn t] returns a pipe of updates from [t] by subscribing to [t].  Closing the
     pipe unsubscribes from [t].  Closing [t] closes the pipe.  [pipe1_exn] raises in the
     same circumstances as [subscribe_exn]. *)
-val pipe1_exn : ('a -> unit) Read_only.t -> Source_code_position.t -> 'a Pipe.Reader.t
+val pipe1_exn
+  :  ('a -> unit) Bus.Read_only.t
+  -> Source_code_position.t
+  -> 'a Pipe.Reader.t
 
 module First_arity : sig
   type (_, _, _) t =
@@ -36,7 +34,7 @@ end
     become determined. *)
 val first_exn
   :  ?stop:unit Deferred.t
-  -> 'c Read_only.t
+  -> 'c Bus.Read_only.t
   -> Source_code_position.t
   -> ('c, 'f, 'r) First_arity.t
   -> f:'f
