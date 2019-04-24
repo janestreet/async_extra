@@ -102,9 +102,9 @@ let tests =
           [%sexp_of: string * int]
           (fun ~sock2 ~effect ->
              read_loop (Socket.fd sock2) (fun b -> effect (Iobuf.to_string b, 0))) )
-      ; (* Queue up some packets and check that they're received all at once.  There's a tiny
-           element of faith in assuming they'll be queued rather than dropped and that they're
-           delivered in order. *)
+    ; (* Queue up some packets and check that they're received all at once.  There's a tiny
+         element of faith in assuming they'll be queued rather than dropped and that they're
+         delivered in order. *)
       ( "recvmmsg_loop"
       , match recvmmsg_loop with
       | Error err ->
