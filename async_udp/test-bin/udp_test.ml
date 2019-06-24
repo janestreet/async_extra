@@ -52,7 +52,7 @@ let with_socks ~expected_effects sexp_of_effect f =
               failwiths
                 "unexpected effects"
                 [%sexp
-                  ~~(outcome : [`Result of _ | `Timeout])
+                  ~~(outcome : [ `Result of _ | `Timeout ])
                 , ~~(effects : effect list)
                 , ~~(expected_effects : effect list)]
                 [%sexp_of: Sexp.t]))

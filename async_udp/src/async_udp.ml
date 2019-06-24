@@ -101,8 +101,7 @@ let ready_iter fd ~stop ~max_ready ~f read_or_write ~syscall_name =
     if i < max_ready && Ivar.is_empty stop && Fd.is_open fd
     then (
       match f file_descr |> Ready_iter.to_result (* doesn't allocate *) with
-      | Ok Poll_again
-      | Error EINTR -> inner_loop (i + 1) file_descr
+      | Ok Poll_again | Error EINTR -> inner_loop (i + 1) file_descr
       | Ok User_stopped -> User_stopped
       | Error (EWOULDBLOCK | EAGAIN) -> Poll_again
       (* This looks extreme but serves the purpose of effectively terminating the
@@ -157,7 +156,7 @@ let sendto () =
              (Some buf)
              "Udp.sendto"
              (error, addr)
-             [%sexp_of: [`Bad_fd | `Closed | `Unsupported] * Core.Unix.sockaddr])
+             [%sexp_of: [ `Bad_fd | `Closed | `Unsupported ] * Core.Unix.sockaddr])
 ;;
 
 let send () =
@@ -180,7 +179,11 @@ let send () =
          >>= function
          | `Interrupted -> Deferred.unit
          | (`Bad_fd | `Closed | `Unsupported) as error ->
-           fail (Some buf) "Udp.send" error [%sexp_of: [`Bad_fd | `Closed | `Unsupported]])
+           fail
+             (Some buf)
+             "Udp.send"
+             error
+             [%sexp_of: [ `Bad_fd | `Closed | `Unsupported ]])
 ;;
 
 let bind ?ifname addr =
@@ -190,9 +193,9 @@ let bind ?ifname addr =
   in
   if is_multicast addr
   then (
+    (* We do not treat [mcast_join] as a blocking operation because it only instructs
+       the kernel to send an IGMP message, which the kernel handles asynchronously. *)
     try
-      (* We do not treat [mcast_join] as a blocking operation because it only instructs
-         the kernel to send an IGMP message, which the kernel handles asynchronously. *)
       Core.Unix.mcast_join
         ?ifname
         (Fd.file_descr_exn (Socket.fd socket))
@@ -211,12 +214,10 @@ let bind ?ifname addr =
 let bind_any () =
   let bind_addr = Socket.Address.Inet.create_bind_any ~port:0 in
   let socket = Socket.create Socket.Type.udp in
-  try
-    (* When bind() is called with a port number of zero, a non-conflicting local port
-       address is chosen (i.e., an ephemeral port).  In almost all cases where we use
-       this, we want a unique port, and hence prevent reuseaddr. *)
-    Socket.bind_inet socket ~reuseaddr:false bind_addr
-  with
+  (* When bind() is called with a port number of zero, a non-conflicting local port
+     address is chosen (i.e., an ephemeral port).  In almost all cases where we use
+     this, we want a unique port, and hence prevent reuseaddr. *)
+  try Socket.bind_inet socket ~reuseaddr:false bind_addr with
   | bind_exn ->
     let socket_fd = Socket.fd socket in
     don't_wait_for
@@ -234,7 +235,7 @@ module Loop_result = struct
   let of_fd_interruptible_every_ready_to_result_exn buf function_name x sexp_of_x result =
     match result with
     | (`Bad_fd | `Unsupported) as error ->
-      fail buf function_name (error, x) [%sexp_of: [`Bad_fd | `Unsupported] * x]
+      fail buf function_name (error, x) [%sexp_of: [ `Bad_fd | `Unsupported ] * x]
     | `Closed -> Closed
     | `Interrupted -> Stopped
   ;;

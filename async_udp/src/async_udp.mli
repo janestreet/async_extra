@@ -74,7 +74,7 @@ end
 val sendto_sync
   :  unit
   -> (Fd.t
-      -> ([> read], Iobuf.seek) Iobuf.t
+      -> ([> read ], Iobuf.seek) Iobuf.t
       -> Socket.Address.Inet.t
       -> Unix.Syscall_result.Unit.t)
        Or_error.t
@@ -90,7 +90,7 @@ val sendto_sync
     [Unix.Syscall_result.Unit.t] rather than raising [Unix_error]. *)
 val send_sync
   :  unit
-  -> (Fd.t -> ([> read], Iobuf.seek) Iobuf.t -> Unix.Syscall_result.Unit.t) Or_error.t
+  -> (Fd.t -> ([> read ], Iobuf.seek) Iobuf.t -> Unix.Syscall_result.Unit.t) Or_error.t
 
 (** [sendto sock buf addr] retries if [sock] is not ready to write.
 
@@ -98,23 +98,25 @@ val send_sync
     errors. *)
 val sendto
   :  unit
-  -> (Fd.t -> ([> read], Iobuf.seek) Iobuf.t -> Socket.Address.Inet.t -> unit Deferred.t)
+  -> (Fd.t -> ([> read ], Iobuf.seek) Iobuf.t -> Socket.Address.Inet.t -> unit Deferred.t)
        Or_error.t
 
 (** [send sock buf] retries if [sock] is not ready to write.
 
     @raise Unix_error in the case of Unix output errors and [Failure] on internal
     errors. *)
-val send : unit -> (Fd.t -> ([> read], Iobuf.seek) Iobuf.t -> unit Deferred.t) Or_error.t
+val send
+  :  unit
+  -> (Fd.t -> ([> read ], Iobuf.seek) Iobuf.t -> unit Deferred.t) Or_error.t
 
 (** [bind address] creates a socket bound to address, and, if [address] is a
     multicast address, joins the multicast group. *)
 val bind
   :  ?ifname:string
   -> Socket.Address.Inet.t
-  -> ([`Bound], Socket.Address.Inet.t) Socket.t
+  -> ([ `Bound ], Socket.Address.Inet.t) Socket.t
 
-val bind_any : unit -> ([`Bound], Socket.Address.Inet.t) Socket.t
+val bind_any : unit -> ([ `Bound ], Socket.Address.Inet.t) Socket.t
 
 module Loop_result : sig
   type t =
@@ -129,7 +131,7 @@ module Loop_result : sig
     -> string
     -> 'a
     -> ('a -> Sexp.t)
-    -> [`Bad_fd | `Closed | `Unsupported | `Interrupted]
+    -> [ `Bad_fd | `Closed | `Unsupported | `Interrupted ]
     -> t
 end
 
@@ -170,16 +172,16 @@ val read_loop_with_buffer_replacement
     [callback bufs ~count] processes [count] packets synchronously.
 
     [Config.init config] is used as a prototype for [bufs] and as one of the elements. *)
-val recvmmsg_loop :
-  (?config:Config.t (** default is [Config.create ()] *)
-   -> ?max_count:int
-   (** default is [default_recvmmsg_loop_max_count],
-       which is 32 now *)
-   -> ?on_wouldblock:(unit -> unit) (** callback if [recvmmsg] would block *)
-   -> Fd.t
-   -> (write_buffer array -> count:int -> unit)
-   -> Loop_result.t Deferred.t)
-    Or_error.t
+val recvmmsg_loop
+  : (?config:Config.t (** default is [Config.create ()] *)
+     -> ?max_count:int
+     (** default is [default_recvmmsg_loop_max_count],
+         which is 32 now *)
+     -> ?on_wouldblock:(unit -> unit) (** callback if [recvmmsg] would block *)
+     -> Fd.t
+     -> (write_buffer array -> count:int -> unit)
+     -> Loop_result.t Deferred.t)
+      Or_error.t
 
 val default_recvmmsg_loop_max_count : int
 
