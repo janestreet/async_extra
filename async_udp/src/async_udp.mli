@@ -98,7 +98,10 @@ val send_sync
     errors. *)
 val sendto
   :  unit
-  -> (Fd.t -> ([> read ], Iobuf.seek) Iobuf.t -> Socket.Address.Inet.t -> unit Deferred.t)
+  -> (Fd.t
+      -> ([> read ], Iobuf.seek) Iobuf.t
+      -> Socket.Address.Inet.t
+      -> unit Deferred.t)
        Or_error.t
 
 (** [send sock buf] retries if [sock] is not ready to write.
