@@ -1,4 +1,0 @@
-(alias (name runtest) (deps qtest.exe) (action (bash ./qtest.exe)))
-
-(executables (names qtest) (libraries async async_udp core qtest_lib)
- (preprocess (pps ppx_jane)))
