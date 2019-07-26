@@ -78,43 +78,43 @@ let with_socks ~expected_effects sexp_of_effect f =
 ;;
 
 let%expect_test "stop smoke" =
-  if false
-  then (
-    match sendto () with
-    | Error nonfatal ->
-      Debug.eprints "nonfatal" nonfatal [%sexp_of: Error.t];
-      [%expect.unreachable]
-    | Ok sendto ->
-      let prefix = [ "a"; "b" ] in
-      let suffix = [ "c"; "d" ] in
-      with_socks
-        ~expected_effects:prefix
-        [%sexp_of: string]
-        (fun ~sock1 ~sock2 ~effect ~addr1:_ ~addr2 ->
-           let stopped = ref false in
-           Deferred.all_unit
-             [ Deferred.List.iter ~how:`Sequential (prefix @ suffix) ~f:(fun str ->
-                 if !stopped
-                 then Deferred.unit
-                 else
-                   sendto (Socket.fd sock1) (Iobuf.of_string str) addr2
-                   >>= fun () ->
-                   after (Time.Span.of_us 100.))
-             ; (Monitor.try_with (fun () ->
-                  read_loop (Socket.fd sock2) (fun buf ->
-                    let str = Iobuf.to_string buf in
-                    effect str;
-                    if String.equal str (List.last_exn prefix)
-                    then (
-                      stopped := true;
-                      failwith "Stop")))
-                >>| function
-                | Error _ when !stopped -> ()
-                (* We don't close the socket or stop the loop in this test (yet). *)
-                | Ok (Closed | Stopped) -> assert false
-                | Error e -> raise e)
-             ]))
-  else Deferred.unit
+  match sendto () with
+  | Error nonfatal ->
+    Debug.eprints "nonfatal" nonfatal [%sexp_of: Error.t];
+    [%expect.unreachable]
+  | Ok sendto ->
+    let prefix = [ "a"; "b" ] in
+    let suffix = [ "c"; "d" ] in
+    with_socks
+      ~expected_effects:prefix
+      [%sexp_of: string]
+      (fun ~sock1 ~sock2 ~effect ~addr1:_ ~addr2 ->
+         let stopped = ref false in
+         let received = Bvar.create () in
+         Deferred.all_unit
+           [ Deferred.List.iter ~how:`Sequential (prefix @ suffix) ~f:(fun str ->
+               if !stopped
+               then Deferred.unit
+               else
+                 Deferred.all_unit
+                   [ sendto (Socket.fd sock1) (Iobuf.of_string str) addr2
+                   ; Bvar.wait received
+                   ])
+           ; (Monitor.try_with (fun () ->
+                read_loop (Socket.fd sock2) (fun buf ->
+                  let str = Iobuf.to_string buf in
+                  effect str;
+                  Bvar.broadcast received ();
+                  if String.equal str (List.last_exn prefix)
+                  then (
+                    stopped := true;
+                    failwith "Stop")))
+              >>| function
+              | Error _ when !stopped -> ()
+              (* We don't close the socket or stop the loop in this test (yet). *)
+              | Ok (Closed | Stopped) -> assert false
+              | Error e -> raise e)
+           ])
 ;;
 
 let with_fsts send ~expected_effects sexp_of_effect receiver =
