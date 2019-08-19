@@ -66,7 +66,7 @@ let with_socks ~expected_effects sexp_of_effect f =
                  ~addr2:(`Inet (Unix.Inet_addr.localhost, port2)))
             >>| fun outcome ->
             let effects = List.rev !rev_effects in
-            if not (Pervasives.( = ) expected_effects effects)
+            if not (Stdlib.( = ) expected_effects effects)
             then
               failwiths
                 "unexpected effects"
