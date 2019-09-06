@@ -186,7 +186,7 @@ let send () =
              [%sexp_of: [ `Bad_fd | `Closed | `Unsupported ]])
 ;;
 
-let bind ?ifname addr =
+let bind ?ifname ?source addr =
   let socket = Socket.create Socket.Type.udp in
   let is_multicast a =
     Unix.Cidr.does_match Unix.Cidr.multicast (Socket.Address.Inet.addr a)
@@ -197,6 +197,7 @@ let bind ?ifname addr =
        the kernel to send an IGMP message, which the kernel handles asynchronously. *)
     try
       Core.Unix.mcast_join
+        ?source
         ?ifname
         (Fd.file_descr_exn (Socket.fd socket))
         (Socket.Address.to_sockaddr addr)

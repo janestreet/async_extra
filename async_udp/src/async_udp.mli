@@ -112,10 +112,14 @@ val send
   :  unit
   -> (Fd.t -> ([> read ], Iobuf.seek) Iobuf.t -> unit Deferred.t) Or_error.t
 
-(** [bind address] creates a socket bound to address, and, if [address] is a
-    multicast address, joins the multicast group. *)
+(** [bind ?ifname ?source address] creates a socket bound to address, and if [address] is
+    multicast address,
+    - joins the multicast group.
+    - if [ifname] is specified, joins the multicast group on ifname.
+    - if [source] is specified, joins the multicast group with source. *)
 val bind
   :  ?ifname:string
+  -> ?source:Unix.Inet_addr.t
   -> Socket.Address.Inet.t
   -> ([ `Bound ], Socket.Address.Inet.t) Socket.t
 
