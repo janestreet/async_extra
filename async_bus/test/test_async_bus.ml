@@ -13,7 +13,7 @@ let%expect_test "[first_exn]" =
       ~on_subscription_after_first_write:Allow
       ~on_callback_raise:Error.raise
   in
-  let d = first_exn (Bus.read_only bus) [%here] Arity1 ~f:(fun _ -> Some ()) in
+  let d = first_exn bus [%here] Arity1 ~f:(fun _ -> Some ()) in
   let print d =
     print_s
       [%message
@@ -30,10 +30,7 @@ let%expect_test "[first_exn]" =
   let%bind () = [%expect {|
     ((is_determined   true)
      (num_subscribers 0)) |}] in
-  let d =
-    first_exn (Bus.read_only bus) [%here] Arity1 ~f:(fun i ->
-      if i = 13 then Some () else None)
-  in
+  let d = first_exn bus [%here] Arity1 ~f:(fun i -> if i = 13 then Some () else None) in
   Bus.write bus 12;
   print d;
   let%bind () = [%expect {|
@@ -57,7 +54,7 @@ let%expect_test "[first_exn] where [~f] raises" =
   in
   let d =
     Monitor.try_with_or_error (fun () ->
-      first_exn (Bus.read_only bus) [%here] Arity1 ~f:(fun _ -> failwith "raising"))
+      first_exn bus [%here] Arity1 ~f:(fun _ -> failwith "raising"))
   in
   Bus.write bus 0;
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
@@ -87,9 +84,7 @@ let%expect_test "[first_exn ~stop:(Deferred.never ())]" =
       ~on_subscription_after_first_write:Allow
       ~on_callback_raise:Error.raise
   in
-  let d =
-    first_exn ~stop:(Deferred.never ()) (Bus.read_only bus) [%here] Arity1 ~f:Fn.id
-  in
+  let d = first_exn ~stop:(Deferred.never ()) bus [%here] Arity1 ~f:Fn.id in
   let print () =
     print_s
       [%message
@@ -121,7 +116,7 @@ let%expect_test "[first_exn ~stop] where [stop] becomes determined" =
   let stop = Ivar.create () in
   let num_calls = ref 0 in
   let d =
-    first_exn ~stop:(Ivar.read stop) (Bus.read_only bus) [%here] Arity1 ~f:(fun () ->
+    first_exn ~stop:(Ivar.read stop) bus [%here] Arity1 ~f:(fun () ->
       incr num_calls;
       None)
   in
@@ -183,7 +178,7 @@ let%expect_test "[pipe1_exn] where the bus is closed" =
       ~on_subscription_after_first_write:Allow
       ~on_callback_raise:Error.raise
   in
-  let pipe = pipe1_exn (Bus.read_only bus) [%here] in
+  let pipe = pipe1_exn bus [%here] in
   Bus.write bus 13;
   Bus.close bus;
   let%bind all = Pipe.read_all pipe in

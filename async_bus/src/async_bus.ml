@@ -3,7 +3,7 @@ open! Async_kernel
 open! Import
 open! Bus
 
-let pipe1_exn (t : ('a -> unit) Read_only.t) here =
+let pipe1_exn (t : ('a -> unit, _) t) here =
   let r, w = Pipe.create () in
   let subscription =
     subscribe_exn

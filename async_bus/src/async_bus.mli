@@ -8,7 +8,7 @@ open! Import
     pipe unsubscribes from [t].  Closing [t] closes the pipe.  [pipe1_exn] raises in the
     same circumstances as [subscribe_exn]. *)
 val pipe1_exn
-  :  ('a -> unit) Bus.Read_only.t
+  :  ('a -> unit, [> read ]) Bus.t
   -> Source_code_position.t
   -> 'a Pipe.Reader.t
 
@@ -34,7 +34,7 @@ end
     become determined. *)
 val first_exn
   :  ?stop:unit Deferred.t
-  -> 'c Bus.Read_only.t
+  -> ('c, [> read ]) Bus.t
   -> Source_code_position.t
   -> ('c, 'f, 'r) First_arity.t
   -> f:'f
