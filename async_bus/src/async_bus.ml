@@ -47,10 +47,10 @@ let first_exn (type c f r) ?stop t here (first_arity : (c, f, r) First_arity.t) 
     in
     let callback : c =
       match first_arity with
-      | A.Arity1 -> fun a -> if can_finish () then finish (f a)
-      | A.Arity2 -> fun a1 a2 -> if can_finish () then finish (f a1 a2)
-      | A.Arity3 -> fun a1 a2 a3 -> if can_finish () then finish (f a1 a2 a3)
-      | A.Arity4 -> fun a1 a2 a3 a4 -> if can_finish () then finish (f a1 a2 a3 a4)
+      | Arity1 -> fun a -> if can_finish () then finish (f a)
+      | Arity2 -> fun a1 a2 -> if can_finish () then finish (f a1 a2)
+      | Arity3 -> fun a1 a2 a3 -> if can_finish () then finish (f a1 a2 a3)
+      | Arity4 -> fun a1 a2 a3 a4 -> if can_finish () then finish (f a1 a2 a3 a4)
     in
     subscriber
     := Some
