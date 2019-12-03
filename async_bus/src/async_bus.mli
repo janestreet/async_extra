@@ -18,6 +18,11 @@ module First_arity : sig
     | Arity2 : ('a -> 'b -> unit, 'a -> 'b -> 'r option, 'r) t
     | Arity3 : ('a -> 'b -> 'c -> unit, 'a -> 'b -> 'c -> 'r option, 'r) t
     | Arity4 : ('a -> 'b -> 'c -> 'd -> unit, 'a -> 'b -> 'c -> 'd -> 'r option, 'r) t
+    | Arity5
+      : ( 'a -> 'b -> 'c -> 'd -> 'e -> unit
+        , 'a -> 'b -> 'c -> 'd -> 'e -> 'r option
+        , 'r )
+          t
   [@@deriving sexp_of]
 end
 

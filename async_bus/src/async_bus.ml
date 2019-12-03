@@ -23,6 +23,11 @@ module First_arity = struct
     | Arity2 : ('a -> 'b -> unit, 'a -> 'b -> 'r option, 'r) t
     | Arity3 : ('a -> 'b -> 'c -> unit, 'a -> 'b -> 'c -> 'r option, 'r) t
     | Arity4 : ('a -> 'b -> 'c -> 'd -> unit, 'a -> 'b -> 'c -> 'd -> 'r option, 'r) t
+    | Arity5
+      : ( 'a -> 'b -> 'c -> 'd -> 'e -> unit
+        , 'a -> 'b -> 'c -> 'd -> 'e -> 'r option
+        , 'r )
+          t
   [@@deriving sexp_of]
 end
 
@@ -51,6 +56,7 @@ let first_exn (type c f r) ?stop t here (first_arity : (c, f, r) First_arity.t) 
       | Arity2 -> fun a1 a2 -> if can_finish () then finish (f a1 a2)
       | Arity3 -> fun a1 a2 a3 -> if can_finish () then finish (f a1 a2 a3)
       | Arity4 -> fun a1 a2 a3 a4 -> if can_finish () then finish (f a1 a2 a3 a4)
+      | Arity5 -> fun a1 a2 a3 a4 a5 -> if can_finish () then finish (f a1 a2 a3 a4 a5)
     in
     subscriber
     := Some
