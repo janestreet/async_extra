@@ -180,3 +180,40 @@ let%expect_test "[pipe1_exn] where the bus is closed" =
     (13) |}];
   return ()
 ;;
+
+let%expect_test "[pipe1_exn] on a closed bus, varying [on_subscription_after_first_write]"
+  =
+  let%bind () =
+    Deferred.List.iter
+      On_subscription_after_first_write.all
+      ~f:(fun on_subscription_after_first_write ->
+        let bus =
+          Bus.create
+            [%here]
+            Arity1
+            ~on_subscription_after_first_write
+            ~on_callback_raise:Error.raise
+        in
+        Bus.close bus;
+        let pipe = pipe1_exn bus [%here] in
+        let is_closed = Pipe.is_closed pipe in
+        let%map values = Pipe.to_list pipe in
+        print_s
+          [%message
+            (on_subscription_after_first_write : On_subscription_after_first_write.t)
+              (is_closed : bool)
+              (values : _ list)])
+  in
+  [%expect
+    {|
+    ((on_subscription_after_first_write Allow)
+     (is_closed                         true)
+     (values ()))
+    ((on_subscription_after_first_write Allow_and_send_last_value)
+     (is_closed true)
+     (values ()))
+    ((on_subscription_after_first_write Raise)
+     (is_closed                         true)
+     (values ())) |}];
+  return ()
+;;

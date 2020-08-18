@@ -5,8 +5,9 @@ open! Async_kernel
 open! Import
 
 (** [pipe1_exn t] returns a pipe of updates from [t] by subscribing to [t].  Closing the
-    pipe unsubscribes from [t].  Closing [t] closes the pipe.  [pipe1_exn] raises in the
-    same circumstances as [subscribe_exn]. *)
+    pipe unsubscribes from [t].  Closing [t] closes the pipe.  Calling [pipe1_exn] on a
+    closed bus always returns an empty pipe.  [pipe1_exn] raises in the same circumstances
+    as [subscribe_exn]. *)
 val pipe1_exn
   :  ('a -> unit, [> read ]) Bus.t
   -> Source_code_position.t

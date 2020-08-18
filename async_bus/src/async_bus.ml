@@ -4,17 +4,20 @@ open! Import
 open! Bus
 
 let pipe1_exn (t : ('a -> unit, _) t) here =
-  let r, w = Pipe.create () in
-  let subscription =
-    subscribe_exn
-      t
-      here
-      ~f:(function
-        | v -> Pipe.write_without_pushback_if_open w v)
-      ~on_close:(fun () -> Pipe.close w)
-  in
-  upon (Pipe.closed w) (fun () -> unsubscribe t subscription);
-  r
+  if Bus.is_closed t
+  then Pipe.empty ()
+  else (
+    let r, w = Pipe.create () in
+    let subscription =
+      subscribe_exn
+        t
+        here
+        ~f:(function
+          | v -> Pipe.write_without_pushback_if_open w v)
+        ~on_close:(fun () -> Pipe.close w)
+    in
+    upon (Pipe.closed w) (fun () -> unsubscribe t subscription);
+    r)
 ;;
 
 module First_arity = struct
