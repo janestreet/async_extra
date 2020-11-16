@@ -53,8 +53,9 @@ let%expect_test "[first_exn] where [~f] raises" =
       ~on_callback_raise:Error.raise
   in
   let d =
-    Monitor.try_with_or_error (fun () ->
-      first_exn bus [%here] Arity1 ~f:(fun _ -> failwith "raising"))
+    Monitor.try_with_or_error
+      ~rest:`Log
+      (fun () -> first_exn bus [%here] Arity1 ~f:(fun _ -> failwith "raising"))
   in
   Bus.write bus 0;
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
