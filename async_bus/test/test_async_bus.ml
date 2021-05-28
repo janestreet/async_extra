@@ -5,6 +5,8 @@ open! Expect_test_helpers_base
 open! Bus
 open! Async_bus
 
+let () = Backtrace.elide := true
+
 let%expect_test "[first_exn]" =
   let bus =
     Bus.create
