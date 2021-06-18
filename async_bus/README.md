@@ -1,3 +1,3 @@
 # Async_bus
 
-Async operations on `Core_kernel.Bus`.
+Async operations on `Bus`.

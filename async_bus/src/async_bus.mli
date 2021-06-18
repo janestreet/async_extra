@@ -1,6 +1,6 @@
-(** Async operations on {{!Core_kernel.Bus}[Core_kernel.Bus]}. *)
+(** Async operations on {{!Core.Bus}[Core.Bus]}. *)
 
-open! Core_kernel
+open! Core
 open! Async_kernel
 open! Import
 
