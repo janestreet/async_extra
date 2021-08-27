@@ -13,6 +13,14 @@ val pipe1_exn
   -> Source_code_position.t
   -> 'a Pipe.Reader.t
 
+(** [pipe1_filter_map_exn] is the [filter_map]ing version of [pipe1_exn], allowing users
+    to [filter_map] the values without incurring the cost of an additional pipe. *)
+val pipe1_filter_map_exn
+  :  ('a -> unit, [> read ]) Bus.t
+  -> Source_code_position.t
+  -> f:('a -> 'b option)
+  -> 'b Pipe.Reader.t
+
 module First_arity : sig
   type (_, _, _) t =
     | Arity1 : ('a -> unit, 'a -> 'r option, 'r) t

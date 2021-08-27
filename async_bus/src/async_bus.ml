@@ -3,21 +3,30 @@ open! Async_kernel
 open! Import
 open! Bus
 
-let pipe1_exn (t : ('a -> unit, _) t) here =
+let subscribe_and_maybe_write_to_pipe1 t here ~maybe_write_fn =
   if Bus.is_closed t
   then Pipe.empty ()
   else (
     let r, w = Pipe.create () in
     let subscription =
-      subscribe_exn
-        t
-        here
-        ~f:(function
-          | v -> Pipe.write_without_pushback_if_open w v)
-        ~on_close:(fun () -> Pipe.close w)
+      subscribe_exn t here ~f:(maybe_write_fn w) ~on_close:(fun () -> Pipe.close w)
     in
     upon (Pipe.closed w) (fun () -> unsubscribe t subscription);
     r)
+;;
+
+let pipe1_exn t here =
+  subscribe_and_maybe_write_to_pipe1
+    t
+    here
+    ~maybe_write_fn:Pipe.write_without_pushback_if_open
+;;
+
+let pipe1_filter_map_exn t here ~f =
+  subscribe_and_maybe_write_to_pipe1 t here ~maybe_write_fn:(fun pipe v ->
+    match f v with
+    | None -> ()
+    | Some v -> Pipe.write_without_pushback_if_open pipe v)
 ;;
 
 module First_arity = struct

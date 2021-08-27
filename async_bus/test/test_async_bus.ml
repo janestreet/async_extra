@@ -220,3 +220,45 @@ let%expect_test "[pipe1_exn] on a closed bus, varying [on_subscription_after_fir
      (values ())) |}];
   return ()
 ;;
+
+let%expect_test "[pipe1_exn]" =
+  let bus =
+    Bus.create
+      [%here]
+      Arity1
+      ~on_subscription_after_first_write:Raise
+      ~on_callback_raise:Error.raise
+  in
+  let pipe = pipe1_exn bus [%here] in
+  for i = 0 to 10 do
+    Bus.write bus i
+  done;
+  Bus.close bus;
+  let%bind values = Pipe.to_list pipe in
+  print_s [%message "" (values : int list)];
+  [%expect {| (values (0 1 2 3 4 5 6 7 8 9 10)) |}];
+  return ()
+;;
+
+let%expect_test "[pipe1_filter_map_exn]" =
+  let bus =
+    Bus.create
+      [%here]
+      Arity1
+      ~on_subscription_after_first_write:Raise
+      ~on_callback_raise:Error.raise
+  in
+  let pipe =
+    pipe1_filter_map_exn bus [%here] ~f:(function
+      | i when i % 2 = 0 -> Some i
+      | _ -> None)
+  in
+  for i = 0 to 10 do
+    Bus.write bus i
+  done;
+  Bus.close bus;
+  let%bind filtered_values = Pipe.to_list pipe in
+  print_s [%message "" (filtered_values : int list)];
+  [%expect {| (filtered_values (0 2 4 6 8 10)) |}];
+  return ()
+;;
