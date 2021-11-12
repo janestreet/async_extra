@@ -44,7 +44,6 @@ module First_arity = struct
 end
 
 let first_exn (type c f r) ?stop t here (first_arity : (c, f, r) First_arity.t) ~(f : f) =
-  let module A = First_arity in
   Deferred.create (fun ivar ->
     let subscriber : c Bus.Subscriber.t option ref = ref None in
     let finish : r option -> unit = function
