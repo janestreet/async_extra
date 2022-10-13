@@ -9,7 +9,7 @@ let () = Backtrace.elide := true
 
 let%expect_test "[first_exn]" =
   let bus =
-    Bus.create
+    Bus.create_exn
       [%here]
       Arity1
       ~on_subscription_after_first_write:Allow
@@ -48,7 +48,7 @@ let%expect_test "[first_exn]" =
 
 let%expect_test "[first_exn] where [~f] raises" =
   let bus =
-    Bus.create
+    Bus.create_exn
       [%here]
       Arity1
       ~on_subscription_after_first_write:Allow
@@ -82,7 +82,7 @@ let%expect_test "[first_exn ~stop:(Deferred.never ())]" =
   (* Providing the [stop] argument tickles some different codepaths.  Check that
      basic functionality still works. *)
   let bus =
-    Bus.create
+    Bus.create_exn
       [%here]
       Arity1
       ~on_subscription_after_first_write:Allow
@@ -111,7 +111,7 @@ let%expect_test "[first_exn ~stop:(Deferred.never ())]" =
 
 let%expect_test "[first_exn ~stop] where [stop] becomes determined" =
   let bus =
-    Bus.create
+    Bus.create_exn
       [%here]
       Arity1
       ~on_subscription_after_first_write:Allow
@@ -168,7 +168,7 @@ let%expect_test "[first_exn ~stop] where [stop] becomes determined" =
 
 let%expect_test "[pipe1_exn] where the bus is closed" =
   let bus =
-    Bus.create
+    Bus.create_exn
       [%here]
       Arity1
       ~on_subscription_after_first_write:Allow
@@ -191,7 +191,7 @@ let%expect_test "[pipe1_exn] on a closed bus, varying [on_subscription_after_fir
       On_subscription_after_first_write.all
       ~f:(fun on_subscription_after_first_write ->
         let bus =
-          Bus.create
+          Bus.create_exn
             [%here]
             Arity1
             ~on_subscription_after_first_write
@@ -223,7 +223,7 @@ let%expect_test "[pipe1_exn] on a closed bus, varying [on_subscription_after_fir
 
 let%expect_test "[pipe1_exn]" =
   let bus =
-    Bus.create
+    Bus.create_exn
       [%here]
       Arity1
       ~on_subscription_after_first_write:Raise
@@ -242,7 +242,7 @@ let%expect_test "[pipe1_exn]" =
 
 let%expect_test "[pipe1_filter_map_exn]" =
   let bus =
-    Bus.create
+    Bus.create_exn
       [%here]
       Arity1
       ~on_subscription_after_first_write:Raise
