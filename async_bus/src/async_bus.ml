@@ -50,7 +50,15 @@ let first_exn (type c f r) ?stop t here (first_arity : (c, f, r) First_arity.t) 
       | None -> ()
       | Some r ->
         Ivar.fill ivar r;
-        Bus.unsubscribe t (Option.value_exn !subscriber)
+        (match !subscriber with
+         | Some subscriber -> Bus.unsubscribe t subscriber
+         | None ->
+           (* When a [Bus] is created with
+              [on_subscription_after_first_write:Allow_and_send_last_value], then [finish]
+              can be called before the [Bus.subscribe_exn] below returns.  In that case,
+              we won't have captured the subscriber yet.  Instead of [Option.value_exn
+              !subscriber], match here and check again after [subscribe_exn] returns. *)
+           ())
     in
     (* We define [can_finish] separately from [finish] because we must call [can_finish]
        before we call [f], so that we do not call [f] if [stop] is determined. *)
@@ -77,5 +85,6 @@ let first_exn (type c f r) ?stop t here (first_arity : (c, f, r) First_arity.t) 
             ~on_callback_raise:
               (let monitor = Monitor.current () in
                fun error -> Monitor.send_exn monitor (Error.to_exn error))
-            ~f:callback))
+            ~f:callback);
+    if Ivar.is_full ivar then Bus.unsubscribe t (Option.value_exn !subscriber))
 ;;

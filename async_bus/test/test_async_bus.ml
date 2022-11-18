@@ -166,6 +166,23 @@ let%expect_test "[first_exn ~stop] where [stop] becomes determined" =
   return ()
 ;;
 
+let%expect_test "[first_exn] when [Allow_and_send_last_value] is used" =
+  let bus =
+    Bus.create_exn
+      [%here]
+      Arity1
+      ~on_subscription_after_first_write:Allow_and_send_last_value
+      ~on_callback_raise:Error.raise
+  in
+  (* Send a value, so that later [first_exn] calls see this value. *)
+  Bus.write bus ();
+  let%bind d = first_exn bus [%here] Arity1 ~f:(fun () -> Some ()) in
+  print_s [%message "" ~_:(d : unit)];
+  [%expect {|
+    () |}];
+  return ()
+;;
+
 let%expect_test "[pipe1_exn] where the bus is closed" =
   let bus =
     Bus.create_exn
