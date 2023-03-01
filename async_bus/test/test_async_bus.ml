@@ -205,6 +205,7 @@ let%expect_test "[pipe1_exn] on a closed bus, varying [on_subscription_after_fir
   =
   let%bind () =
     Deferred.List.iter
+      ~how:`Sequential
       On_subscription_after_first_write.all
       ~f:(fun on_subscription_after_first_write ->
         let bus =
