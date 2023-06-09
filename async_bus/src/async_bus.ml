@@ -49,7 +49,7 @@ let first_exn (type c f r) ?stop t here (first_arity : (c, f, r) First_arity.t) 
     let finish : r option -> unit = function
       | None -> ()
       | Some r ->
-        Ivar.fill ivar r;
+        Ivar.fill_exn ivar r;
         (match !subscriber with
          | Some subscriber -> Bus.unsubscribe t subscriber
          | None ->

@@ -146,7 +146,7 @@ let%expect_test "[first_exn ~stop] where [stop] becomes determined" =
     ((num_calls       1)
      (is_determined   false)
      (num_subscribers 1)) |}];
-  Ivar.fill stop ();
+  Ivar.fill_exn stop ();
   (* [stop] is determined, so even if we write, the callback should not be called. *)
   Bus.write bus ();
   print ();
