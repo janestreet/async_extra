@@ -55,9 +55,8 @@ let%expect_test "[first_exn] where [~f] raises" =
       ~on_callback_raise:Error.raise
   in
   let d =
-    Monitor.try_with_or_error
-      ~rest:`Log
-      (fun () -> first_exn bus [%here] Arity1 ~f:(fun _ -> failwith "raising"))
+    Monitor.try_with_or_error ~rest:`Log (fun () ->
+      first_exn bus [%here] Arity1 ~f:(fun _ -> failwith "raising"))
   in
   Bus.write bus 0;
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
@@ -208,22 +207,22 @@ let%expect_test "[pipe1_exn] on a closed bus, varying [on_subscription_after_fir
       ~how:`Sequential
       On_subscription_after_first_write.all
       ~f:(fun on_subscription_after_first_write ->
-        let bus =
-          Bus.create_exn
-            [%here]
-            Arity1
-            ~on_subscription_after_first_write
-            ~on_callback_raise:Error.raise
-        in
-        Bus.close bus;
-        let pipe = pipe1_exn bus [%here] in
-        let is_closed = Pipe.is_closed pipe in
-        let%map values = Pipe.to_list pipe in
-        print_s
-          [%message
-            (on_subscription_after_first_write : On_subscription_after_first_write.t)
-              (is_closed : bool)
-              (values : _ list)])
+      let bus =
+        Bus.create_exn
+          [%here]
+          Arity1
+          ~on_subscription_after_first_write
+          ~on_callback_raise:Error.raise
+      in
+      Bus.close bus;
+      let pipe = pipe1_exn bus [%here] in
+      let is_closed = Pipe.is_closed pipe in
+      let%map values = Pipe.to_list pipe in
+      print_s
+        [%message
+          (on_subscription_after_first_write : On_subscription_after_first_write.t)
+            (is_closed : bool)
+            (values : _ list)])
   in
   [%expect
     {|

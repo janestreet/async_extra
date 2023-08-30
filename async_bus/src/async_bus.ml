@@ -36,9 +36,9 @@ module First_arity = struct
     | Arity3 : ('a -> 'b -> 'c -> unit, 'a -> 'b -> 'c -> 'r option, 'r) t
     | Arity4 : ('a -> 'b -> 'c -> 'd -> unit, 'a -> 'b -> 'c -> 'd -> 'r option, 'r) t
     | Arity5
-      : ( 'a -> 'b -> 'c -> 'd -> 'e -> unit
-        , 'a -> 'b -> 'c -> 'd -> 'e -> 'r option
-        , 'r )
+        : ( 'a -> 'b -> 'c -> 'd -> 'e -> unit
+          , 'a -> 'b -> 'c -> 'd -> 'e -> 'r option
+          , 'r )
           t
   [@@deriving sexp_of]
 end
@@ -78,13 +78,13 @@ let first_exn (type c f r) ?stop t here (first_arity : (c, f, r) First_arity.t) 
       | Arity5 -> fun a1 a2 a3 a4 a5 -> if can_finish () then finish (f a1 a2 a3 a4 a5)
     in
     subscriber
-    := Some
-         (Bus.subscribe_exn
-            t
-            here
-            ~on_callback_raise:
-              (let monitor = Monitor.current () in
-               fun error -> Monitor.send_exn monitor (Error.to_exn error))
-            ~f:callback);
+      := Some
+           (Bus.subscribe_exn
+              t
+              here
+              ~on_callback_raise:
+                (let monitor = Monitor.current () in
+                 fun error -> Monitor.send_exn monitor (Error.to_exn error))
+              ~f:callback);
     if Ivar.is_full ivar then Bus.unsubscribe t (Option.value_exn !subscriber))
 ;;
