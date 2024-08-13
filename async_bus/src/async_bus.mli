@@ -21,14 +21,25 @@ val pipe1_filter_map_exn
   -> f:('a -> 'b option)
   -> 'b Pipe.Reader.t
 
+(** [pipe2_filter_map_exn] is like [pipe1_filter_map_exn], but works on buses with
+    arity 2. *)
+val pipe2_filter_map_exn
+  :  ?stop:unit Deferred.t
+  -> ('a -> 'b -> unit, [> read ]) Bus.t
+  -> Source_code_position.t
+  -> f:('a -> 'b -> 'c option)
+  -> 'c Pipe.Reader.t
+
 module First_arity : sig
   type (_, _, _) t =
     | Arity1 : ('a -> unit, 'a -> 'r option, 'r) t
+    | Arity1_local : ('a -> unit, 'a -> 'r option, 'r) t
     | Arity2 : ('a -> 'b -> unit, 'a -> 'b -> 'r option, 'r) t
+    | Arity2_local : ('a -> 'b -> unit, 'a -> 'b -> 'r option, 'r) t
     | Arity3 : ('a -> 'b -> 'c -> unit, 'a -> 'b -> 'c -> 'r option, 'r) t
     | Arity4 : ('a -> 'b -> 'c -> 'd -> unit, 'a -> 'b -> 'c -> 'd -> 'r option, 'r) t
-    | Arity5
-        : ( 'a -> 'b -> 'c -> 'd -> 'e -> unit
+    | Arity5 :
+        ( 'a -> 'b -> 'c -> 'd -> 'e -> unit
           , 'a -> 'b -> 'c -> 'd -> 'e -> 'r option
           , 'r )
           t

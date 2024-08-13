@@ -3,7 +3,7 @@ open! Async_kernel
 open! Import
 open! Bus
 
-let subscribe_and_maybe_write_to_pipe1 t here ~maybe_write_fn =
+let subscribe_and_maybe_write_to_pipe ?stop t here ~maybe_write_fn =
   if Bus.is_closed t
   then Pipe.empty ()
   else (
@@ -11,20 +11,30 @@ let subscribe_and_maybe_write_to_pipe1 t here ~maybe_write_fn =
     let subscription =
       subscribe_exn t here ~f:(maybe_write_fn w) ~on_close:(fun () -> Pipe.close w)
     in
+    (match stop with
+     | None -> ()
+     | Some stop -> upon stop (fun () -> Pipe.close w));
     upon (Pipe.closed w) (fun () -> unsubscribe t subscription);
     r)
 ;;
 
 let pipe1_exn t here =
-  subscribe_and_maybe_write_to_pipe1
+  subscribe_and_maybe_write_to_pipe
     t
     here
     ~maybe_write_fn:Pipe.write_without_pushback_if_open
 ;;
 
 let pipe1_filter_map_exn t here ~f =
-  subscribe_and_maybe_write_to_pipe1 t here ~maybe_write_fn:(fun pipe v ->
+  subscribe_and_maybe_write_to_pipe t here ~maybe_write_fn:(fun pipe v ->
     match f v with
+    | None -> ()
+    | Some v -> Pipe.write_without_pushback_if_open pipe v)
+;;
+
+let pipe2_filter_map_exn ?stop t here ~f =
+  subscribe_and_maybe_write_to_pipe ?stop t here ~maybe_write_fn:(fun pipe a b ->
+    match f a b with
     | None -> ()
     | Some v -> Pipe.write_without_pushback_if_open pipe v)
 ;;
@@ -32,11 +42,13 @@ let pipe1_filter_map_exn t here ~f =
 module First_arity = struct
   type (_, _, _) t =
     | Arity1 : ('a -> unit, 'a -> 'r option, 'r) t
+    | Arity1_local : ('a -> unit, 'a -> 'r option, 'r) t
     | Arity2 : ('a -> 'b -> unit, 'a -> 'b -> 'r option, 'r) t
+    | Arity2_local : ('a -> 'b -> unit, 'a -> 'b -> 'r option, 'r) t
     | Arity3 : ('a -> 'b -> 'c -> unit, 'a -> 'b -> 'c -> 'r option, 'r) t
     | Arity4 : ('a -> 'b -> 'c -> 'd -> unit, 'a -> 'b -> 'c -> 'd -> 'r option, 'r) t
-    | Arity5
-        : ( 'a -> 'b -> 'c -> 'd -> 'e -> unit
+    | Arity5 :
+        ( 'a -> 'b -> 'c -> 'd -> 'e -> unit
           , 'a -> 'b -> 'c -> 'd -> 'e -> 'r option
           , 'r )
           t
@@ -72,19 +84,21 @@ let first_exn (type c f r) ?stop t here (first_arity : (c, f, r) First_arity.t) 
     let callback : c =
       match first_arity with
       | Arity1 -> fun a -> if can_finish () then finish (f a)
+      | Arity1_local -> fun a -> if can_finish () then finish (f a)
       | Arity2 -> fun a1 a2 -> if can_finish () then finish (f a1 a2)
+      | Arity2_local -> fun a1 a2 -> if can_finish () then finish (f a1 a2)
       | Arity3 -> fun a1 a2 a3 -> if can_finish () then finish (f a1 a2 a3)
       | Arity4 -> fun a1 a2 a3 a4 -> if can_finish () then finish (f a1 a2 a3 a4)
       | Arity5 -> fun a1 a2 a3 a4 a5 -> if can_finish () then finish (f a1 a2 a3 a4 a5)
     in
     subscriber
-      := Some
-           (Bus.subscribe_exn
-              t
-              here
-              ~on_callback_raise:
-                (let monitor = Monitor.current () in
-                 fun error -> Monitor.send_exn monitor (Error.to_exn error))
-              ~f:callback);
+    := Some
+         (Bus.subscribe_exn
+            t
+            here
+            ~on_callback_raise:
+              (let monitor = Monitor.current () in
+               fun error -> Monitor.send_exn monitor (Error.to_exn error))
+            ~f:callback);
     if Ivar.is_full ivar then Bus.unsubscribe t (Option.value_exn !subscriber))
 ;;

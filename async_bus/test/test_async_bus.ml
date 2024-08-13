@@ -24,26 +24,30 @@ let%expect_test "[first_exn]" =
           ~num_subscribers:(Bus.num_subscribers bus : int)]
   in
   print d;
-  [%expect {|
+  [%expect
+    {|
     ((is_determined   false)
      (num_subscribers 1))
     |}];
   Bus.write bus 0;
   print d;
-  [%expect {|
+  [%expect
+    {|
     ((is_determined   true)
      (num_subscribers 0))
     |}];
   let d = first_exn bus [%here] Arity1 ~f:(fun i -> if i = 13 then Some () else None) in
   Bus.write bus 12;
   print d;
-  [%expect {|
+  [%expect
+    {|
     ((is_determined   false)
      (num_subscribers 1))
     |}];
   Bus.write bus 13;
   print d;
-  [%expect {|
+  [%expect
+    {|
     ((is_determined   true)
      (num_subscribers 0))
     |}];
@@ -102,13 +106,15 @@ let%expect_test "[first_exn ~stop:(Deferred.never ())]" =
   in
   Bus.write bus None;
   print ();
-  [%expect {|
+  [%expect
+    {|
     ((is_determined   false)
      (num_subscribers 1))
     |}];
   Bus.write bus (Some 5);
   print ();
-  [%expect {|
+  [%expect
+    {|
     ((is_determined   true)
      (num_subscribers 0))
     |}];
@@ -133,8 +139,7 @@ let%expect_test "[first_exn ~stop] where [stop] becomes determined" =
   let print () =
     print_s
       [%message
-        ""
-          (num_calls : int ref)
+        (num_calls : int ref)
           ~is_determined:(Deferred.is_determined d : bool)
           ~num_subscribers:(Bus.num_subscribers bus : int)]
   in
@@ -216,22 +221,22 @@ let%expect_test "[pipe1_exn] on a closed bus, varying [on_subscription_after_fir
       ~how:`Sequential
       On_subscription_after_first_write.all
       ~f:(fun on_subscription_after_first_write ->
-      let bus =
-        Bus.create_exn
-          [%here]
-          Arity1
-          ~on_subscription_after_first_write
-          ~on_callback_raise:Error.raise
-      in
-      Bus.close bus;
-      let pipe = pipe1_exn bus [%here] in
-      let is_closed = Pipe.is_closed pipe in
-      let%map values = Pipe.to_list pipe in
-      print_s
-        [%message
-          (on_subscription_after_first_write : On_subscription_after_first_write.t)
-            (is_closed : bool)
-            (values : _ list)])
+        let bus =
+          Bus.create_exn
+            [%here]
+            Arity1
+            ~on_subscription_after_first_write
+            ~on_callback_raise:Error.raise
+        in
+        Bus.close bus;
+        let pipe = pipe1_exn bus [%here] in
+        let is_closed = Pipe.is_closed pipe in
+        let%map values = Pipe.to_list pipe in
+        print_s
+          [%message
+            (on_subscription_after_first_write : On_subscription_after_first_write.t)
+              (is_closed : bool)
+              (values : _ list)])
   in
   [%expect
     {|
@@ -262,7 +267,7 @@ let%expect_test "[pipe1_exn]" =
   done;
   Bus.close bus;
   let%bind values = Pipe.to_list pipe in
-  print_s [%message "" (values : int list)];
+  print_s [%message (values : int list)];
   [%expect {| (values (0 1 2 3 4 5 6 7 8 9 10)) |}];
   return ()
 ;;
@@ -285,7 +290,36 @@ let%expect_test "[pipe1_filter_map_exn]" =
   done;
   Bus.close bus;
   let%bind filtered_values = Pipe.to_list pipe in
-  print_s [%message "" (filtered_values : int list)];
+  print_s [%message (filtered_values : int list)];
   [%expect {| (filtered_values (0 2 4 6 8 10)) |}];
+  return ()
+;;
+
+let%expect_test "[pipe2_filter_map_exn]" =
+  let stop = Ivar.create () in
+  let bus =
+    Bus.create_exn
+      [%here]
+      Arity2
+      ~on_subscription_after_first_write:Raise
+      ~on_callback_raise:Error.raise
+  in
+  let pipe =
+    pipe2_filter_map_exn bus [%here] ~stop:(Ivar.read stop) ~f:(fun () -> function
+      | i when i % 2 = 0 -> Some i
+      | _ -> None)
+  in
+  for i = 0 to 5 do
+    Bus.write2 bus () i
+  done;
+  Ivar.fill_exn stop ();
+  let%bind filtered_values = Pipe.to_list pipe in
+  print_s [%message (filtered_values : int list)];
+  [%expect {| (filtered_values (0 2 4)) |}];
+  for i = 6 to 10 do
+    Bus.write2 bus () i
+  done;
+  require (Pipe.is_empty pipe);
+  [%expect {| |}];
   return ()
 ;;
