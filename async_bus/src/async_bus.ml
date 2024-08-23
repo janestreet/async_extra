@@ -42,9 +42,10 @@ let pipe2_filter_map_exn ?stop t here ~f =
 module First_arity = struct
   type (_, _, _) t =
     | Arity1 : ('a -> unit, 'a -> 'r option, 'r) t
-    | Arity1_local : ('a -> unit, 'a -> 'r option, 'r) t
+    | Arity1_local : (local_ 'a -> unit, local_ 'a -> 'r option, 'r) t
     | Arity2 : ('a -> 'b -> unit, 'a -> 'b -> 'r option, 'r) t
-    | Arity2_local : ('a -> 'b -> unit, 'a -> 'b -> 'r option, 'r) t
+    | Arity2_local :
+        (local_ 'a -> local_ 'b -> unit, local_ 'a -> local_ 'b -> 'r option, 'r) t
     | Arity3 : ('a -> 'b -> 'c -> unit, 'a -> 'b -> 'c -> 'r option, 'r) t
     | Arity4 : ('a -> 'b -> 'c -> 'd -> unit, 'a -> 'b -> 'c -> 'd -> 'r option, 'r) t
     | Arity5 :
