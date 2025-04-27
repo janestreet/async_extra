@@ -5,17 +5,16 @@ open! Expect_test_helpers_base
 open! Bus
 open! Async_bus
 
-let () = Backtrace.elide := true
+let () = Dynamic.set_root Backtrace.elide true
 
 let%expect_test "[first_exn]" =
   let bus =
     Bus.create_exn
-      [%here]
       Arity1
       ~on_subscription_after_first_write:Allow
       ~on_callback_raise:Error.raise
   in
-  let d = first_exn bus [%here] Arity1 ~f:(fun _ -> Some ()) in
+  let d = first_exn bus Arity1 ~f:(fun _ -> Some ()) in
   let print d =
     print_s
       [%message
@@ -36,7 +35,7 @@ let%expect_test "[first_exn]" =
     ((is_determined   true)
      (num_subscribers 0))
     |}];
-  let d = first_exn bus [%here] Arity1 ~f:(fun i -> if i = 13 then Some () else None) in
+  let d = first_exn bus Arity1 ~f:(fun i -> if i = 13 then Some () else None) in
   Bus.write bus 12;
   print d;
   [%expect
@@ -57,14 +56,13 @@ let%expect_test "[first_exn]" =
 let%expect_test "[first_exn] where [~f] raises" =
   let bus =
     Bus.create_exn
-      [%here]
       Arity1
       ~on_subscription_after_first_write:Allow
       ~on_callback_raise:Error.raise
   in
   let d =
     Monitor.try_with_or_error ~rest:`Log (fun () ->
-      first_exn bus [%here] Arity1 ~f:(fun _ -> failwith "raising"))
+      first_exn bus Arity1 ~f:(fun _ -> failwith "raising"))
   in
   Bus.write bus 0;
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
@@ -91,12 +89,11 @@ let%expect_test "[first_exn ~stop:(Deferred.never ())]" =
      basic functionality still works. *)
   let bus =
     Bus.create_exn
-      [%here]
       Arity1
       ~on_subscription_after_first_write:Allow
       ~on_callback_raise:Error.raise
   in
-  let d = first_exn ~stop:(Deferred.never ()) bus [%here] Arity1 ~f:Fn.id in
+  let d = first_exn ~stop:(Deferred.never ()) bus Arity1 ~f:Fn.id in
   let print () =
     print_s
       [%message
@@ -124,7 +121,6 @@ let%expect_test "[first_exn ~stop:(Deferred.never ())]" =
 let%expect_test "[first_exn ~stop] where [stop] becomes determined" =
   let bus =
     Bus.create_exn
-      [%here]
       Arity1
       ~on_subscription_after_first_write:Allow
       ~on_callback_raise:Error.raise
@@ -132,7 +128,7 @@ let%expect_test "[first_exn ~stop] where [stop] becomes determined" =
   let stop = Ivar.create () in
   let num_calls = ref 0 in
   let d =
-    first_exn ~stop:(Ivar.read stop) bus [%here] Arity1 ~f:(fun () ->
+    first_exn ~stop:(Ivar.read stop) bus Arity1 ~f:(fun () ->
       incr num_calls;
       None)
   in
@@ -184,14 +180,13 @@ let%expect_test "[first_exn ~stop] where [stop] becomes determined" =
 let%expect_test "[first_exn] when [Allow_and_send_last_value] is used" =
   let bus =
     Bus.create_exn
-      [%here]
       Arity1
       ~on_subscription_after_first_write:Allow_and_send_last_value
       ~on_callback_raise:Error.raise
   in
   (* Send a value, so that later [first_exn] calls see this value. *)
   Bus.write bus ();
-  let%bind d = first_exn bus [%here] Arity1 ~f:(fun () -> Some ()) in
+  let%bind d = first_exn bus Arity1 ~f:(fun () -> Some ()) in
   print_s [%message "" ~_:(d : unit)];
   [%expect {| () |}];
   return ()
@@ -200,12 +195,11 @@ let%expect_test "[first_exn] when [Allow_and_send_last_value] is used" =
 let%expect_test "[pipe1_exn] where the bus is closed" =
   let bus =
     Bus.create_exn
-      [%here]
       Arity1
       ~on_subscription_after_first_write:Allow
       ~on_callback_raise:Error.raise
   in
-  let pipe = pipe1_exn bus [%here] in
+  let pipe = pipe1_exn bus in
   Bus.write bus 13;
   Bus.close bus;
   let%bind all = Pipe.read_all pipe in
@@ -223,13 +217,12 @@ let%expect_test "[pipe1_exn] on a closed bus, varying [on_subscription_after_fir
       ~f:(fun on_subscription_after_first_write ->
         let bus =
           Bus.create_exn
-            [%here]
             Arity1
             ~on_subscription_after_first_write
             ~on_callback_raise:Error.raise
         in
         Bus.close bus;
-        let pipe = pipe1_exn bus [%here] in
+        let pipe = pipe1_exn bus in
         let is_closed = Pipe.is_closed pipe in
         let%map values = Pipe.to_list pipe in
         print_s
@@ -256,12 +249,11 @@ let%expect_test "[pipe1_exn] on a closed bus, varying [on_subscription_after_fir
 let%expect_test "[pipe1_exn]" =
   let bus =
     Bus.create_exn
-      [%here]
       Arity1
       ~on_subscription_after_first_write:Raise
       ~on_callback_raise:Error.raise
   in
-  let pipe = pipe1_exn bus [%here] in
+  let pipe = pipe1_exn bus in
   for i = 0 to 10 do
     Bus.write bus i
   done;
@@ -275,13 +267,12 @@ let%expect_test "[pipe1_exn]" =
 let%expect_test "[pipe1_filter_map_exn]" =
   let bus =
     Bus.create_exn
-      [%here]
       Arity1
       ~on_subscription_after_first_write:Raise
       ~on_callback_raise:Error.raise
   in
   let pipe =
-    pipe1_filter_map_exn bus [%here] ~f:(function
+    pipe1_filter_map_exn bus ~f:(function
       | i when i % 2 = 0 -> Some i
       | _ -> None)
   in
@@ -299,13 +290,12 @@ let%expect_test "[pipe2_filter_map_exn]" =
   let stop = Ivar.create () in
   let bus =
     Bus.create_exn
-      [%here]
       Arity2
       ~on_subscription_after_first_write:Raise
       ~on_callback_raise:Error.raise
   in
   let pipe =
-    pipe2_filter_map_exn bus [%here] ~stop:(Ivar.read stop) ~f:(fun () -> function
+    pipe2_filter_map_exn bus ~stop:(Ivar.read stop) ~f:(fun () -> function
       | i when i % 2 = 0 -> Some i
       | _ -> None)
   in
