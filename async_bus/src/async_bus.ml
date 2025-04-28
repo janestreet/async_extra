@@ -3,13 +3,18 @@ open! Async_kernel
 open! Import
 open! Bus
 
-let subscribe_and_maybe_write_to_pipe ?stop t here ~maybe_write_fn =
+let subscribe_and_maybe_write_to_pipe
+  ?stop
+  ?(here = Stdlib.Lexing.dummy_pos)
+  t
+  ~maybe_write_fn
+  =
   if Bus.is_closed t
   then Pipe.empty ()
   else (
     let r, w = Pipe.create () in
     let subscription =
-      subscribe_exn t here ~f:(maybe_write_fn w) ~on_close:(fun () -> Pipe.close w)
+      subscribe_exn t ~here ~f:(maybe_write_fn w) ~on_close:(fun () -> Pipe.close w)
     in
     (match stop with
      | None -> ()
@@ -18,22 +23,22 @@ let subscribe_and_maybe_write_to_pipe ?stop t here ~maybe_write_fn =
     r)
 ;;
 
-let pipe1_exn t here =
+let pipe1_exn ?(here = Stdlib.Lexing.dummy_pos) t =
   subscribe_and_maybe_write_to_pipe
     t
-    here
+    ~here
     ~maybe_write_fn:Pipe.write_without_pushback_if_open
 ;;
 
-let pipe1_filter_map_exn t here ~f =
-  subscribe_and_maybe_write_to_pipe t here ~maybe_write_fn:(fun pipe v ->
+let pipe1_filter_map_exn ?(here = Stdlib.Lexing.dummy_pos) t ~f =
+  subscribe_and_maybe_write_to_pipe t ~here ~maybe_write_fn:(fun pipe v ->
     match f v with
     | None -> ()
     | Some v -> Pipe.write_without_pushback_if_open pipe v)
 ;;
 
-let pipe2_filter_map_exn ?stop t here ~f =
-  subscribe_and_maybe_write_to_pipe ?stop t here ~maybe_write_fn:(fun pipe a b ->
+let pipe2_filter_map_exn ?stop ?(here = Stdlib.Lexing.dummy_pos) t ~f =
+  subscribe_and_maybe_write_to_pipe ?stop t ~here ~maybe_write_fn:(fun pipe a b ->
     match f a b with
     | None -> ()
     | Some v -> Pipe.write_without_pushback_if_open pipe v)
@@ -55,7 +60,14 @@ module First_arity = struct
   [@@deriving sexp_of]
 end
 
-let first_exn (type c f r) ?stop t here (first_arity : (c, f, r) First_arity.t) ~(f : f) =
+let first_exn
+  (type c f r)
+  ?stop
+  ?(here = Stdlib.Lexing.dummy_pos)
+  t
+  (first_arity : (c, f, r) First_arity.t)
+  ~(f : f)
+  =
   Deferred.create (fun ivar ->
     let subscriber : c Bus.Subscriber.t option ref = ref None in
     let finish : r option -> unit = function
@@ -95,7 +107,7 @@ let first_exn (type c f r) ?stop t here (first_arity : (c, f, r) First_arity.t) 
     := Some
          (Bus.subscribe_exn
             t
-            here
+            ~here
             ~on_callback_raise:
               (let monitor = Monitor.current () in
                fun error -> Monitor.send_exn monitor (Error.to_exn error))

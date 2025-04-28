@@ -1,23 +1,23 @@
-(** Async operations on {{!Core.Bus}[Core.Bus]}. *)
+(** Async operations on {{!Core.Bus} [Core.Bus]}. *)
 
 open! Core
 open! Async_kernel
 open! Import
 
-(** [pipe1_exn t] returns a pipe of updates from [t] by subscribing to [t].  Closing the
-    pipe unsubscribes from [t].  Closing [t] closes the pipe.  Calling [pipe1_exn] on a
-    closed bus always returns an empty pipe.  [pipe1_exn] raises in the same circumstances
+(** [pipe1_exn t] returns a pipe of updates from [t] by subscribing to [t]. Closing the
+    pipe unsubscribes from [t]. Closing [t] closes the pipe. Calling [pipe1_exn] on a
+    closed bus always returns an empty pipe. [pipe1_exn] raises in the same circumstances
     as [subscribe_exn]. *)
 val pipe1_exn
-  :  ('a -> unit, [> read ]) Bus.t
-  -> Source_code_position.t
+  :  ?here:Stdlib.Lexing.position
+  -> ('a -> unit, [> read ]) Bus.t
   -> 'a Pipe.Reader.t
 
 (** [pipe1_filter_map_exn] is the [filter_map]ing version of [pipe1_exn], allowing users
     to [filter_map] the values without incurring the cost of an additional pipe. *)
 val pipe1_filter_map_exn
-  :  ('a -> unit, [> read ]) Bus.t
-  -> Source_code_position.t
+  :  ?here:Stdlib.Lexing.position
+  -> ('a -> unit, [> read ]) Bus.t
   -> f:('a -> 'b option)
   -> 'b Pipe.Reader.t
 
@@ -25,8 +25,8 @@ val pipe1_filter_map_exn
     arity 2. *)
 val pipe2_filter_map_exn
   :  ?stop:unit Deferred.t
+  -> ?here:Stdlib.Lexing.position
   -> ('a -> 'b -> unit, [> read ]) Bus.t
-  -> Source_code_position.t
   -> f:('a -> 'b -> 'c option)
   -> 'c Pipe.Reader.t
 
@@ -47,11 +47,11 @@ module First_arity : sig
 end
 
 (** [first_exn here t arity ~f] returns a deferred that becomes determined with value [r]
-    when the first event is published to [t] where [f] returns [Some r].  [first_exn] then
+    when the first event is published to [t] where [f] returns [Some r]. [first_exn] then
     unsubscribes from [t], ensuring that [f] is never called again after it returns
-    [Some].  [first_exn] raises if it can't subscribe to the bus, i.e., if [subscribe_exn]
-    raises.  If [f] raises, then [first_exn] raises to the monitor in effect when
-    [first_exn] was called.  [first_exn] takes time proportional to the number of bus
+    [Some]. [first_exn] raises if it can't subscribe to the bus, i.e., if [subscribe_exn]
+    raises. If [f] raises, then [first_exn] raises to the monitor in effect when
+    [first_exn] was called. [first_exn] takes time proportional to the number of bus
     subscribers.
 
     If [stop] is provided and becomes determined, [f] will not be called again, it will
@@ -59,8 +59,8 @@ end
     become determined. *)
 val first_exn
   :  ?stop:unit Deferred.t
+  -> ?here:Stdlib.Lexing.position
   -> ('c, [> read ]) Bus.t
-  -> Source_code_position.t
   -> ('c, 'f, 'r) First_arity.t
   -> f:'f
   -> 'r Deferred.t
