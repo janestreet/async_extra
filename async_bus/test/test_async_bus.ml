@@ -85,8 +85,8 @@ let%expect_test "[first_exn] where [~f] raises" =
 ;;
 
 let%expect_test "[first_exn ~stop:(Deferred.never ())]" =
-  (* Providing the [stop] argument tickles some different codepaths.  Check that
-     basic functionality still works. *)
+  (* Providing the [stop] argument tickles some different codepaths. Check that basic
+     functionality still works. *)
   let bus =
     Bus.create_exn
       Arity1
