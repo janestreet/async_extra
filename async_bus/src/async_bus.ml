@@ -74,9 +74,9 @@ let first_exn
          | Some subscriber -> Bus.unsubscribe t subscriber
          | None ->
            (* When a [Bus] is created with
-              [on_subscription_after_first_write:Allow_and_send_last_value], then [finish]
-              can be called before the [Bus.subscribe_exn] below returns. In that case, we
-              won't have captured the subscriber yet. Instead of
+              [on_subscription_after_first_write:Allow_and_send_last_value_if_global],
+              then [finish] can be called before the [Bus.subscribe_exn] below returns. In
+              that case, we won't have captured the subscriber yet. Instead of
               [Option.value_exn !subscriber], match here and check again after
               [subscribe_exn] returns. *)
            ())

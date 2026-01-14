@@ -10,9 +10,9 @@ let () = Dynamic.set_root Backtrace.elide true
 let%expect_test "[first_exn]" =
   let bus =
     Bus.create_exn
-      Arity1
       ~on_subscription_after_first_write:Allow
       ~on_callback_raise:Error.raise
+      ()
   in
   let d = first_exn bus Arity1 ~f:(fun _ -> Some ()) in
   let print d =
@@ -56,9 +56,9 @@ let%expect_test "[first_exn]" =
 let%expect_test "[first_exn] where [~f] raises" =
   let bus =
     Bus.create_exn
-      Arity1
       ~on_subscription_after_first_write:Allow
       ~on_callback_raise:Error.raise
+      ()
   in
   let d =
     Monitor.try_with_or_error ~rest:`Log (fun () ->
@@ -89,9 +89,9 @@ let%expect_test "[first_exn ~stop:(Deferred.never ())]" =
      functionality still works. *)
   let bus =
     Bus.create_exn
-      Arity1
       ~on_subscription_after_first_write:Allow
       ~on_callback_raise:Error.raise
+      ()
   in
   let d = first_exn ~stop:(Deferred.never ()) bus Arity1 ~f:Fn.id in
   let print () =
@@ -121,9 +121,9 @@ let%expect_test "[first_exn ~stop:(Deferred.never ())]" =
 let%expect_test "[first_exn ~stop] where [stop] becomes determined" =
   let bus =
     Bus.create_exn
-      Arity1
       ~on_subscription_after_first_write:Allow
       ~on_callback_raise:Error.raise
+      ()
   in
   let stop = Ivar.create () in
   let num_calls = ref 0 in
@@ -177,12 +177,12 @@ let%expect_test "[first_exn ~stop] where [stop] becomes determined" =
   return ()
 ;;
 
-let%expect_test "[first_exn] when [Allow_and_send_last_value] is used" =
+let%expect_test "[first_exn] when [Allow_and_send_last_value_if_global] is used" =
   let bus =
     Bus.create_exn
-      Arity1
-      ~on_subscription_after_first_write:Allow_and_send_last_value
+      ~on_subscription_after_first_write:Allow_and_send_last_value_if_global
       ~on_callback_raise:Error.raise
+      ()
   in
   (* Send a value, so that later [first_exn] calls see this value. *)
   Bus.write bus ();
@@ -195,9 +195,9 @@ let%expect_test "[first_exn] when [Allow_and_send_last_value] is used" =
 let%expect_test "[pipe1_exn] where the bus is closed" =
   let bus =
     Bus.create_exn
-      Arity1
       ~on_subscription_after_first_write:Allow
       ~on_callback_raise:Error.raise
+      ()
   in
   let pipe = pipe1_exn bus in
   Bus.write bus 13;
@@ -217,9 +217,9 @@ let%expect_test "[pipe1_exn] on a closed bus, varying [on_subscription_after_fir
       ~f:(fun on_subscription_after_first_write ->
         let bus =
           Bus.create_exn
-            Arity1
             ~on_subscription_after_first_write
             ~on_callback_raise:Error.raise
+            ()
         in
         Bus.close bus;
         let pipe = pipe1_exn bus in
@@ -236,7 +236,7 @@ let%expect_test "[pipe1_exn] on a closed bus, varying [on_subscription_after_fir
     ((on_subscription_after_first_write Allow)
      (is_closed                         true)
      (values ()))
-    ((on_subscription_after_first_write Allow_and_send_last_value)
+    ((on_subscription_after_first_write Allow_and_send_last_value_if_global)
      (is_closed true)
      (values ()))
     ((on_subscription_after_first_write Raise)
@@ -249,9 +249,9 @@ let%expect_test "[pipe1_exn] on a closed bus, varying [on_subscription_after_fir
 let%expect_test "[pipe1_exn]" =
   let bus =
     Bus.create_exn
-      Arity1
       ~on_subscription_after_first_write:Raise
       ~on_callback_raise:Error.raise
+      ()
   in
   let pipe = pipe1_exn bus in
   for i = 0 to 10 do
@@ -267,9 +267,9 @@ let%expect_test "[pipe1_exn]" =
 let%expect_test "[pipe1_filter_map_exn]" =
   let bus =
     Bus.create_exn
-      Arity1
       ~on_subscription_after_first_write:Raise
       ~on_callback_raise:Error.raise
+      ()
   in
   let pipe =
     pipe1_filter_map_exn bus ~f:(function
@@ -290,9 +290,9 @@ let%expect_test "[pipe2_filter_map_exn]" =
   let stop = Ivar.create () in
   let bus =
     Bus.create_exn
-      Arity2
       ~on_subscription_after_first_write:Raise
       ~on_callback_raise:Error.raise
+      ()
   in
   let pipe =
     pipe2_filter_map_exn bus ~stop:(Ivar.read stop) ~f:(fun () -> function
